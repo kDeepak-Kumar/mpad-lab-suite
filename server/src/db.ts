@@ -1,6 +1,31 @@
 import knexFactory, { type Knex } from 'knex';
 import path from 'node:path';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
+
+const req = createRequire(import.meta.url);
+const canLoad = (m: string) => { try { req(m); return true; } catch { return false; } };
+
+/**
+ * SQLite without native add-ons: if better-sqlite3 is not installed (e.g. very new Node.js on Windows),
+ * use Node's built-in `node:sqlite` through the same Knex dialect.
+ */
+function builtinSqliteClient() {
+  const { DatabaseSync } = req('node:sqlite');
+  const Base = req('knex/lib/dialects/better-sqlite3');
+  class Shim {
+    db: any;
+    constructor(file: string) { this.db = new DatabaseSync(file); }
+    prepare(sql: string) {
+      const st = this.db.prepare(sql);
+      const reader = typeof st.columns === 'function' ? st.columns().length > 0 : /^\s*(select|pragma|with|explain)\b|\breturning\b/i.test(sql);
+      return { reader, safeIntegers() { /* not needed */ }, all: (b: unknown[]) => st.all(...(b ?? [])), run: (b: unknown[]) => st.run(...(b ?? [])) };
+    }
+    pragma(s: string) { this.db.exec(`PRAGMA ${s}`); }
+    close() { this.db.close(); }
+  }
+  return class BuiltinSqliteClient extends Base { _driver() { return Shim; } };
+}
 
 /**
  * Database: SQLite for local development and demos, MySQL/MariaDB on cPanel hosting.
@@ -26,8 +51,10 @@ export function createDb(): Knex {
   }
   const file = process.env.DATABASE_FILE || path.resolve(process.cwd(), 'data', 'suite.sqlite');
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const useBuiltin = process.env.SQLITE_DRIVER === 'builtin' || !canLoad('better-sqlite3');
+  if (useBuiltin) console.log('Using the built-in Node.js SQLite engine');
   return knexFactory({
-    client: 'better-sqlite3',
+    client: (useBuiltin ? builtinSqliteClient() : 'better-sqlite3') as any,
     connection: { filename: file },
     useNullAsDefault: true,
     pool: { afterCreate: (conn: { pragma: (s: string) => void }, done: () => void) => { conn.pragma('foreign_keys = ON'); conn.pragma('journal_mode = WAL'); done(); } },
