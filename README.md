@@ -44,6 +44,18 @@ node scripts/ui-check.mjs http://localhost:4000      # every screen + observatio
 
 The CBR template reproduces the lab’s Excel sheet: proving-ring factor 0.04995 kN/div → 5.0935 kgf/div; 43.2 div at 2.5 mm → 11.21 kg/cm² → **CBR 16.0 %**.
 
+## Try it without a server
+
+**On your own computer (data is kept):** install Node.js 20 LTS from nodejs.org, download this repository (Code → Download ZIP, or `git clone`), then in the folder run:
+```
+npm install
+npm run build
+npm start
+```
+Open http://localhost:4000. Others on the same Wi-Fi/office network can open `http://<your-computer-IP>:4000` (allow Node.js through the Windows firewall when asked).
+
+**Public test link on Render (free):** render.com → New + → Blueprint → choose this repository → Apply. The `render.yaml` file sets everything up. On the free plan the app sleeps when idle and the demo data resets on restart, so use it for demos, not real work.
+
 ## Deploying
 See **[DEPLOY.md](DEPLOY.md)** (cPanel Node.js app + MySQL; GitHub Actions publishes a ready-built `deploy` branch).
 

@@ -1,0 +1,20 @@
+# One-click test deployment on Render (render.com): New + → Blueprint → pick this repository.
+# Free plan: the app sleeps after ~15 minutes idle and the SQLite demo database resets on restart.
+# For data that persists, set DB_CLIENT=mysql and the MYSQL_* variables to a hosted MySQL database.
+services:
+  - type: web
+    name: mpad-lab-suite
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node server/dist/server.cjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
