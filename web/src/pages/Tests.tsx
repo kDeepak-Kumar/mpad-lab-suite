@@ -1,0 +1,217 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Alert, Button, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge } from '@mantine/core';
+import { IconAlertTriangle, IconPrinter } from '@tabler/icons-react';
+import { emptyInput, evaluateObservation, formatValue, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
+import { api, dmy, ok, useApi, localToday } from '../api';
+import { useMe, hasRole } from '../App';
+import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui';
+import { LineChart } from '../doc/Chart';
+
+export function TestsPage() {
+  const me = useMe();
+  const [sp, setSp] = useSearchParams();
+  const tab = sp.get('tab') ?? (me.user.role === 'technician' ? 'mine' : hasRole(me, 'reviewer') && me.user.role !== 'owner' ? 'review' : 'open');
+  const q = tab === 'mine' ? '?mine=1&status=pending,in_progress,returned' : tab === 'open' ? '?status=pending,in_progress,returned' : tab === 'review' ? '?status=submitted' : tab === 'accepted' ? '?status=accepted' : '';
+  const { data } = useApi<any[]>(`/tests${q}`, [tab]);
+  const nav = useNavigate();
+  const today = localToday();
+  return (
+    <>
+      <PageHeader title="Tests & observation sheets" subtitle="Technicians enter observations; reviewers accept or return them" />
+      <Tabs value={tab} onChange={(t) => setSp({ tab: t ?? 'open' })} mb="sm">
+        <Tabs.List><Tabs.Tab value="mine">My tests</Tabs.Tab><Tabs.Tab value="open">All open</Tabs.Tab><Tabs.Tab value="review">To review</Tabs.Tab><Tabs.Tab value="accepted">Accepted</Tabs.Tab><Tabs.Tab value="all">All</Tabs.Tab></Tabs.List>
+      </Tabs>
+      <SimpleTable head={['Test', 'Job code', 'Client', 'Assigned', 'Due', 'Status']}
+        rows={(data ?? []).map((t) => [<Text size="sm" fw={500}>{t.report_name || t.billing_name}</Text>, t.sample_code, t.client_name, t.assignee ?? <Text size="xs" c="dimmed">Unassigned</Text>,
+          <Text size="sm" c={t.due_date && t.due_date < today && ['pending', 'in_progress', 'returned'].includes(t.status) ? 'red' : undefined}>{dmy(t.due_date)}</Text>, <StatusBadge status={t.status} />])}
+        onRow={(i) => nav(`/tests/${data![i].id}`)} />
+    </>
+  );
+}
+
+export function TestSheetPage() {
+  const { id } = useParams();
+  const me = useMe();
+  const nav = useNavigate();
+  const { data: t, reload } = useApi<any>(`/tests/${id}`, [id]);
+  const [obs, setObs] = useState<ObservationInput | null>(null);
+  const [dates, setDates] = useState<{ started_at: string; completed_at: string }>({ started_at: '', completed_at: '' });
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [reasonOpen, setReasonOpen] = useState(false);
+
+  useEffect(() => {
+    if (!t) return;
+    const tpl = t.template as ObservationTemplate;
+    const base = emptyInput(tpl);
+    const saved = t.observation as ObservationInput | null;
+    setObs(saved ? { ...base, ...saved, grids: { ...base.grids, ...(saved.grids ?? {}) } } : base);
+    setDates({ started_at: t.started_at ?? localToday(), completed_at: t.completed_at ?? '' });
+    setDirty(false);
+  }, [t]);
+
+  const tpl = t?.template as ObservationTemplate | undefined;
+  const result = useMemo(() => {
+    if (!tpl || !obs) return null;
+    // use the selected equipment's calibration data live
+    const eq: ObservationInput['equipment'] = {};
+    for (const slot of tpl.equipment ?? []) {
+      const sel = obs.equipment?.[slot.key]; const e = t.equipment.find((x: any) => x.id === sel?.id);
+      eq[slot.key] = e ? { id: e.id, name: e.name, data: e.data ?? {} } : null;
+    }
+    return evaluateObservation(tpl, { ...obs, equipment: eq });
+  }, [tpl, obs, t]);
+
+  if (!t || !obs || !tpl || !result) return <Loading />;
+  const editable = ['pending', 'in_progress', 'returned'].includes(t.status) && hasRole(me, 'technician', 'reviewer');
+  const canReview = t.status === 'submitted' && hasRole(me, 'reviewer', 'signatory');
+  const setHeader = (k: string, v: any) => { setObs({ ...obs, header: { ...obs.header, [k]: v } }); setDirty(true); };
+  const setCell = (g: string, i: number, k: string, v: string) => {
+    const rows = [...(obs.grids[g] ?? [])]; rows[i] = { ...rows[i], [k]: v === '' ? null : isNaN(Number(v)) ? v : Number(v) };
+    setObs({ ...obs, grids: { ...obs.grids, [g]: rows } }); setDirty(true);
+  };
+  const save = async (reason?: string) => {
+    setBusy(true);
+    try {
+      const r = await api<any>(`/tests/${t.id}/observation`, { method: 'PUT', body: { observation: obs, started_at: dates.started_at || null, completed_at: dates.completed_at || null, reason } });
+      setDirty(false); ok('Observation sheet saved'); await reload(); return r;
+    } finally { setBusy(false); }
+  };
+  const submit = async () => {
+    if (dirty || t.status === 'pending') await save();
+    await api(`/tests/${t.id}/submit`, { method: 'POST' }); ok('Submitted for review'); reload();
+  };
+  const review = async (action: 'accept' | 'return', note?: string) => {
+    await api(`/tests/${t.id}/review`, { body: { action, note } }); ok(action === 'accept' ? 'Accepted – ready for the report' : 'Returned to the technician'); reload();
+  };
+  const errors = result.checks.filter((c) => c.level === 'error');
+  const s = t.sample;
+
+  return (
+    <>
+      <PageHeader title={<Group gap="sm">{t.catalog?.report_name || tpl.name}<StatusBadge status={t.status} />{tpl.simplified && <Badge color="yellow" variant="light">Simplified sheet</Badge>}</Group>}
+        subtitle={<>{s.code} · {t.client?.name}{t.site ? ` · ${t.site.name}` : ''} · {tpl.method}</>}
+        actions={<>
+          <Button variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print sheet</Button>
+          {editable && <Button variant="default" loading={busy} disabled={!dirty} onClick={() => (t.status === 'returned' ? setReasonOpen(true) : save())}>Save</Button>}
+          {editable && <Button loading={busy} disabled={errors.length > 0} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button>}
+          {canReview && <Button variant="default" color="red" onClick={() => setReturnOpen(true)}>Return for correction</Button>}
+          {canReview && <Button color="teal" onClick={() => review('accept')}>Accept</Button>}
+          {t.status === 'accepted' && hasRole(me, 'reviewer') && <Button onClick={() => nav('/reports/prepare')}>Prepare report</Button>}
+          {t.report_id && <Button variant="light" onClick={() => nav(`/documents/${t.report_id}`)}>Open report</Button>}
+        </>} />
+      {t.status === 'returned' && t.review_note && <Alert color="red" mb="sm" title={`Returned by ${t.reviewedBy ?? 'reviewer'}`}>{t.review_note}</Alert>}
+      {t.status === 'submitted' && !canReview && <Alert mb="sm">Submitted on {new Date(t.submitted_at).toLocaleString('en-IN')} – waiting for review. The sheet is locked.</Alert>}
+      {tpl.instructions && editable && <Alert variant="light" mb="sm">{tpl.instructions}</Alert>}
+      <Grid>
+        <Grid.Col span={{ base: 12, xl: 8 }}>
+          <div className="print-root">
+            <Paper withBorder p="md" radius="md">
+              <Stack gap="sm">
+                <Group justify="space-between" align="flex-start">
+                  <div><Text fw={700}>OBSERVATION SHEET – {tpl.name.toUpperCase()}</Text><Text size="sm">{tpl.method}</Text></div>
+                  {tpl.docControl && <Text size="xs" c="dimmed" ta="right">Doc: {tpl.docControl.docNo} · Issue {tpl.docControl.issueNo}{tpl.docControl.issueDate ? ` · ${tpl.docControl.issueDate}` : ''} · Amd {tpl.docControl.amendmentNo}</Text>}
+                </Group>
+                <SimpleGrid cols={{ base: 2, md: 4 }} spacing={6}>
+                  <Info k="Job code" v={s.code} /><Info k="Sample ID" v={s.sample_label || s.code.split('/').slice(-3, -2)[0]} /><Info k="Received" v={dmy(s.received_date)} /><Info k="Quantity" v={s.quantity} />
+                  <Info k="Condition" v={s.condition} /><Info k="ULR" v={s.ulr} /><Info k="Due date" v={dmy(t.due_date)} />
+                  <Info k="Template" v={`${tpl.code} v${tpl.version}`} />
+                </SimpleGrid>
+                <SimpleGrid cols={{ base: 2, md: 4 }}>
+                  <TextInput size="xs" type="date" label="Test started" value={dates.started_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, started_at: e.currentTarget.value }); setDirty(true); }} />
+                  <TextInput size="xs" type="date" label="Test completed" value={dates.completed_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, completed_at: e.currentTarget.value }); setDirty(true); }} />
+                  {tpl.headerFields.map((f) => f.type === 'select'
+                    ? <Select key={f.key} size="xs" label={f.label} required={f.required} data={f.options ?? []} value={(obs.header[f.key] as string) ?? null} disabled={!editable} onChange={(v) => setHeader(f.key, v)} />
+                    : <TextInput key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} type={f.type === 'date' ? 'date' : 'text'} inputMode={f.type === 'number' ? 'decimal' : undefined}
+                        value={(obs.header[f.key] as string) ?? ''} disabled={!editable} onChange={(e) => setHeader(f.key, f.type === 'number' ? (e.currentTarget.value === '' ? null : e.currentTarget.value) : e.currentTarget.value)} />)}
+                  {(tpl.equipment ?? []).map((slot) => {
+                    const sel = obs.equipment?.[slot.key]?.id; const e = t.equipment.find((x: any) => x.id === sel);
+                    return <Select key={slot.key} size="xs" label={slot.label} required disabled={!editable} value={sel ? String(sel) : null}
+                      description={e ? `Cert ${e.cert_no ?? '—'} · due ${dmy(e.due_date)}` : undefined}
+                      data={t.equipment.filter((x: any) => x.category === slot.category).map((x: any) => ({ value: String(x.id), label: `${x.name}${x.due_date && x.due_date < localToday() ? ' (calibration expired)' : ''}`, disabled: x.due_date && x.due_date < localToday() }))}
+                      onChange={(v) => { setObs({ ...obs, equipment: { ...(obs.equipment ?? {}), [slot.key]: v ? { id: Number(v), name: '', data: {} } : null } }); setDirty(true); }} />;
+                  })}
+                </SimpleGrid>
+                {(tpl.constants.length > 0 || tpl.derived.length > 0) && (
+                  <Paper withBorder p="xs" bg="#fafbfc">
+                    <Text size="xs" fw={600} mb={4}>Constants and derived values</Text>
+                    <SimpleGrid cols={{ base: 1, md: 3 }} spacing={2}>
+                      {tpl.constants.map((c) => <Text key={c.key} size="xs">{c.label}: <b>{formatValue(result.scalars[c.key] as never)}</b> {c.unit}{c.fromEquipment ? ' (from calibration)' : ''}</Text>)}
+                      {tpl.derived.map((c) => <Text key={c.key} size="xs">{c.label}: <b>{formatValue(result.scalars[c.key] as never, c.decimals)}</b> {c.unit}</Text>)}
+                    </SimpleGrid>
+                  </Paper>
+                )}
+                {tpl.grids.map((g) => (
+                  <div key={g.key} style={{ overflowX: 'auto' }}>
+                    <Text size="sm" fw={600} mb={4}>{g.label}</Text>
+                    <table className="grid-input">
+                      <thead><tr><th>#</th>{g.columns.map((c) => <th key={c.key}>{c.label}{c.unit ? <><br /><span style={{ fontWeight: 400 }}>({c.unit})</span></> : null}</th>)}</tr></thead>
+                      <tbody>
+                        {(obs.grids[g.key] ?? []).map((row, i) => (
+                          <tr key={i}>
+                            <td className="fixed">{i + 1}</td>
+                            {g.columns.map((c) => c.input
+                              ? <td key={c.key}><input inputMode={c.key === 'id' ? 'text' : 'decimal'} value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value)} /></td>
+                              : <td key={c.key} className={c.formula ? 'calc' : 'fixed'}>{formatValue(result.grids[g.key]?.[i]?.[c.key] as never, c.decimals)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+                <Paper withBorder p="sm" bg="#f1f6ff">
+                  <Text size="sm" fw={600} mb={4}>Results</Text>
+                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing={4}>
+                    {tpl.results.map((r) => <Text key={r.key} size="sm">{r.label}: <b>{formatValue(result.results[r.key] as never, r.decimals) || '—'}</b> {r.unit}</Text>)}
+                  </SimpleGrid>
+                </Paper>
+                {result.checks.map((c, i) => <Alert key={i} color={c.level === 'error' ? 'red' : 'orange'} icon={<IconAlertTriangle size={16} />} py={6}>{c.message}</Alert>)}
+                {tpl.chart && (() => {
+                  const pts = (result.grids[tpl.chart.grid] ?? []).map((r) => [r[tpl.chart!.x], r[tpl.chart!.y]]).filter(([x, y]) => typeof x === 'number' && typeof y === 'number') as [number, number][];
+                  return pts.length > 1 ? <div style={{ textAlign: 'center' }}><LineChart points={pts} title={tpl.chart.title} xLabel={tpl.chart.xLabel} yLabel={tpl.chart.yLabel} /></div> : null;
+                })()}
+                <Group justify="space-between" mt="sm">
+                  <Text size="sm">Tested by: <b>{t.enteredBy ?? '—'}</b></Text>
+                  <Text size="sm">Checked by: <b>{t.reviewedBy && ['accepted', 'reported'].includes(t.status) ? t.reviewedBy : '—'}</b></Text>
+                </Group>
+              </Stack>
+            </Paper>
+          </div>
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, xl: 4 }} className="no-print">
+          <Paper withBorder p="md">
+            <Text fw={600} mb="xs">History and corrections</Text>
+            <Timeline bulletSize={12}>
+              {t.history.map((h: any) => (
+                <Timeline.Item key={h.id} title={<Text size="sm">{h.action}</Text>}>
+                  <Text size="xs" c="dimmed">{h.user} · {new Date(h.at).toLocaleString('en-IN')}</Text>
+                  {h.detail?.note && <Text size="xs">“{h.detail.note}”</Text>}
+                  {h.detail?.reason && <Text size="xs">Reason: {h.detail.reason}</Text>}
+                  {Array.isArray(h.detail?.changes) && h.detail.changes.slice(0, 8).map((c: any, i: number) => <Text key={i} size="xs" c="red">{c.field}: <s>{String(c.from ?? '')}</s> → {String(c.to ?? '')}</Text>)}
+                </Timeline.Item>
+              ))}
+            </Timeline>
+            {!t.history.length && <Text size="sm" c="dimmed">No entries yet.</Text>}
+            <Text size="xs" c="dimmed" mt="sm">Status: {TEST_STATUS_LABEL[t.status as keyof typeof TEST_STATUS_LABEL]}. Corrections after return keep the old value and a reason.</Text>
+          </Paper>
+        </Grid.Col>
+      </Grid>
+      <ReasonModal opened={returnOpen} title="Return for correction – what needs fixing?" onClose={() => setReturnOpen(false)} onSubmit={async (n) => { setReturnOpen(false); await review('return', n); }} />
+      <ReasonModal opened={reasonOpen} title="Reason for correction" onClose={() => setReasonOpen(false)} onSubmit={async (n) => { setReasonOpen(false); await save(n); }} />
+    </>
+  );
+}
+
+const Info = ({ k, v }: { k: string; v?: string | null }) => <Text size="xs"><Text span c="dimmed">{k}: </Text>{v || '—'}</Text>;
+
+function ReasonModal({ opened, title, onClose, onSubmit }: { opened: boolean; title: string; onClose: () => void; onSubmit: (n: string) => void }) {
+  const [n, setN] = useState('');
+  return (
+    <Modal opened={opened} onClose={onClose} title={title}>
+      <Textarea autosize minRows={3} value={n} onChange={(e) => setN(e.currentTarget.value)} data-autofocus />
+      <Group justify="flex-end" mt="sm"><Button disabled={n.trim().length < 3} onClick={() => { onSubmit(n.trim()); setN(''); }}>Submit</Button></Group>
+    </Modal>
+  );
+}

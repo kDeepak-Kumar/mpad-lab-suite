@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.sqlite
+*.sqlite-journal
+.env
+.env.*
+!.env.example
+uploads/
+private/
+test-results/
+screenshots/
+*.sqlite-shm
+*.sqlite-wal
+data/

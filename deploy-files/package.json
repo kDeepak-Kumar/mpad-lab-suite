@@ -1,0 +1,12 @@
+{
+  "name": "lab-suite-app",
+  "private": true,
+  "version": "0.1.0",
+  "main": "server.cjs",
+  "scripts": { "start": "node server.cjs" },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "knex": "^3.1.0",
+    "mysql2": "^3.11.0"
+  }
+}

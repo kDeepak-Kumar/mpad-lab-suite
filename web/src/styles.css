@@ -1,0 +1,36 @@
+body { background: #f5f6f8; }
+.page-title { font-size: 20px; font-weight: 650; color: #1b2433; }
+.muted { color: #6b7280; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.clickable { cursor: pointer; }
+.clickable:hover { background: #f1f5fb; }
+table.grid-input { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.grid-input th { background: #f1f3f6; font-weight: 600; padding: 6px; border: 1px solid #dfe3e8; text-align: center; }
+table.grid-input td { border: 1px solid #dfe3e8; padding: 0; text-align: center; height: 30px; }
+table.grid-input td.calc { background: #f8fafc; color: #1f3a68; padding: 0 6px; font-variant-numeric: tabular-nums; }
+table.grid-input td.fixed { background: #f3f4f6; padding: 0 6px; }
+table.grid-input input { width: 100%; height: 30px; border: 0; padding: 0 6px; text-align: center; background: #fffbe6; color: #1d4ed8; font-size: 13px; }
+table.grid-input input:focus { outline: 2px solid #3d66b0; background: #fff; }
+table.grid-input input:disabled { background: transparent; color: #111; }
+
+/* ---------- printable documents ---------- */
+.doc-stage { background: #e5e7eb; padding: 16px; overflow: auto; border-radius: 8px; }
+.doc-page { background: #fff; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,.12); color: #111; line-height: 1.35; position: relative; }
+.doc-page table { border-collapse: collapse; width: 100%; }
+.doc-page .bx td, .doc-page .bx th { border: 1px solid #333; padding: 3px 6px; vertical-align: middle; }
+.doc-block { position: relative; }
+.doc-block.selectable:hover { outline: 1px dashed #3d66b0; outline-offset: 2px; cursor: pointer; }
+.doc-block.selected { outline: 2px solid #3d66b0; outline-offset: 2px; }
+.doc-watermark { position: absolute; top: 40%; left: 0; right: 0; text-align: center; font-size: 96px; font-weight: 800; color: rgba(200, 30, 30, 0.08); transform: rotate(-30deg); pointer-events: none; letter-spacing: 8px; }
+@media print {
+  @page { size: A4; margin: 0; }
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  .print-root, .print-root * { visibility: visible; }
+  .print-root { position: absolute; left: 0; top: 0; width: 100%; }
+  .print-root .doc-stage { background: #fff; padding: 0; }
+  .print-root .doc-page { box-shadow: none; margin: 0; }
+  .doc-zoom { zoom: 1 !important; }
+  .doc-block.selectable:hover, .doc-block.selected { outline: none !important; }
+  .no-print { display: none !important; }
+}

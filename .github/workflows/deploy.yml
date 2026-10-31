@@ -1,0 +1,45 @@
+name: Test, build and publish deploy branch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (formulas, GST, numbering, CBR acceptance)
+        run: npm test
+      - name: Build web + server
+        run: npm run build
+      - name: End-to-end API test on a fresh demo database
+        run: |
+          PORT=4000 node server/dist/server.cjs > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:4000/api/health && break; sleep 1; done
+          node scripts/api-flow.mjs http://localhost:4000
+      - name: Assemble deployable app (no build step needed on the host)
+        run: |
+          rm -rf deploy && mkdir -p deploy
+          cp server/dist/server.cjs deploy/server.cjs
+          cp -r web/dist deploy/web
+          cp deploy-files/package.json deploy-files/README-DEPLOY.txt deploy/
+          cp -r deploy-files/tmp deploy/tmp
+      - name: Publish to the deploy branch
+        run: |
+          cd deploy
+          git init -q -b deploy
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" deploy

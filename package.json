@@ -1,0 +1,15 @@
+{
+  "name": "mpad-suite",
+  "private": true,
+  "version": "0.1.0",
+  "description": "All-in-one business suite: clients, quotations, samples, observations, reports, invoices, ledgers. First industry pack: civil testing laboratory.",
+  "workspaces": ["shared", "server", "web"],
+  "scripts": {
+    "dev": "npm run dev -w server & npm run dev -w web",
+    "build": "npm run build -w web && npm run build -w server",
+    "test": "npm test -w shared",
+    "seed": "npm run seed -w server",
+    "start": "node server/dist/server.cjs"
+  },
+  "engines": { "node": ">=18" }
+}
