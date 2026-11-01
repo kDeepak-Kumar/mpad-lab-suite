@@ -5,3 +5,5 @@ export * from './numbering';
 export * from './doc-templates';
 export * from './packs/civil-lab';
 export * from './types';
+export * from './meta';
+export * from './analytics';

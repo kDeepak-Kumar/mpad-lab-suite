@@ -6,7 +6,7 @@ One centralised web application for running a testing laboratory end to end:
 
 It is built as a **generic core + industry pack**: clients, documents, GST, numbering, templates, ledgers and roles are industry-neutral; the civil-lab pack adds observation sheets (CBR, Proctor, gradation, Atterberg limits, free swell, concrete cubes) defined as data, not code.
 
-## What is included (v0.1)
+## What is included (v0.2)
 
 | Area | Features |
 | --- | --- |
@@ -19,6 +19,11 @@ It is built as a **generic core + industry pack**: clients, documents, GST, numb
 | Documents | One block-based designer for every document: show/hide/reorder blocks, rename columns, edit text, fonts, margins, letterhead mode; per-document edits or “save to template” (versioned); print/PDF, PNG, Word export; email from the company mailbox |
 | Registers | Sample inward, tests, report issue, quotations, GST sales, receipts, calibration – filter by date, export to Excel |
 | Admin | Company profile and branding, numbering formats, default notes, users and roles, rate card with CSV import/export, equipment, templates |
+| Report type | NABL / Non-NABL on samples, reports, quotes and invoices; ULR only for NABL; NABL and standard letterhead profiles (designed header or uploaded images); filters and analytics by type |
+| Editable documents | Every automatic value (number, date, client name, address, GSTIN, site, contact, job code, ULR, dates…) has a lock – unlock to type your own; quotes can be rate-only or show quantity, amount and GST |
+| List views | Search, per-column filters, sorting, column chooser, saved personal/shared views and export on every list |
+| Analytics & AI | KPIs (revenue, forecast, pipeline, conversion, outstanding, unbilled work, turnaround), default dashboard, report builder with forecast, saved reports; “Ask about your business” in plain English – built-in assistant works offline, any AI model (free Gemini/Groq/OpenRouter/Ollama or paid) can be connected in Settings |
+| Setup (no code) | Custom fields on any object, page layouts (order/hide), picklists, roles with tab access, record CRUD, actions and field-level access; System Administrator role with full control that skips workflow validations (all audited) |
 
 ## Run locally
 
@@ -26,7 +31,7 @@ It is built as a **generic core + industry pack**: clients, documents, GST, numb
 npm install
 npm run dev            # API on :4000 and web on :5173 (proxied)
 ```
-Open http://localhost:5173 and sign in as `owner@demo.lab` / `Demo@12345`.
+Open http://localhost:5173 and sign in as `admin@demo.lab` (System Administrator) or `owner@demo.lab`, password `Demo@12345`.
 Other demo users (same password): `frontdesk@`, `tech@`, `reviewer@`, `signatory@`, `accounts@demo.lab`.
 
 Reset the demo database: `npm run seed`.

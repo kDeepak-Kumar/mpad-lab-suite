@@ -33,7 +33,7 @@ const rep = docs.find((d) => d.kind === 'report'); const inv = docs.find((d) => 
 const pages = [['dashboard', '/'], ['clients', '/clients'], ['client-detail', '/clients/2'], ['quotes', '/quotes'], ['quote', `/documents/${quote.id}`], ['workorders', '/workorders'], ['workorder', '/workorders/1'],
   ['samples', '/samples'], ['tests', '/tests?tab=all'], ['test-cbr', `/tests/${tests.find((t) => t.template_code === 'CBR-LAB').id}`], ['reports', '/reports'], ['report', `/documents/${rep.id}`],
   ['invoices', '/invoices'], ['invoice', `/documents/${inv.id}`], ['payments', '/payments'], ['ledger', '/ledger'], ['statement', '/ledger/2'], ['registers', '/registers'],
-  ['settings-company', '/settings/company'], ['rate-card', '/settings/catalog'], ['equipment', '/equipment'], ['templates', '/settings/templates'], ['template-designer', '/settings/templates/1'], ['users', '/settings/users'], ['prepare-report', '/reports/prepare'], ['new-quote', '/quotes/new?client=1']];
+  ['settings-company', '/settings/company'], ['rate-card', '/settings/catalog'], ['equipment', '/equipment'], ['templates', '/settings/templates'], ['template-designer', '/settings/templates/1'], ['users', '/settings/users'], ['prepare-report', '/reports/prepare'], ['new-quote', '/quotes/new?client=1'], ['analytics', '/analytics'], ['setup', '/setup'], ['setup-roles', '/setup?tab=roles'], ['setup-picklists', '/setup?tab=picklists']];
 for (const [name, path] of pages) { await owner.goto(base + path); await owner.waitForLoadState('networkidle'); await shot(owner, name); }
 console.log(`visited ${pages.length} screens`);
 
@@ -83,7 +83,7 @@ await rv.goto(`${base}/reports/prepare`);
 await rv.getByText(s.code).click();
 await rv.getByRole('button', { name: /Create report draft/ }).click();
 await rv.waitForURL(/documents\/\d+/);
-await rv.getByLabel('Remarks / conclusion').fill('CBR value is suitable for subgrade as per project specification.');
+await rv.getByPlaceholder('e.g. The soil can be used for backfilling purpose.').fill('CBR value is suitable for subgrade as per project specification.');
 await rv.waitForTimeout(2000);
 await rv.getByRole('button', { name: 'Send for verification' }).click();
 await rv.waitForTimeout(1000);
@@ -103,6 +103,69 @@ if (!rText.includes('Clause 7.3')) problems.push('report: CBR note missing');
 if (rText.includes('DRAFT')) problems.push('report: still shows DRAFT watermark after issue');
 await shot(sg, 'report-issued');
 await sg.screenshot({ path: `${out}/report-issued-full.png`, fullPage: true });
+
+// ---- 6. System Admin completes a whole NABL flow alone, with editable fields and qty/GST
+const ad = await session('admin');
+const s2 = await api(ad, '/samples', { client_id: 2, site_id: 3, accreditation: 'NABL', material: 'Soil', received_date: new Date().toLocaleDateString('en-CA'), quantity: '20 kg', condition: 'Good', source: 'Sample supplied by the customer', tests: [{ catalog_id: cat.find((c) => c.code === 'SOIL-FSI').id }] });
+if (!s2.ulr) problems.push('admin: NABL sample has no ULR');
+const t2 = (await api(ad, '/tests?status=pending')).find((t) => t.sample_id === s2.id).id;
+await ad.goto(`${base}/tests/${t2}`);
+await ad.getByRole('textbox', { name: /Volume of soil in distilled water/ }).fill('12');
+await ad.getByRole('textbox', { name: /Volume of soil in kerosene/ }).fill('10');
+await ad.getByRole('button', { name: 'Save' }).click(); await ad.waitForTimeout(800);
+await ad.getByRole('button', { name: 'Submit for review' }).click(); await ad.waitForTimeout(800);
+await ad.getByRole('button', { name: 'Accept' }).click(); await ad.waitForTimeout(800);
+const st2 = await api(ad, `/tests/${t2}`);
+if (st2.status !== 'accepted') problems.push(`admin: self-review blocked (status ${st2.status})`);
+await ad.goto(`${base}/reports/prepare`);
+await ad.getByText(s2.code).click();
+await ad.getByRole('button', { name: /Create report draft/ }).click();
+await ad.waitForURL(/documents\/\d+/);
+// unlock and edit the client name on the report
+const lockBtns = ad.locator('.mantine-TextInput-root:has(label:text-is("Client name")) button');
+await lockBtns.first().click();
+const nameInput = ad.getByRole('textbox', { name: 'Client name' });
+await nameInput.fill('Deccan Developers (Data Centre Division)'); await nameInput.blur();
+await ad.waitForTimeout(1800);
+ad.once('dialog', (d) => d.accept());
+await ad.getByRole('button', { name: 'Sign & issue' }).click();
+await ad.waitForTimeout(1500);
+const r2 = await ad.locator('.doc-page').innerText();
+if (!r2.includes('Data Centre Division')) problems.push('admin: unlocked client name not on report');
+const certNo = (await api(ad, '/company')).accreditation?.certNo;
+if (certNo && !r2.includes(certNo)) problems.push('admin: NABL letterhead (certificate no.) missing');
+if (!r2.includes('Free Swell Index')) problems.push('admin: FSI result missing');
+await ad.screenshot({ path: `${out}/admin-nabl-report.png`, fullPage: true });
+
+// quote with quantity and GST switched on
+await ad.goto(`${base}/quotes/new?client=1`);
+await ad.getByRole('button', { name: 'Create draft' }).click();
+await ad.waitForURL(/documents\/\d+/);
+await ad.getByPlaceholder('Add a test or service from the rate card…').click();
+await ad.getByRole('option', { name: /Compressive strength of concrete cubes/i }).click();
+await ad.getByText('Show quantity and amount').click();
+await ad.getByText('Add GST to the total').click();
+await ad.getByRole('textbox', { name: 'Qty' }).fill('2');
+await ad.waitForTimeout(2200);
+const q2 = await ad.locator('.doc-page').innerText();
+if (!q2.includes('Amount Incl GST')) problems.push('quote: GST total not shown when switched on');
+await ad.screenshot({ path: `${out}/quote-qty-gst.png` });
+
+// custom field appears on the client form
+await api(ad, '/meta/field/client.client_category', { object: 'client', key: 'client_category', label: 'Client category', type: 'text' }, 'PUT');
+await ad.goto(`${base}/clients?new=1`); await ad.waitForTimeout(800);
+if (!(await ad.getByRole('textbox', { name: 'Client category' }).count())) problems.push('setup: custom field not on client form');
+
+// analytics + built-in assistant
+await ad.goto(`${base}/analytics?ask=${encodeURIComponent('revenue by client this year')}`);
+await ad.waitForTimeout(2500);
+if (!(await ad.getByText('Built-in').count()) && !(await ad.getByText('AI', { exact: true }).count())) problems.push('analytics: no AI answer card');
+await ad.screenshot({ path: `${out}/analytics-ai.png`, fullPage: true });
+
+// technician cannot see accounts tabs
+const tk = await session('tech');
+const navText = await tk.locator('nav').innerText();
+if (navText.includes('Invoices') || navText.includes('Ledgers')) problems.push('roles: technician sees accounts tabs');
 
 await browser.close();
 if (problems.length) { console.log('PROBLEMS:\n' + problems.join('\n')); process.exit(1); }

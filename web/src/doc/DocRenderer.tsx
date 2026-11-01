@@ -15,6 +15,13 @@ export interface RenderInput {
   onSelect?: (id: string) => void;
 }
 
+const rateOnly = (kind: string, d: any) => kind === 'quote' && !(d.showQty ?? d.mode !== 'rate');
+/** NABL documents use the NABL letterhead profile, others the standard one (Settings → Letterheads). */
+const letterhead = (c: any, d: any) => {
+  const key = d.accreditation === 'NABL' ? 'nabl' : d.accreditation === 'Non-NABL' ? 'standard' : null;
+  if (!key) return null;
+  return c.letterheads?.[key] ?? { mode: 'designed', showAccreditation: key === 'nabl' };
+};
 const get = (o: any, path: string) => path.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
 const nl = (s: string) => s.split('\n').map((line, i, arr) => <span key={i}>{line}{i < arr.length - 1 && <br />}</span>);
 
@@ -53,8 +60,11 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
   const fill = (s?: string) => fillPlaceholders(s ?? '', ctx);
   const field = (f: string) => (f === 'number' ? p.number ?? '(on issue)' : f === 'dateText' ? d.dateText || formatDate(d.date ?? null) || formatDate(new Date().toLocaleDateString('en-CA')) : get(d, f) ?? '');
   switch (b.type) {
-    case 'letterhead':
+    case 'letterhead': {
       if (lh) return <div style={{ height: '32mm' }} />;
+      const prof = letterhead(c, d);
+      if (prof?.mode === 'image' && prof.headerImage) return <img src={prof.headerImage} alt="" style={{ width: '100%', display: 'block', marginBottom: 8 }} />;
+      const showAcc = prof ? prof.showAccreditation !== false && d.accreditation === 'NABL' : pr.showAccreditation;
       return (
         <div style={{ borderBottom: `2px solid ${accent}`, paddingBottom: 6, marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -63,7 +73,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
               <div style={{ fontSize: '22pt', letterSpacing: 0.5, color: '#111' }}>{c.name}</div>
               {c.tagline && <div style={{ fontStyle: 'italic', textAlign: 'right', fontSize: '10pt' }}>{c.tagline}</div>}
             </div>
-            {pr.showAccreditation && (c.accreditationLogo || c.accreditation?.certNo) && (
+            {showAcc && (c.accreditationLogo || c.accreditation?.certNo) && (
               <div style={{ textAlign: 'center', fontSize: '8pt', fontWeight: 700 }}>
                 {c.accreditationLogo && <img src={c.accreditationLogo} alt="" style={{ height: 62, display: 'block', margin: '0 auto' }} />}
                 {c.accreditation?.certNo}
@@ -75,6 +85,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
           </div>
         </div>
       );
+    }
     case 'title':
       return (
         <div style={{ textAlign: 'center', margin: pr.small ? '4px 0 2px' : '4px 0 8px' }}>
@@ -112,7 +123,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       );
     }
     case 'items': {
-      const rateMode = d.mode === 'rate';
+      const rateMode = rateOnly(p.kind, d);
       const cols = (pr.columns as Column[]).filter((col) => col.visible && !(rateMode && (col.key === 'amount' || col.key === 'unit')));
       const lines = (p.totals?.lines ?? d.lines ?? []) as any[];
       const cell = (col: Column, l: any, i: number) => {
@@ -136,14 +147,17 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     }
     case 'totals': {
       const tt = p.totals;
-      if (!tt || d.mode === 'rate') return null;
+      if (!tt || rateOnly(p.kind, d)) return null;
+      const gstIn = p.kind !== 'quote' || (d.includeGst ?? d.mode !== 'rate');
       const rate = tt.taxSummary?.length === 1 ? tt.taxSummary[0].rate : null;
       const rows: [string, number][] = [[pr.subtotal, tt.subtotal]];
       if (tt.discount > 0) rows.push([pr.discount, -tt.discount], ['Taxable value', tt.taxable]);
-      if (tt.interState) rows.push([`${pr.igst}${rate !== null ? ` -${rate}%` : ''}`, tt.igst]);
-      else rows.push([`${pr.cgst}${rate !== null ? ` -${rate / 2}%` : ''}`, tt.cgst], [`${pr.sgst}${rate !== null ? ` -${rate / 2}%` : ''}`, tt.sgst]);
+      if (gstIn) {
+        if (tt.interState) rows.push([`${pr.igst}${rate !== null ? ` -${rate}%` : ''}`, tt.igst]);
+        else rows.push([`${pr.cgst}${rate !== null ? ` -${rate / 2}%` : ''}`, tt.cgst], [`${pr.sgst}${rate !== null ? ` -${rate / 2}%` : ''}`, tt.sgst]);
+      }
       if (tt.roundOff) rows.push([pr.roundOff, tt.roundOff]);
-      rows.push([pr.total, tt.total]);
+      rows.push([gstIn ? pr.total : 'Total (GST extra)', tt.total]);
       return (
         <table className="bx" style={{ width: '100%', borderTop: 0 }}><tbody>
           {rows.map(([l, v], i) => <tr key={i}><td style={{ border: 0 }} /><td style={{ width: '22%', textAlign: 'center', fontWeight: i === rows.length - 1 ? 700 : 400 }}>{l}</td><td style={{ width: '14%', textAlign: 'right', fontWeight: i === rows.length - 1 ? 700 : 400 }}>{inr(v, Math.abs(v % 1) > 0.001 ? 2 : 0)}</td></tr>)}
@@ -151,7 +165,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       );
     }
     case 'amountWords':
-      if (!p.totals || d.mode === 'rate') return null;
+      if (!p.totals || rateOnly(p.kind, d)) return null;
       return <div style={{ textAlign: 'center', border: '1px solid #333', borderTop: 0, padding: 4 }}><div>{pr.label}</div><div>( {amountInWords(p.totals.total)} )</div></div>;
     case 'notes': {
       const notes: string[] = Array.isArray(d.notes) ? d.notes : String(d.notes ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
@@ -179,14 +193,17 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
         </div>
       );
     }
-    case 'footer':
+    case 'footer': {
       if (lh) return <div style={{ height: '18mm' }} />;
+      const prof = letterhead(c, d);
+      if (prof?.mode === 'image' && prof.footerImage) return <img src={prof.footerImage} alt="" style={{ width: '100%', display: 'block', marginTop: 10 }} />;
       return (
         <div style={{ borderTop: `1px solid ${accent}`, marginTop: 10, paddingTop: 4, textAlign: 'center', fontSize: '9pt', color: accent }}>
           <div>Contact : {c.phone} | Email: {c.email}{c.website ? `, Website: ${c.website}` : ''}</div>
           <div style={{ color: '#222' }}>{c.address}</div>
         </div>
       );
+    }
     case 'reportInfo': {
       const rows = (pr.rows as { label: string; field: string; hidden?: boolean }[]).filter((r) => !r.hidden);
       return (

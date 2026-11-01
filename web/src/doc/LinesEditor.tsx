@@ -1,48 +1,54 @@
-import { ActionIcon, Button, Group, NumberInput, Paper, Select, Stack, Text, TextInput, Textarea, SegmentedControl, SimpleGrid } from '@mantine/core';
-import { IconTrash, IconPlus } from '@tabler/icons-react';
-import { INDIAN_STATES, type LineInput } from '@suite/shared';
-import { useApi, money } from '../api';
+import { useState } from 'react';
+import { ActionIcon, Button, Group, Modal, NumberInput, Paper, Select, Stack, Switch, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
+import { IconTrash, IconPlus, IconSparkles, IconGripVertical } from '@tabler/icons-react';
+import type { LineInput } from '@suite/shared';
+import { api, useApi, money, ok } from '../api';
+import { useCan } from '../ctx';
 
+/** Line items + quantity/GST options. Quotes can be rate-only or show qty, amount and GST. */
 export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kind: string; data: Record<string, any>; onChange: (d: Record<string, any>) => void; totals: any; disabled?: boolean }) {
   const { data: catalog } = useApi<any[]>('/catalog');
+  const can = useCan();
+  const [paste, setPaste] = useState(false);
   const lines = (data.lines ?? []) as LineInput[];
   const set = (patch: Record<string, any>) => onChange({ ...data, ...patch });
   const setLine = (i: number, patch: Partial<LineInput>) => set({ lines: lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+  const showQty = kind !== 'quote' || (data.showQty ?? data.mode !== 'rate');
+  const includeGst = kind !== 'quote' || (data.includeGst ?? data.mode !== 'rate');
+  const lineFrom = (c: any, qty = 1): LineInput => ({ description: c.billing_name, rate: c.rate, qty, unit: c.unit, remarks: kind === 'quote' ? (c.obs_template_code || c.method ? (c.nabl ? 'NABL' : 'Non-NABL') : '--') : '', sac: c.sac, gstRate: c.gst_rate, catalogId: c.id });
   const addCatalog = (id: string | null) => {
     const c = catalog?.find((x) => String(x.id) === id); if (!c) return;
-    const line: LineInput = { description: c.billing_name, rate: c.rate, qty: 1, unit: c.unit, remarks: kind === 'quote' ? (c.obs_template_code || c.method ? (c.nabl ? 'NABL' : 'Non-NABL') : '--') : '', sac: c.sac, gstRate: c.gst_rate, catalogId: c.id };
     let notes: string = data.notes ?? '';
     if (c.conditions && !notes.includes(c.conditions)) notes = notes ? `${notes}\n${c.conditions}` : c.conditions;
-    set({ lines: [...lines, line], notes });
+    set({ lines: [...lines, lineFrom(c)], notes });
   };
-  const rateMode = data.mode === 'rate';
+  const move = (i: number, d: number) => { const l = [...lines]; const j = i + d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; set({ lines: l }); };
   return (
     <Stack gap="sm">
       {kind === 'quote' && (
-        <SegmentedControl disabled={disabled} value={data.mode ?? 'rate'} onChange={(v) => set({ mode: v })} data={[{ value: 'rate', label: 'Rate quote (unit rates only)' }, { value: 'estimate', label: 'Estimate (qty, totals, GST)' }]} />
+        <Paper withBorder p="sm">
+          <Group gap="xl">
+            <Switch disabled={disabled} label="Show quantity and amount" description="Off = rate-only quotation" checked={showQty} onChange={(e) => set({ showQty: e.currentTarget.checked, mode: undefined })} />
+            <Switch disabled={disabled || !showQty} label="Add GST to the total" description="Off = “GST extra as applicable”" checked={includeGst && showQty} onChange={(e) => set({ includeGst: e.currentTarget.checked, mode: undefined })} />
+          </Group>
+        </Paper>
       )}
-      <SimpleGrid cols={2}>
-        <TextInput disabled={disabled} label="Customer reference" placeholder="Verbal / letter no. & date" value={data.customerRef ?? ''} onChange={(e) => set({ customerRef: e.currentTarget.value })} />
-        <Select disabled={disabled} label="Place of supply" searchable data={INDIAN_STATES.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` }))} value={data.placeOfSupply ?? null} onChange={(v) => set({ placeOfSupply: v })} />
-        {kind === 'invoice' && <Select disabled={disabled} label="Copy label" data={['ORIGINAL COPY', 'DUPLICATE COPY', 'TRIPLICATE COPY', '']} value={data.copyLabel ?? 'ORIGINAL COPY'} onChange={(v) => set({ copyLabel: v ?? '' })} />}
-        {kind === 'invoice' && <TextInput disabled={disabled} label="SAC" value={data.sac ?? ''} onChange={(e) => set({ sac: e.currentTarget.value })} />}
-        {kind === 'quote' && <NumberInput disabled={disabled} label="Valid for (days)" value={data.validityDays ?? 30} onChange={(v) => set({ validityDays: Number(v) })} />}
-        {!rateMode && <NumberInput disabled={disabled} label="Overall discount (₹)" value={data.overallDiscount ?? 0} min={0} thousandSeparator="," onChange={(v) => set({ overallDiscount: Number(v) || 0 })} />}
-      </SimpleGrid>
-
       <Stack gap={6}>
         {lines.map((l, i) => (
           <Paper key={i} withBorder p="xs" radius="md">
             <Group gap="xs" align="flex-start" wrap="nowrap">
-              <Text size="sm" fw={600} w={18} mt={6}>{i + 1}</Text>
+              <Stack gap={0} mt={4} align="center">
+                <Text size="sm" fw={650} c="dimmed" w={18} ta="center">{i + 1}</Text>
+                {!disabled && <Tooltip label="Move up"><ActionIcon size="xs" variant="subtle" color="gray" onClick={() => move(i, -1)}><IconGripVertical size={12} /></ActionIcon></Tooltip>}
+              </Stack>
               <Stack gap={6} style={{ flex: 1 }}>
                 <Textarea disabled={disabled} size="xs" autosize minRows={1} placeholder="Description" value={l.description} onChange={(e) => setLine(i, { description: e.currentTarget.value })} />
                 <Group gap={6} grow wrap="nowrap">
                   <NumberInput disabled={disabled} size="xs" label="Rate (₹)" value={l.rate} min={0} thousandSeparator="," hideControls onChange={(v) => setLine(i, { rate: Number(v) || 0 })} />
-                  {!rateMode && <NumberInput disabled={disabled} size="xs" label="Qty" value={l.qty ?? 1} min={0} hideControls onChange={(v) => setLine(i, { qty: Number(v) || 0 })} />}
+                  {showQty && <NumberInput disabled={disabled} size="xs" label="Qty" value={l.qty ?? 1} min={0} allowDecimal={false} onChange={(v) => setLine(i, { qty: Number(v) || 0 })} />}
                   <TextInput disabled={disabled} size="xs" label="Unit" value={l.unit ?? ''} onChange={(e) => setLine(i, { unit: e.currentTarget.value })} />
                   <TextInput disabled={disabled} size="xs" label="Remarks" value={l.remarks ?? ''} onChange={(e) => setLine(i, { remarks: e.currentTarget.value })} />
-                  {!rateMode && <TextInput size="xs" label="Amount" value={money((l.qty ?? 0) * l.rate)} readOnly variant="filled" />}
+                  {showQty && <TextInput size="xs" label="Amount" value={money((l.qty ?? 0) * l.rate)} readOnly variant="filled" />}
                 </Group>
               </Stack>
               <ActionIcon disabled={disabled} variant="subtle" color="red" mt={4} onClick={() => set({ lines: lines.filter((_, j) => j !== i) })}><IconTrash size={15} /></ActionIcon>
@@ -55,17 +61,45 @@ export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kin
             <Select placeholder="Add a test or service from the rate card…" searchable style={{ flex: 1 }} value={null} onChange={addCatalog}
               data={(catalog ?? []).filter((c) => c.active).map((c) => ({ value: String(c.id), label: `${c.billing_name} · ₹${money(c.rate)} ${c.unit ?? ''}` }))} />
             <Button variant="default" leftSection={<IconPlus size={14} />} onClick={() => set({ lines: [...lines, { description: '', rate: 0, qty: 1, unit: '', remarks: '' }] })}>Custom line</Button>
+            {kind === 'quote' && can('useAI') && <Button variant="light" leftSection={<IconSparkles size={14} />} onClick={() => setPaste(true)}>From enquiry text</Button>}
           </Group>
         )}
       </Stack>
-      {!rateMode && totals && (
+      {showQty && totals && (
         <Group justify="flex-end" gap="lg">
           <Text size="sm">Taxable ₹{money(totals.taxable, 2)}</Text>
-          <Text size="sm">{totals.interState ? `IGST ₹${money(totals.igst, 2)}` : `CGST ₹${money(totals.cgst, 2)} + SGST ₹${money(totals.sgst, 2)}`}</Text>
+          {includeGst ? <Text size="sm">{totals.interState ? `IGST ₹${money(totals.igst, 2)}` : `CGST ₹${money(totals.cgst, 2)} + SGST ₹${money(totals.sgst, 2)}`}</Text> : <Text size="sm" c="dimmed">GST extra</Text>}
           <Text fw={700}>Total ₹{money(totals.total)}</Text>
         </Group>
       )}
+      {!includeGst && kind === 'quote' && showQty && <Text size="xs" c="dimmed">Tip: keep a note such as “GST will be applicable on above rates”.</Text>}
       {kind === 'quote' && <Textarea disabled={disabled} label="Notes / terms (one per line)" autosize minRows={3} value={data.notes ?? ''} onChange={(e) => set({ notes: e.currentTarget.value })} />}
+      {paste && <EnquiryModal catalog={catalog ?? []} onClose={() => setPaste(false)} onLines={(ls, notes) => { set({ lines: [...lines, ...ls.map((x) => { const c = catalog?.find((k) => k.id === x.catalogId); return c ? { ...lineFrom(c, x.qty || 1) } : { description: x.description, rate: 0, qty: x.qty || 1, unit: '', remarks: '' }; })], notes: notes ? `${data.notes ?? ''}\n${notes}`.trim() : data.notes }); setPaste(false); }} />}
     </Stack>
+  );
+}
+
+/** Paste a client's email/WhatsApp enquiry; AI (or keyword matching) turns it into quote lines. */
+function EnquiryModal({ catalog, onClose, onLines }: { catalog: any[]; onClose: () => void; onLines: (l: { catalogId: number | null; description: string; qty: number }[], notes?: string) => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const fallback = () => {
+    const t = text.toLowerCase();
+    return catalog.filter((c) => c.active && [c.report_name, c.code].filter(Boolean).some((k: string) => k.length > 2 && t.includes(k.toLowerCase()))).map((c) => ({ catalogId: c.id, description: c.billing_name, qty: 1 }));
+  };
+  const run = async () => {
+    setBusy(true);
+    try { const r = await api<any>('/ai/assist', { body: { task: 'quote_lines', input: text }, quiet: true }); onLines(r.lines ?? [], r.notes); ok(`Added ${r.lines?.length ?? 0} line(s) with AI`); }
+    catch { const l = fallback(); onLines(l); ok(l.length ? `Matched ${l.length} test(s) by name (AI not configured)` : 'No tests matched – add them from the rate card'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal opened onClose={onClose} title="Create lines from the client’s enquiry" size="lg">
+      <Stack>
+        <Textarea autosize minRows={6} placeholder="Paste the email or WhatsApp message, e.g. “Please quote for CBR and Proctor on 3 soil samples and 2 plate load tests at our Kokapet site”" value={text} onChange={(e) => setText(e.currentTarget.value)} />
+        <Text size="xs" c="dimmed">Uses the AI model set in Settings; without one, tests are matched by name.</Text>
+        <Group justify="flex-end"><Button loading={busy} disabled={text.trim().length < 5} leftSection={<IconSparkles size={14} />} onClick={run}>Add lines</Button></Group>
+      </Stack>
+    </Modal>
   );
 }

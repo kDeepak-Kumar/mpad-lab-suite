@@ -159,6 +159,28 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '002_platform',
+    up: async (k) => {
+      await k.schema.createTable('meta', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('kind', 30).notNullable(); t.string('key', 120).notNullable();
+        t.integer('owner_id').unsigned().nullable(); json(t, 'data'); t.string('updated_at', 32);
+        t.unique(['company_id', 'kind', 'key']);
+      });
+      await k.schema.alterTable('documents', (t) => { t.string('accreditation', 30); });
+      await k.schema.alterTable('samples', (t) => { t.string('accreditation', 30); t.index(['company_id', 'client_id']); });
+      await k.schema.alterTable('contacts', (t) => { json(t, 'data'); });
+      await k.schema.alterTable('catalog', (t) => { json(t, 'data'); });
+      await k.schema.alterTable('work_orders', (t) => { json(t, 'data'); t.string('accreditation', 30); });
+      await k.schema.alterTable('payments', (t) => { json(t, 'data'); });
+      await k.schema.alterTable('tests', (t) => { t.index(['company_id', 'status']); t.index(['sample_id']); });
+      await k.schema.alterTable('documents', (t) => { t.index(['company_id', 'client_id']); });
+      // existing data: samples with a ULR were NABL-scope
+      await k('samples').whereNotNull('ulr').update({ accreditation: 'NABL' });
+      await k('samples').whereNull('ulr').update({ accreditation: 'Non-NABL' });
+      await k('documents').where({ kind: 'report' }).update({ accreditation: 'NABL' });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

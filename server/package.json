@@ -9,7 +9,9 @@
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
+    "@types/compression": "^1.8.1",
     "bcryptjs": "^2.4.3",
+    "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
@@ -18,7 +20,9 @@
     "nodemailer": "^6.9.15",
     "zod": "^3.23.8"
   },
-  "optionalDependencies": { "better-sqlite3": "^11.5.0" },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.5.0"
+  },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.7",

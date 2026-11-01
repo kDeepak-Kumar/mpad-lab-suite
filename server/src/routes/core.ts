@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { validateGstin, DEFAULT_TEMPLATES, type DocKind } from '@suite/shared';
+import { DEFAULT_TEMPLATES, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
-import { allow, checkPassword, clearSession, h, hashPassword, HttpError, requireAuth, setSession } from '../auth';
+import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession } from '../auth';
 import { audit, getCompany, ledger } from '../services';
+import { cleanWrite, deleteMeta, getMeta, mergeCustom, saveMeta, stripHidden, type MetaKind } from '../meta';
 
 export const core = Router();
 
@@ -21,17 +22,51 @@ core.use(requireAuth);
 
 core.get('/auth/me', h(async (req) => {
   const company = await getCompany(req.user.company_id);
-  return { user: req.user, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo } };
+  const { roleDef, ...user } = req.user;
+  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo } };
 }));
 
 // ---------- company settings ----------
-core.get('/company', h(async (req) => getCompany(req.user.company_id)));
+const maskCompany = (c: Record<string, any>) => ({ ...c, ai: c.ai ? { ...c.ai, apiKey: undefined, hasKey: Boolean(c.ai.apiKey) } : undefined });
+core.get('/company', h(async (req) => maskCompany(await getCompany(req.user.company_id))));
 core.put('/company', allow('settings'), h(async (req) => {
   const cur = await getCompany(req.user.company_id);
-  const { id: _i, name, ...data } = { ...cur, ...req.body };
+  const body = { ...req.body };
+  if (body.ai) body.ai = { ...body.ai, apiKey: body.ai.apiKey ? body.ai.apiKey : cur.ai && (cur.ai as any).apiKey, hasKey: undefined };
+  const { id: _i, name, ...data } = { ...cur, ...body };
   await db('companies').where({ id: req.user.company_id }).update({ name, data: toJson(data) });
   await audit(db, req.user, 'company', req.user.company_id, 'updated settings');
-  return getCompany(req.user.company_id);
+  return maskCompany(await getCompany(req.user.company_id));
+}));
+
+// ---------- metadata (picklists, custom fields, layouts, roles, list views, reports, dashboards) ----------
+core.get('/meta', h(async (req) => {
+  const m = await getMeta(req.user.company_id);
+  const mine = (x: { owner_id: number | null }) => x.owner_id === null || x.owner_id === req.user.id;
+  return { ...m, listviews: m.listviews.filter(mine), reports: m.reports.filter(mine), dashboards: m.dashboards.filter(mine) };
+}));
+const PERSONAL: MetaKind[] = ['listview', 'report', 'dashboard'];
+core.put('/meta/:kind/:key', h(async (req) => {
+  const kind = req.params.kind as MetaKind;
+  if (!['picklist', 'field', 'layout', 'role', 'listview', 'report', 'dashboard'].includes(kind)) throw new HttpError(400, 'Unknown metadata type');
+  const shared = Boolean(req.body?.shared);
+  if (!PERSONAL.includes(kind) || shared) if (!can(req.user, 'manageCustomization')) throw new HttpError(403, 'Only administrators can change this');
+  if (kind === 'role' && req.params.key === 'admin') throw new HttpError(400, 'The System Administrator role cannot be changed');
+  if (kind === 'field' && !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(req.params.key)) throw new HttpError(400, 'Field key must look like object.field_name (lowercase)');
+  const { shared: _s, ...data } = req.body ?? {};
+  await saveMeta(req.user.company_id, kind, req.params.key, data, PERSONAL.includes(kind) && !shared ? req.user.id : null);
+  await audit(db, req.user, 'meta', 0, `${kind} ${req.params.key} saved`);
+  return { ok: true };
+}));
+core.delete('/meta/:kind/:key', h(async (req) => {
+  const kind = req.params.kind as MetaKind;
+  const row0 = await db('meta').where({ company_id: req.user.company_id, kind, key: req.params.key }).first();
+  if (!row0) return { ok: true };
+  if (!(row0.owner_id === req.user.id) && !can(req.user, 'manageCustomization')) throw new HttpError(403, 'Only administrators can delete this');
+  if (kind === 'role' && await db('users').where({ company_id: req.user.company_id, role: req.params.key }).first()) throw new HttpError(409, 'Some users still have this role. Move them to another role first.');
+  await deleteMeta(req.user.company_id, kind, req.params.key);
+  await audit(db, req.user, 'meta', 0, `${kind} ${req.params.key} deleted`);
+  return { ok: true };
 }));
 
 // ---------- users ----------
@@ -42,8 +77,15 @@ const userSchema = z.object({
   qualifications: z.string().optional().nullable(), phone: z.string().optional().nullable(), signature: z.string().optional().nullable(),
   active: z.boolean().optional(), password: z.string().min(6).optional(),
 });
+async function checkRoleAssign(req: Express.Request & { user: any }, role?: string) {
+  if (!role) return;
+  const m = await getMeta(req.user.company_id);
+  if (!m.roles.some((r) => r.key === role)) throw new HttpError(400, 'Unknown role');
+  if (role === 'admin' && !isAdmin(req.user)) throw new HttpError(403, 'Only a System Administrator can create another System Administrator');
+}
 core.post('/users', allow('users'), h(async (req) => {
   const { password, ...u } = userSchema.parse(req.body);
+  await checkRoleAssign(req as never, u.role);
   if (!password) throw new HttpError(400, 'Set an initial password (6+ characters)');
   const id = await insert(db, 'users', { ...u, email: u.email.toLowerCase(), company_id: req.user.company_id, password_hash: await hashPassword(password), created_at: now() });
   await audit(db, req.user, 'user', id, 'created', { email: u.email, role: u.role });
@@ -51,9 +93,13 @@ core.post('/users', allow('users'), h(async (req) => {
 }));
 core.put('/users/:id', h(async (req) => {
   const id = Number(req.params.id);
-  if (req.user.role !== 'owner' && req.user.id !== id) throw new HttpError(403, 'You can only edit your own profile');
+  const manager = can(req.user, 'manageUsers');
+  if (!manager && req.user.id !== id) throw new HttpError(403, 'You can only edit your own profile');
   const { password, ...u } = userSchema.partial().parse(req.body);
-  if (req.user.role !== 'owner') delete u.role;
+  if (!manager) { delete u.role; delete u.active; }
+  const target = await db('users').where({ id, company_id: req.user.company_id }).first();
+  if (target?.role === 'admin' && !isAdmin(req.user)) throw new HttpError(403, 'Only a System Administrator can change another System Administrator');
+  await checkRoleAssign(req as never, u.role);
   const patch: Record<string, unknown> = { ...u };
   if (u.email) patch.email = u.email.toLowerCase();
   if (password) patch.password_hash = await hashPassword(password);
@@ -62,55 +108,55 @@ core.put('/users/:id', h(async (req) => {
   return { ok: true };
 }));
 
-// ---------- clients, sites, contacts ----------
+// ---------- clients, sites, contacts (with custom fields and field-level security) ----------
+const withCustom = (r: Record<string, any>, jsonCols: string[] = ['data']) => { const out = row(r, jsonCols) as Record<string, any>; return { ...out, custom: (out.data ?? {}).custom ?? {} }; };
+const custom = z.record(z.any()).optional();
 const clientSchema = z.object({
-  name: z.string().min(1), short_code: z.string().max(20).optional().nullable(), type: z.string().optional(),
+  name: z.string().min(1), short_code: z.string().max(20).optional().nullable(), type: z.string().optional().nullable(),
   gstin: z.string().optional().nullable(), state_code: z.string().optional().nullable(), pan: z.string().optional().nullable(),
   address: z.string().optional().nullable(), email: z.string().optional().nullable(), phone: z.string().optional().nullable(),
-  payment_terms_days: z.number().optional().nullable(), opening_balance: z.number().optional().nullable(), notes: z.string().optional().nullable(),
+  payment_terms_days: z.coerce.number().optional().nullable(), opening_balance: z.coerce.number().optional().nullable(), notes: z.string().optional().nullable(), custom,
 });
-function cleanClient(c: z.infer<typeof clientSchema>) {
+function normaliseClient(c: Record<string, any>) {
   const out = { ...c };
-  if (out.gstin) {
-    out.gstin = out.gstin.trim().toUpperCase();
-    const v = validateGstin(out.gstin);
-    if (!v.ok) throw new HttpError(400, v.message!);
-    out.state_code = v.state;
-    out.pan = out.pan || out.gstin.slice(2, 12);
-  }
-  if (out.short_code) out.short_code = out.short_code.toUpperCase();
+  if (out.gstin) { out.gstin = String(out.gstin).trim().toUpperCase(); out.state_code = out.gstin.slice(0, 2); out.pan = out.pan || out.gstin.slice(2, 12); }
+  if (out.gstin === '') out.gstin = null;
+  if (out.short_code) out.short_code = String(out.short_code).toUpperCase();
   return out;
 }
+const split = (c: Record<string, any>) => { const { custom: cu, ...rest } = c; return { rest, cu: cu as Record<string, unknown> | undefined }; };
 
-core.get('/clients', h(async (req) => {
+core.get('/clients', allow('client.read'), h(async (req) => {
   const q = String(req.query.q ?? '').trim();
   const rows = await db('clients').where({ company_id: req.user.company_id })
     .modify((b) => { if (q) b.andWhere((w) => w.whereLike('name', `%${q}%`).orWhereLike('gstin', `%${q}%`).orWhereLike('short_code', `%${q}%`)); })
-    .orderBy('name').limit(500);
+    .orderBy('name').limit(5000);
   const sites = await db('sites').where({ company_id: req.user.company_id }).select('client_id').count({ n: 'id' }).groupBy('client_id');
   const sc = new Map((sites as { client_id: number; n: number }[]).map((s) => [s.client_id, Number(s.n)]));
-  return rows.map((r: Record<string, unknown>) => ({ ...row(r, ['data']), sites: sc.get(r.id as number) ?? 0 }));
+  return rows.map((r: Record<string, any>) => stripHidden(req.user.roleDef, 'client', { ...withCustom(r), sites: sc.get(r.id) ?? 0 }));
 }));
-core.post('/clients', allow('clients'), h(async (req) => {
-  const c = cleanClient(clientSchema.parse(req.body));
+core.post('/clients', allow('client.create'), h(async (req) => {
+  const c = normaliseClient(await cleanWrite(req.user.company_id, req.user.roleDef, 'client', clientSchema.parse(req.body), { creating: true }));
   const dup = await db('clients').where({ company_id: req.user.company_id }).andWhere((w) => {
-    w.whereRaw('LOWER(name) = ?', [c.name.toLowerCase()]); if (c.gstin) w.orWhere('gstin', c.gstin);
+    w.whereRaw('LOWER(name) = ?', [String(c.name).toLowerCase()]); if (c.gstin) w.orWhere('gstin', c.gstin);
   }).first();
   if (dup && !req.query.force) throw new HttpError(409, `A client "${dup.name}" with the same name or GSTIN already exists`);
-  const id = await insert(db, 'clients', { ...c, company_id: req.user.company_id, created_at: now() });
+  const { rest, cu } = split(c);
+  const id = await insert(db, 'clients', { ...rest, data: toJson(mergeCustom(null, cu)), company_id: req.user.company_id, created_at: now() });
   await audit(db, req.user, 'client', id, 'created', { name: c.name });
   return { id };
 }));
-core.get('/clients/:id', h(async (req) => {
-  const cid = req.user.company_id, id = Number(req.params.id);
-  const c = row(await db('clients').where({ id, company_id: cid }).first(), ['data']);
-  if (!c) throw new HttpError(404, 'Client not found');
+core.get('/clients/:id', allow('client.read'), h(async (req) => {
+  const cid = req.user.company_id, id = Number(req.params.id), role = req.user.roleDef;
+  const raw = await db('clients').where({ id, company_id: cid }).first();
+  if (!raw) throw new HttpError(404, 'Client not found');
+  const c = stripHidden(role, 'client', withCustom(raw));
   const [sites, contacts, docs, workOrders, samples, led] = await Promise.all([
     db('sites').where({ client_id: id, company_id: cid }).orderBy('name'),
     db('contacts').where({ client_id: id, company_id: cid }).orderBy('name'),
-    db('documents').where({ client_id: id, company_id: cid }).orderBy('id', 'desc').select('id', 'kind', 'number', 'status', 'date', 'total', 'site_id'),
+    db('documents').where({ client_id: id, company_id: cid }).orderBy('id', 'desc').select('id', 'kind', 'number', 'status', 'date', 'total', 'site_id', 'accreditation'),
     db('work_orders').where({ client_id: id, company_id: cid }).orderBy('id', 'desc'),
-    db('samples').where({ client_id: id, company_id: cid }).orderBy('id', 'desc').select('id', 'code', 'material', 'received_date', 'status', 'site_id'),
+    db('samples').where({ client_id: id, company_id: cid }).orderBy('id', 'desc').select('id', 'code', 'material', 'received_date', 'status', 'site_id', 'accreditation'),
     ledger(cid, id),
   ]);
   const timeline = await db('audit_log').where({ company_id: cid }).andWhere((w) => {
@@ -119,36 +165,66 @@ core.get('/clients/:id', h(async (req) => {
       .orWhere((x) => x.where('entity', 'sample').whereIn('entity_id', samples.map((s) => s.id)));
   }).orderBy('id', 'desc').limit(50);
   const users = new Map((await db('users').where({ company_id: cid }).select('id', 'name')).map((u) => [u.id, u.name]));
-  return { ...c, sites, contacts: contacts.map((x) => row(x, ['receives'])), documents: docs.map((d) => ({ ...d, total: Number(d.total) })), workOrders, samples, ledger: led,
+  return { ...c, sites: sites.map((x) => stripHidden(role, 'site', withCustom(x))), contacts: contacts.map((x) => stripHidden(role, 'contact', withCustom(x, ['data', 'receives']))),
+    documents: docs.map((d) => ({ ...d, total: Number(d.total) })), workOrders, samples, ledger: led,
     timeline: timeline.map((t) => ({ ...row(t, ['detail']), user: users.get(t.user_id) })) };
 }));
-core.put('/clients/:id', allow('clients'), h(async (req) => {
-  const c = cleanClient(clientSchema.partial().extend({ name: z.string().min(1) }).parse(req.body) as z.infer<typeof clientSchema>);
-  await db('clients').where({ id: Number(req.params.id), company_id: req.user.company_id }).update(c);
-  await audit(db, req.user, 'client', Number(req.params.id), 'updated');
+core.put('/clients/:id', allow('client.edit'), h(async (req) => {
+  const id = Number(req.params.id);
+  const ex = await db('clients').where({ id, company_id: req.user.company_id }).first();
+  if (!ex) throw new HttpError(404, 'Client not found');
+  const c = normaliseClient(await cleanWrite(req.user.company_id, req.user.roleDef, 'client', clientSchema.partial().parse(req.body), { creating: false }));
+  const { rest, cu } = split(c);
+  await db('clients').where({ id }).update({ ...rest, data: toJson(mergeCustom(ex.data, cu)) });
+  await audit(db, req.user, 'client', id, 'updated', { fields: Object.keys(rest) });
+  return { ok: true };
+}));
+core.delete('/clients/:id', allow('client.delete'), h(async (req) => {
+  const id = Number(req.params.id), cid = req.user.company_id;
+  const used = await db('documents').where({ client_id: id, company_id: cid }).first() || await db('samples').where({ client_id: id, company_id: cid }).first();
+  if (used) throw new HttpError(409, 'This client has quotations, samples or invoices and cannot be deleted');
+  await db('contacts').where({ client_id: id, company_id: cid }).delete();
+  await db('sites').where({ client_id: id, company_id: cid }).delete();
+  await db('clients').where({ id, company_id: cid }).delete();
+  await audit(db, req.user, 'client', id, 'deleted');
   return { ok: true };
 }));
 
-const siteSchema = z.object({ name: z.string().min(1), address: z.string().optional().nullable(), project: z.string().optional().nullable(), po_number: z.string().optional().nullable(), state_code: z.string().optional().nullable() });
-core.post('/clients/:id/sites', allow('clients'), h(async (req) => {
-  const s = siteSchema.parse(req.body);
-  const id = await insert(db, 'sites', { ...s, client_id: Number(req.params.id), company_id: req.user.company_id, created_at: now() });
-  await audit(db, req.user, 'client', Number(req.params.id), 'site added', { site: s.name });
+const siteSchema = z.object({ name: z.string().min(1), address: z.string().optional().nullable(), project: z.string().optional().nullable(), po_number: z.string().optional().nullable(), state_code: z.string().optional().nullable(), custom });
+core.post('/clients/:id/sites', allow('client.edit'), h(async (req) => {
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'site', siteSchema.parse(req.body), { creating: true }));
+  const id = await insert(db, 'sites', { ...rest, data: toJson(mergeCustom(null, cu)), client_id: Number(req.params.id), company_id: req.user.company_id, created_at: now() });
+  await audit(db, req.user, 'client', Number(req.params.id), 'site added', { site: rest.name });
   return { id };
 }));
-core.put('/sites/:id', allow('clients'), h(async (req) => {
-  await db('sites').where({ id: Number(req.params.id), company_id: req.user.company_id }).update(siteSchema.partial().parse(req.body));
+core.put('/sites/:id', allow('client.edit'), h(async (req) => {
+  const ex = await db('sites').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
+  if (!ex) throw new HttpError(404, 'Site not found');
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'site', siteSchema.partial().parse(req.body), { creating: false }));
+  await db('sites').where({ id: ex.id }).update({ ...rest, data: toJson(mergeCustom(ex.data, cu)) });
   return { ok: true };
 }));
-const contactSchema = z.object({ name: z.string().min(1), role: z.string().optional().nullable(), phone: z.string().optional().nullable(), email: z.string().optional().nullable(), site_id: z.number().optional().nullable(), receives: z.array(z.string()).optional() });
-core.post('/clients/:id/contacts', allow('clients'), h(async (req) => {
-  const c = contactSchema.parse(req.body);
-  const id = await insert(db, 'contacts', { ...c, receives: toJson(c.receives ?? []), client_id: Number(req.params.id), company_id: req.user.company_id, created_at: now() });
+core.delete('/sites/:id', allow('client.delete'), h(async (req) => {
+  const id = Number(req.params.id), cid = req.user.company_id;
+  if (await db('samples').where({ site_id: id, company_id: cid }).first() || await db('documents').where({ site_id: id, company_id: cid }).first()) throw new HttpError(409, 'This site is used on samples or documents');
+  await db('sites').where({ id, company_id: cid }).delete();
+  return { ok: true };
+}));
+const contactSchema = z.object({ name: z.string().min(1), role: z.string().optional().nullable(), phone: z.string().optional().nullable(), email: z.string().optional().nullable(), site_id: z.coerce.number().optional().nullable(), receives: z.array(z.string()).optional(), custom });
+core.post('/clients/:id/contacts', allow('client.edit'), h(async (req) => {
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'contact', contactSchema.parse(req.body), { creating: true }));
+  const id = await insert(db, 'contacts', { ...rest, site_id: rest.site_id || null, receives: toJson(rest.receives ?? []), data: toJson(mergeCustom(null, cu)), client_id: Number(req.params.id), company_id: req.user.company_id, created_at: now() });
   return { id };
 }));
-core.put('/contacts/:id', allow('clients'), h(async (req) => {
-  const c = contactSchema.partial().parse(req.body);
-  await db('contacts').where({ id: Number(req.params.id), company_id: req.user.company_id }).update({ ...c, ...(c.receives ? { receives: toJson(c.receives) } : {}) });
+core.put('/contacts/:id', allow('client.edit'), h(async (req) => {
+  const ex = await db('contacts').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
+  if (!ex) throw new HttpError(404, 'Contact not found');
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'contact', contactSchema.partial().parse(req.body), { creating: false }));
+  await db('contacts').where({ id: ex.id }).update({ ...rest, ...(rest.receives ? { receives: toJson(rest.receives) } : {}), ...('site_id' in rest ? { site_id: rest.site_id || null } : {}), data: toJson(mergeCustom(ex.data, cu)) });
+  return { ok: true };
+}));
+core.delete('/contacts/:id', allow('client.edit'), h(async (req) => {
+  await db('contacts').where({ id: Number(req.params.id), company_id: req.user.company_id }).delete();
   return { ok: true };
 }));
 
@@ -156,42 +232,60 @@ core.put('/contacts/:id', allow('clients'), h(async (req) => {
 const catSchema = z.object({
   code: z.string().optional().nullable(), material: z.string().optional().nullable(), billing_name: z.string().min(1),
   report_name: z.string().optional().nullable(), method: z.string().optional().nullable(), nabl: z.boolean().optional(),
-  unit: z.string().optional().nullable(), rate: z.number().optional(), sac: z.string().optional().nullable(), gst_rate: z.number().optional(),
+  unit: z.string().optional().nullable(), rate: z.coerce.number().optional(), sac: z.string().optional().nullable(), gst_rate: z.coerce.number().optional(),
   conditions: z.string().optional().nullable(), report_notes: z.string().optional().nullable(), obs_template_code: z.string().optional().nullable(),
-  tat_days: z.number().optional().nullable(), active: z.boolean().optional(),
+  tat_days: z.coerce.number().optional().nullable(), active: z.boolean().optional(), custom,
 });
-core.get('/catalog', h(async (req) => (await db('catalog').where({ company_id: req.user.company_id }).orderBy(['material', 'billing_name'])).map((r) => row(r, []))));
-core.post('/catalog', allow('catalog'), h(async (req) => {
+core.get('/catalog', h(async (req) => (await db('catalog').where({ company_id: req.user.company_id }).orderBy(['material', 'billing_name']))
+  .map((r: Record<string, any>) => stripHidden(req.user.roleDef, 'catalog', withCustom(r)))));
+core.post('/catalog', allow('catalog.create'), h(async (req) => {
   const items = Array.isArray(req.body) ? req.body : [req.body];
   const ids: number[] = [];
-  for (const it of items) ids.push(await insert(db, 'catalog', { ...catSchema.parse(it), company_id: req.user.company_id, created_at: now() }));
+  for (const it of items) {
+    const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'catalog', catSchema.parse(it), { creating: true }));
+    ids.push(await insert(db, 'catalog', { ...rest, data: toJson(mergeCustom(null, cu)), company_id: req.user.company_id, created_at: now() }));
+  }
   await audit(db, req.user, 'catalog', ids[0], items.length > 1 ? `imported ${items.length} items` : 'created');
   return { ids };
 }));
-core.put('/catalog/:id', allow('catalog'), h(async (req) => {
+core.put('/catalog/:id', allow('catalog.edit'), h(async (req) => {
   const before = await db('catalog').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
-  const patch = catSchema.partial().parse(req.body);
-  await db('catalog').where({ id: Number(req.params.id), company_id: req.user.company_id }).update(patch);
-  if (patch.rate !== undefined && before && Number(before.rate) !== patch.rate) await audit(db, req.user, 'catalog', Number(req.params.id), 'rate changed', { from: Number(before.rate), to: patch.rate });
+  if (!before) throw new HttpError(404, 'Item not found');
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'catalog', catSchema.partial().parse(req.body), { creating: false }));
+  await db('catalog').where({ id: before.id }).update({ ...rest, data: toJson(mergeCustom(before.data, cu)) });
+  if (rest.rate !== undefined && Number(before.rate) !== rest.rate) await audit(db, req.user, 'catalog', before.id, 'rate changed', { from: Number(before.rate), to: rest.rate });
+  return { ok: true };
+}));
+core.delete('/catalog/:id', allow('catalog.delete'), h(async (req) => {
+  const id = Number(req.params.id), cid = req.user.company_id;
+  if (await db('tests').where({ catalog_id: id, company_id: cid }).first()) { await db('catalog').where({ id, company_id: cid }).update({ active: false }); return { ok: true, deactivated: true }; }
+  await db('catalog').where({ id, company_id: cid }).delete();
   return { ok: true };
 }));
 
 // ---------- equipment ----------
 const eqSchema = z.object({
   name: z.string().min(1), category: z.string().optional().nullable(), id_no: z.string().optional().nullable(), make: z.string().optional().nullable(),
-  data: z.record(z.any()).optional(), cert_no: z.string().optional().nullable(), cal_date: z.string().optional().nullable(), due_date: z.string().optional().nullable(), active: z.boolean().optional(),
+  data: z.record(z.any()).optional(), cert_no: z.string().optional().nullable(), cal_date: z.string().optional().nullable(), due_date: z.string().optional().nullable(), active: z.boolean().optional(), custom,
 });
-core.get('/equipment', h(async (req) => (await db('equipment').where({ company_id: req.user.company_id }).orderBy('name')).map((r) => row(r, ['data']))));
-core.post('/equipment', allow('equipment'), h(async (req) => {
-  const e = eqSchema.parse(req.body);
-  const id = await insert(db, 'equipment', { ...e, data: toJson(e.data ?? {}), company_id: req.user.company_id, created_at: now() });
-  await audit(db, req.user, 'equipment', id, 'created', { name: e.name });
+core.get('/equipment', h(async (req) => (await db('equipment').where({ company_id: req.user.company_id }).orderBy('name')).map((r: Record<string, any>) => withCustom(r))));
+core.post('/equipment', allow('equipment.create'), h(async (req) => {
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'equipment', eqSchema.parse(req.body), { creating: true }));
+  const id = await insert(db, 'equipment', { ...rest, data: toJson({ ...(rest.data ?? {}), custom: cu ?? {} }), company_id: req.user.company_id, created_at: now() });
+  await audit(db, req.user, 'equipment', id, 'created', { name: rest.name });
   return { id };
 }));
-core.put('/equipment/:id', allow('equipment'), h(async (req) => {
-  const e = eqSchema.partial().parse(req.body);
-  await db('equipment').where({ id: Number(req.params.id), company_id: req.user.company_id }).update({ ...e, ...(e.data ? { data: toJson(e.data) } : {}) });
-  await audit(db, req.user, 'equipment', Number(req.params.id), 'updated', e);
+core.put('/equipment/:id', allow('equipment.edit'), h(async (req) => {
+  const ex = await db('equipment').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
+  if (!ex) throw new HttpError(404, 'Equipment not found');
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'equipment', eqSchema.partial().parse(req.body), { creating: false }));
+  const merged = mergeCustom(ex.data, cu);
+  await db('equipment').where({ id: ex.id }).update({ ...rest, data: toJson({ ...merged, ...(rest.data ?? {}), custom: merged.custom ?? {} }) });
+  await audit(db, req.user, 'equipment', ex.id, 'updated', rest);
+  return { ok: true };
+}));
+core.delete('/equipment/:id', allow('equipment.delete'), h(async (req) => {
+  await db('equipment').where({ id: Number(req.params.id), company_id: req.user.company_id }).update({ active: false });
   return { ok: true };
 }));
 

@@ -1,13 +1,19 @@
 import { notifications } from '@mantine/notifications';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
+/** In-memory cache: screens open instantly from cache and refresh in the background. */
+const cache = new Map<string, { at: number; data: unknown }>();
+const listeners = new Set<() => void>();
+export const invalidate = () => { cache.clear(); listeners.forEach((l) => l()); };
+
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; quiet?: boolean } = {}): Promise<T> {
+  const method = opts.method ?? (opts.body !== undefined ? 'POST' : 'GET');
   const r = await fetch(`/api${path}`, {
-    method: opts.method ?? (opts.body ? 'POST' : 'GET'),
-    headers: opts.body ? { 'content-type': 'application/json' } : undefined,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    method,
+    headers: opts.body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     credentials: 'same-origin',
   });
   let j: any = null;
@@ -18,26 +24,33 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
     if (!opts.quiet) notifications.show({ color: 'red', title: 'Could not complete', message: msg });
     throw new ApiError(r.status, msg);
   }
+  if (method === 'GET') cache.set(path, { at: Date.now(), data: j });
+  else if (!path.startsWith('/ai/') && !path.startsWith('/analytics/')) invalidate();
   return j as T;
 }
 
-export const ok = (message: string) => notifications.show({ color: 'teal', message });
+export const ok = (message: string) => notifications.show({ color: 'teal', message, autoClose: 2500 });
 
-/** Load data from the API with reload support. */
+/** Load data with stale-while-revalidate caching. */
 export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<T | null>(() => (path ? (cache.get(path)?.data as T) ?? null : null));
+  const [loading, setLoading] = useState(!data);
+  const live = useRef(true);
   const load = useCallback(async () => {
     if (!path) { setLoading(false); return; }
-    setLoading(true);
-    try { setData(await api<T>(path)); } catch { /* shown */ } finally { setLoading(false); }
+    const hit = cache.get(path);
+    if (hit) setData(hit.data as T);
+    if (!hit) setLoading(true);
+    try { const d = await api<T>(path, { quiet: !!hit }); if (live.current) setData(d); } catch { /* shown */ } finally { if (live.current) setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, ...deps]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { live.current = true; load(); return () => { live.current = false; }; }, [load]);
+  useEffect(() => { const l = () => { load(); }; listeners.add(l); return () => { listeners.delete(l); }; }, [load]);
   return { data, loading, reload: load, setData };
 }
 
 export const money = (n?: number | null, d = 0) => (n === null || n === undefined || isNaN(Number(n)) ? '' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }));
+export const compact = (n: number) => (Math.abs(n) >= 1e7 ? `${(n / 1e7).toFixed(2)} Cr` : Math.abs(n) >= 1e5 ? `${(n / 1e5).toFixed(2)} L` : Math.abs(n) >= 1e3 ? `${(n / 1e3).toFixed(1)} K` : String(Math.round(n)));
 export const dmy = (d?: string | null) => (d ? `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}` : '');
 export const localToday = () => new Date().toLocaleDateString('en-CA');
 

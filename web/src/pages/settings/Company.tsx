@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert } from '@mantine/core';
+import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor } from '@mantine/core';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
@@ -32,7 +32,7 @@ export function CompanySettings() {
     <>
       <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={<Button onClick={save}>Save settings</Button>} />
       <Tabs defaultValue="profile">
-        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="email">Email</Tabs.Tab></Tabs.List>
+        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="email">Email</Tabs.Tab></Tabs.List>
         <Tabs.Panel value="profile">
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
@@ -73,6 +73,34 @@ export function CompanySettings() {
           <Textarea mt="sm" label="Standard report notes (one per line, added to every report after test-specific notes)" autosize minRows={4} value={v.defaults?.reportNotes ?? ''} onChange={(e) => set('defaults.reportNotes', e.currentTarget.value)} />
           <Switch mt="md" label="Allow a person to review observations they entered (not recommended for ISO 17025)" checked={!!v.defaults?.allowSelfReview} onChange={(e) => set('defaults.allowSelfReview', e.currentTarget.checked)} />
         </Tabs.Panel>
+        <Tabs.Panel value="letterheads">
+          <Alert variant="light" mb="sm">Every quote, invoice and report has a Report type. NABL documents print with the NABL letterhead, the rest with the standard one. Use the designed header (logo, name, CIN, GSTIN and, for NABL, the accreditation symbol and certificate number) or upload your own header and footer images.</Alert>
+          <SimpleGrid cols={{ base: 1, md: 2 }}>
+            {(['nabl', 'standard'] as const).map((k) => {
+              const lh = v.letterheads?.[k] ?? { mode: 'designed', showAccreditation: k === 'nabl' };
+              const setLh = (patch: any) => set(`letterheads.${k}`, { ...lh, ...patch });
+              return (
+                <Paper key={k} withBorder p="md">
+                  <Text fw={650} mb="xs">{k === 'nabl' ? 'NABL letterhead' : 'Standard (Non-NABL) letterhead'}</Text>
+                  <SegmentedControl fullWidth mb="sm" value={lh.mode} onChange={(m) => setLh({ mode: m })} data={[{ value: 'designed', label: 'Designed header' }, { value: 'image', label: 'Upload images' }]} />
+                  {lh.mode === 'designed'
+                    ? <Switch label="Show accreditation symbol and certificate number" checked={lh.showAccreditation !== false} onChange={(e) => setLh({ showAccreditation: e.currentTarget.checked })} />
+                    : <Stack gap="xs">
+                        {(['headerImage', 'footerImage'] as const).map((f) => (
+                          <div key={f}>
+                            <Text size="sm" fw={500}>{f === 'headerImage' ? 'Header image (full width)' : 'Footer image (full width)'}</Text>
+                            {lh[f] ? <Image src={lh[f]} mah={80} fit="contain" my={4} /> : <Text size="xs" c="dimmed">Not uploaded</Text>}
+                            <Group gap="xs"><FileButton accept="image/png,image/jpeg" onChange={async (file) => file && setLh({ [f]: await fileToDataUrl(file, 1800) })}>{(p) => <Button size="xs" variant="light" {...p}>Upload</Button>}</FileButton>
+                              {lh[f] && <Button size="xs" variant="subtle" color="red" onClick={() => setLh({ [f]: null })}>Remove</Button>}</Group>
+                          </div>
+                        ))}
+                      </Stack>}
+                </Paper>
+              );
+            })}
+          </SimpleGrid>
+        </Tabs.Panel>
+        <Tabs.Panel value="ai"><AiSettings v={v} set={set} /></Tabs.Panel>
         <Tabs.Panel value="email">
           <Alert variant="light" mb="sm">Documents are emailed from your own mailbox. For Gmail use host smtp.gmail.com, port 465 and an App Password. For cPanel mail use mail.yourdomain.com. The password itself is set as SMTP_PASSWORD in the hosting environment, never stored here.</Alert>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
@@ -83,5 +111,41 @@ export function CompanySettings() {
         </Tabs.Panel>
       </Tabs>
     </>
+  );
+}
+
+const PROVIDERS: { value: string; label: string; baseUrl: string; model: string; note: string; key: boolean }[] = [
+  { value: 'gemini', label: 'Google Gemini (free tier)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-flash-latest', note: 'Free API key from aistudio.google.com. “-latest” model names follow Google’s newest release.', key: true },
+  { value: 'groq', label: 'Groq (free tier)', baseUrl: 'https://api.groq.com/openai/v1', model: '', note: 'Free key at console.groq.com; copy a current model name from its Models page.', key: true },
+  { value: 'openrouter', label: 'OpenRouter (free models)', baseUrl: 'https://openrouter.ai/api/v1', model: '', note: 'Key at openrouter.ai; pick any model ending in “:free”.', key: true },
+  { value: 'ollama', label: 'Ollama on this computer (free, private)', baseUrl: 'http://localhost:11434/v1', model: '', note: 'Install Ollama, run e.g. “ollama pull <model>”, then enter that model name. No key, nothing leaves your network.', key: false },
+  { value: 'anthropic', label: 'Anthropic Claude', baseUrl: 'https://api.anthropic.com', model: 'claude-haiku-5-5', note: 'Paid API key from console.anthropic.com.', key: true },
+  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: '', note: 'Paid API key from platform.openai.com.', key: true },
+  { value: 'custom', label: 'Other (OpenAI-compatible)', baseUrl: '', model: '', note: 'Any service with an OpenAI-compatible /chat/completions endpoint.', key: true },
+];
+
+function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void }) {
+  const ai = v.ai ?? {};
+  const prov = PROVIDERS.find((p) => p.value === ai.provider);
+  const [test, setTest] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const runTest = async () => {
+    setBusy(true); setTest('');
+    try { const r = await api<any>('/ai/test', { body: { provider: ai.provider === 'anthropic' ? 'anthropic' : 'openai', baseUrl: ai.baseUrl, model: ai.model, apiKey: ai.apiKey } , quiet: true }); setTest(`✓ Connected in ${r.ms} ms`); }
+    catch (e: any) { setTest(`✗ ${e.message}`); } finally { setBusy(false); }
+  };
+  return (
+    <Stack maw={720}>
+      <Alert variant="light">The AI assistant answers business questions (“revenue from DAMAC Hills this year”), drafts report remarks and turns client enquiries into quotation lines. Without a model it still answers common questions with the built-in assistant. Questions are sent to the provider you choose; for full privacy use Ollama on your own computer.</Alert>
+      <Switch label="Use an AI model" checked={!!ai.enabled} onChange={(e) => set('ai', { ...ai, enabled: e.currentTarget.checked })} />
+      <Select label="Provider" data={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))} value={ai.provider ?? null}
+        onChange={(x) => { const p = PROVIDERS.find((q) => q.value === x)!; set('ai', { ...ai, provider: x, baseUrl: p.baseUrl, model: p.model || ai.model || '' }); }} />
+      {prov && <Text size="xs" c="dimmed">{prov.note}</Text>}
+      <TextInput label="API base URL" value={ai.baseUrl ?? ''} onChange={(e) => set('ai', { ...ai, baseUrl: e.currentTarget.value })} />
+      <TextInput label="Model name" description="Change this whenever the provider releases a newer model – no update to the app needed." value={ai.model ?? ''} onChange={(e) => set('ai', { ...ai, model: e.currentTarget.value })} />
+      {(!prov || prov.key) && <PasswordInput label="API key" placeholder={ai.hasKey ? 'Saved – leave blank to keep' : 'Paste the key'} value={ai.apiKey ?? ''} onChange={(e) => set('ai', { ...ai, apiKey: e.currentTarget.value })} />}
+      <Group><Button variant="default" loading={busy} onClick={runTest} disabled={!ai.model}>Test connection</Button><Text size="sm" c={test.startsWith('✓') ? 'teal' : 'red'}>{test}</Text></Group>
+      <Text size="xs" c="dimmed">Remember to click “Save settings” at the top. The key is stored on your server and never shown again in the browser. <Anchor href="https://aistudio.google.com/apikey" target="_blank" size="xs">Get a free Gemini key</Anchor></Text>
+    </Stack>
   );
 }

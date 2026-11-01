@@ -3,18 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview" },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
     "@mantine/core": "^7.13.0",
+    "@mantine/dates": "^7.17.8",
     "@mantine/hooks": "^7.13.0",
     "@mantine/notifications": "^7.13.0",
+    "@mantine/spotlight": "^7.17.8",
     "@tabler/icons-react": "^3.19.0",
     "dayjs": "^1.11.13",
     "html-to-image": "^1.11.11",
     "jspdf": "^2.5.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.27.0"
+    "react-router-dom": "^6.27.0",
+    "recharts": "^2.15.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.11",

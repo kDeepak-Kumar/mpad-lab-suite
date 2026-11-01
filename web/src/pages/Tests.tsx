@@ -5,13 +5,15 @@ import { IconAlertTriangle, IconPrinter } from '@tabler/icons-react';
 import { emptyInput, evaluateObservation, formatValue, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
+import { useCan, isAdmin } from '../ctx';
+import { ListView } from '../components/ListView';
 import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui';
 import { LineChart } from '../doc/Chart';
 
 export function TestsPage() {
   const me = useMe();
   const [sp, setSp] = useSearchParams();
-  const tab = sp.get('tab') ?? (me.user.role === 'technician' ? 'mine' : hasRole(me, 'reviewer') && me.user.role !== 'owner' ? 'review' : 'open');
+  const tab = sp.get('tab') ?? (me.user.role === 'technician' ? 'mine' : ['reviewer', 'signatory'].includes(me.user.role) ? 'review' : 'open');
   const q = tab === 'mine' ? '?mine=1&status=pending,in_progress,returned' : tab === 'open' ? '?status=pending,in_progress,returned' : tab === 'review' ? '?status=submitted' : tab === 'accepted' ? '?status=accepted' : '';
   const { data } = useApi<any[]>(`/tests${q}`, [tab]);
   const nav = useNavigate();
@@ -22,10 +24,12 @@ export function TestsPage() {
       <Tabs value={tab} onChange={(t) => setSp({ tab: t ?? 'open' })} mb="sm">
         <Tabs.List><Tabs.Tab value="mine">My tests</Tabs.Tab><Tabs.Tab value="open">All open</Tabs.Tab><Tabs.Tab value="review">To review</Tabs.Tab><Tabs.Tab value="accepted">Accepted</Tabs.Tab><Tabs.Tab value="all">All</Tabs.Tab></Tabs.List>
       </Tabs>
-      <SimpleTable head={['Test', 'Job code', 'Client', 'Assigned', 'Due', 'Status']}
-        rows={(data ?? []).map((t) => [<Text size="sm" fw={500}>{t.report_name || t.billing_name}</Text>, t.sample_code, t.client_name, t.assignee ?? <Text size="xs" c="dimmed">Unassigned</Text>,
-          <Text size="sm" c={t.due_date && t.due_date < today && ['pending', 'in_progress', 'returned'].includes(t.status) ? 'red' : undefined}>{dmy(t.due_date)}</Text>, <StatusBadge status={t.status} />])}
-        onRow={(i) => nav(`/tests/${data![i].id}`)} />
+      <ListView id={`tests-${tab}`} rows={data} onRow={(t) => nav(`/tests/${t.id}`)} columns={[
+        { key: 'test', label: 'Test', value: (t) => t.report_name || t.billing_name, render: (t) => <Text size="sm" fw={550}>{t.report_name || t.billing_name}</Text>, filter: 'select' },
+        { key: 'sample_code', label: 'Job code' }, { key: 'accreditation', label: 'Type', type: 'badge' }, { key: 'client_name', label: 'Client', filter: 'select' },
+        { key: 'assignee', label: 'Assigned', filter: 'select' },
+        { key: 'due_date', label: 'Due', type: 'date', render: (t) => <Text size="sm" c={t.due_date && t.due_date < today && ['pending', 'in_progress', 'returned'].includes(t.status) ? 'red' : undefined}>{dmy(t.due_date)}</Text> },
+        { key: 'status', label: 'Status', type: 'status' }]} />
     </>
   );
 }
@@ -33,6 +37,8 @@ export function TestsPage() {
 export function TestSheetPage() {
   const { id } = useParams();
   const me = useMe();
+  const can = useCan();
+  const admin = isAdmin(me as never);
   const nav = useNavigate();
   const { data: t, reload } = useApi<any>(`/tests/${id}`, [id]);
   const [obs, setObs] = useState<ObservationInput | null>(null);
@@ -65,8 +71,8 @@ export function TestSheetPage() {
   }, [tpl, obs, t]);
 
   if (!t || !obs || !tpl || !result) return <Loading />;
-  const editable = ['pending', 'in_progress', 'returned'].includes(t.status) && hasRole(me, 'technician', 'reviewer');
-  const canReview = t.status === 'submitted' && hasRole(me, 'reviewer', 'signatory');
+  const editable = (['pending', 'in_progress', 'returned'].includes(t.status) && can('enterObservations')) || (admin && t.status !== 'reported');
+  const canReview = (t.status === 'submitted' || (admin && ['in_progress', 'returned'].includes(t.status))) && can('reviewTests');
   const setHeader = (k: string, v: any) => { setObs({ ...obs, header: { ...obs.header, [k]: v } }); setDirty(true); };
   const setCell = (g: string, i: number, k: string, v: string) => {
     const rows = [...(obs.grids[g] ?? [])]; rows[i] = { ...rows[i], [k]: v === '' ? null : isNaN(Number(v)) ? v : Number(v) };
@@ -84,6 +90,7 @@ export function TestSheetPage() {
     await api(`/tests/${t.id}/submit`, { method: 'POST' }); ok('Submitted for review'); reload();
   };
   const review = async (action: 'accept' | 'return', note?: string) => {
+    if (dirty) await save();
     await api(`/tests/${t.id}/review`, { body: { action, note } }); ok(action === 'accept' ? 'Accepted – ready for the report' : 'Returned to the technician'); reload();
   };
   const errors = result.checks.filter((c) => c.level === 'error');
@@ -96,10 +103,10 @@ export function TestSheetPage() {
         actions={<>
           <Button variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print sheet</Button>
           {editable && <Button variant="default" loading={busy} disabled={!dirty} onClick={() => (t.status === 'returned' ? setReasonOpen(true) : save())}>Save</Button>}
-          {editable && <Button loading={busy} disabled={errors.length > 0} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button>}
+          {editable && ['pending', 'in_progress', 'returned'].includes(t.status) && <Button loading={busy} disabled={errors.length > 0 && !admin} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button>}
           {canReview && <Button variant="default" color="red" onClick={() => setReturnOpen(true)}>Return for correction</Button>}
           {canReview && <Button color="teal" onClick={() => review('accept')}>Accept</Button>}
-          {t.status === 'accepted' && hasRole(me, 'reviewer') && <Button onClick={() => nav('/reports/prepare')}>Prepare report</Button>}
+          {t.status === 'accepted' && can('prepareReports') && <Button onClick={() => nav('/reports/prepare')}>Prepare report</Button>}
           {t.report_id && <Button variant="light" onClick={() => nav(`/documents/${t.report_id}`)}>Open report</Button>}
         </>} />
       {t.status === 'returned' && t.review_note && <Alert color="red" mb="sm" title={`Returned by ${t.reviewedBy ?? 'reviewer'}`}>{t.review_note}</Alert>}

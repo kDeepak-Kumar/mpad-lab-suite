@@ -3,7 +3,8 @@ import { z } from 'zod';
 import nodemailer from 'nodemailer';
 import { computeTotals, formatDate, stateName, type LineInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
-import { allow, can, h, HttpError } from '../auth';
+import { allow, can, h, HttpError, isAdmin } from '../auth';
+import { cleanWrite } from '../meta';
 import { audit, clientSnapshot, getCompany, getDocTemplate, ledger, nextNumber, paidAgainst, refreshInvoiceStatus, sha256 } from '../services';
 import { createWorkOrder } from './lab';
 
@@ -21,30 +22,35 @@ async function loadDoc(cid: number, id: number) {
 async function totalsFor(cid: number, data: Record<string, unknown>) {
   const company = await getCompany(cid);
   const lines = (data.lines ?? []) as LineInput[];
-  const mode = data.mode ?? 'estimate';
-  const t = computeTotals(lines.map((l) => ({ ...l, qty: mode === 'rate' ? 0 : l.qty })), {
+  const showQty = data.showQty ?? data.mode !== 'rate';
+  const includeGst = data.includeGst ?? true;
+  const t = computeTotals(lines.map((l) => ({ ...l, qty: showQty ? (l.qty ?? 1) : 0, gstRate: includeGst ? l.gstRate : 0 })), {
     supplierState: company.stateCode ?? '', placeOfSupply: String(data.placeOfSupply ?? company.stateCode ?? ''),
-    defaultGst: company.defaults?.gstRate ?? 18, overallDiscount: Number(data.overallDiscount ?? 0),
+    defaultGst: includeGst ? company.defaults?.gstRate ?? 18 : 0, overallDiscount: Number(data.overallDiscount ?? 0),
   });
   return t;
 }
 
 // ---------- list / get ----------
+const KINDS = ['quote', 'invoice', 'report'];
 finance.get('/documents', h(async (req) => {
   const cid = req.user.company_id;
+  const readable = KINDS.filter((k) => can(req.user, `${k}.read`));
   const q = db('documents as d').leftJoin('clients as c', 'c.id', 'd.client_id').leftJoin('sites as s', 's.id', 'd.site_id')
-    .where('d.company_id', cid).select('d.id', 'd.kind', 'd.number', 'd.status', 'd.date', 'd.total', 'd.client_id', 'd.site_id', 'd.work_order_id', 'd.revision', 'd.issued_at', 'c.name as client_name', 's.name as site_name');
+    .where('d.company_id', cid).select('d.id', 'd.kind', 'd.number', 'd.status', 'd.date', 'd.total', 'd.client_id', 'd.site_id', 'd.work_order_id', 'd.revision', 'd.issued_at', 'd.accreditation', 'c.name as client_name', 's.name as site_name');
+  q.whereIn('d.kind', readable);
   if (req.query.kind) q.andWhere('d.kind', String(req.query.kind));
   if (req.query.status) q.whereIn('d.status', String(req.query.status).split(','));
   if (req.query.client_id) q.andWhere('d.client_id', Number(req.query.client_id));
   if (req.query.q) q.andWhere((w) => w.whereLike('d.number', `%${req.query.q}%`).orWhereLike('c.name', `%${req.query.q}%`));
-  const rows = await q.orderBy('d.id', 'desc').limit(500);
+  const rows = await q.orderBy('d.id', 'desc').limit(5000);
   const paid = await paidAgainst(cid);
   return rows.map((r) => ({ ...r, total: Number(r.total), paid: r.kind === 'invoice' ? paid.get(r.id) ?? 0 : undefined }));
 }));
 finance.get('/documents/:id', h(async (req) => {
   const cid = req.user.company_id;
   const d = await loadDoc(cid, Number(req.params.id));
+  if (!can(req.user, `${d.kind}.read`)) throw new HttpError(403, 'Your role cannot open this document');
   const [company, tpl] = await Promise.all([getCompany(cid), getDocTemplate(cid, d.kind, d.template_id as number)]);
   const issuer = d.issued_by ? await db('users').where({ id: d.issued_by }).first('id', 'name', 'designation', 'qualifications', 'signature') : null;
   const paid = d.kind === 'invoice' ? (await paidAgainst(cid)).get(d.id) ?? 0 : undefined;
@@ -67,7 +73,7 @@ export async function createDocument(user: { company_id: number; id: number }, b
   const placeOfSupply = body.data.placeOfSupply || snap.client.stateCode || company.stateCode;
   const defaults = company.defaults ?? {};
   const data: Record<string, unknown> = {
-    mode: body.kind === 'quote' ? 'rate' : 'estimate', lines: [], customerRef: '', notes: '', overallDiscount: 0,
+    showQty: body.data.showQty ?? (body.data.mode ? body.data.mode !== 'rate' : body.kind !== 'quote'), includeGst: body.data.includeGst ?? (body.data.mode ? body.data.mode !== 'rate' : body.kind !== 'quote'), lines: [], customerRef: '', notes: '', overallDiscount: 0,
     copyLabel: body.kind === 'invoice' ? 'ORIGINAL COPY' : undefined, sac: defaults.sac ?? '998346', validityDays: defaults.validityDays ?? 30,
     ...body.data, ...snap, placeOfSupply, placeOfSupplyName: stateName(placeOfSupply),
   };
@@ -77,7 +83,7 @@ export async function createDocument(user: { company_id: number; id: number }, b
   return db.transaction(async (trx) => {
     const number = body.kind === 'quote' ? (await nextNumber(trx, cid, 'quote', { date, client: snap.client.shortCode })).number : null;
     const id = await insert(trx, 'documents', {
-      company_id: cid, kind: body.kind, number, status: 'draft', client_id: body.client_id, site_id: body.site_id ?? null, work_order_id: body.work_order_id ?? null,
+      company_id: cid, kind: body.kind, number, status: 'draft', accreditation: (data.accreditation as string) ?? null, client_id: body.client_id, site_id: body.site_id ?? null, work_order_id: body.work_order_id ?? null,
       date, data: toJson(data), overrides: toJson({}), template_id: tpl?.id ?? null, totals: toJson(totals), total: totals.total, created_by: user.id, created_at: now(), updated_at: now(),
     });
     await audit(trx, user as never, 'document', id, `${body.kind} created`, { number });
@@ -96,25 +102,53 @@ finance.put('/documents/:id', h(async (req) => {
   const body = z.object({
     data: z.record(z.any()).optional(), overrides: z.record(z.any()).optional(), template_id: z.number().nullable().optional(),
     client_id: z.number().optional(), site_id: z.number().nullable().optional(), contact_id: z.number().nullable().optional(), date: z.string().optional(),
+    number: z.string().nullable().optional(),
   }).parse(req.body);
-  const locked = ['issued', 'paid', 'partly_paid', 'cancelled'].includes(d.status) || (d.kind === 'quote' && d.status !== 'draft') || (d.kind === 'report' && d.status === 'verified');
-  if (locked && (body.data || body.client_id || body.date)) throw new HttpError(409, d.kind === 'quote' ? 'This quotation was already sent. Create a revision to change it.' : 'Issued documents cannot be changed. Use an amendment or credit note.');
+  const admin = isAdmin(req.user);
+  const issued = ['issued', 'paid', 'partly_paid', 'cancelled'].includes(d.status);
+  const locked = issued || (!admin && ((d.kind === 'quote' && d.status !== 'draft') || (d.kind === 'report' && d.status === 'verified')));
+  if (locked && (body.data || body.client_id || body.date || body.number !== undefined)) throw new HttpError(409, issued ? (admin ? 'Unlock the issued document first (System Admin).' : 'Issued documents cannot be changed. Use an amendment or credit note.') : 'This quotation was already sent. Create a revision to change it.');
   if (locked && body.overrides) throw new HttpError(409, 'Layout of an issued document is frozen');
   let data = { ...d.data, ...(body.data ?? {}) };
+  if (body.data?.custom) data.custom = (await cleanWrite(cid, req.user.roleDef, d.kind, { custom: body.data.custom }, { creating: false })).custom;
   if (body.client_id || body.site_id !== undefined || body.contact_id !== undefined) {
     const snap = await clientSnapshot(cid, body.client_id ?? d.client_id, body.site_id !== undefined ? body.site_id : (d.site_id as number), body.contact_id !== undefined ? body.contact_id : ((d.data.contact as { id?: number })?.id ?? null));
-    data = { ...data, ...snap };
+    // keep values the user unlocked and typed by hand
+    const unlocked = (data.unlocked ?? {}) as Record<string, boolean>;
+    const merged: Record<string, any> = { ...data, ...snap };
+    for (const part of ['client', 'site', 'contact'] as const) {
+      const before = (data as any)[part] ?? {};
+      for (const k of Object.keys(before)) if (unlocked[`${part}.${k}`]) merged[part] = { ...(merged[part] ?? {}), [k]: before[k] };
+    }
+    data = merged;
   }
-  if (data.placeOfSupply) data.placeOfSupplyName = stateName(String(data.placeOfSupply));
-  const patch: Record<string, unknown> = { data: toJson(data), updated_at: now() };
+  if (data.placeOfSupply && !(data.unlocked as any)?.placeOfSupplyName) data.placeOfSupplyName = stateName(String(data.placeOfSupply));
+  const patch: Record<string, unknown> = { data: toJson(data), updated_at: now(), accreditation: (data.accreditation as string) ?? null };
   if (d.kind !== 'report') { const t = await totalsFor(cid, data); patch.totals = toJson(t); patch.total = t.total; }
   if (body.overrides) patch.overrides = toJson(body.overrides);
   if (body.template_id !== undefined) patch.template_id = body.template_id;
   if (body.client_id) patch.client_id = body.client_id;
   if (body.site_id !== undefined) patch.site_id = body.site_id;
   if (body.date) patch.date = body.date;
+  if (body.number !== undefined && body.number !== d.number) {
+    const n = (body.number ?? '').trim() || null;
+    if (n) {
+      const clash = await db('documents').where({ company_id: cid, kind: d.kind, number: n }).whereNot({ id: d.id }).whereNot({ status: 'cancelled' }).first();
+      if (clash) throw new HttpError(409, `${n} is already used by another ${d.kind}`);
+    }
+    patch.number = n;
+    await audit(db, req.user, 'document', d.id, 'number changed manually', { from: d.number, to: n });
+  }
   await db('documents').where({ id: d.id }).update(patch);
   if (body.overrides && Object.keys(body.overrides).length) await audit(db, req.user, 'document', d.id, 'layout edited');
+  return { ok: true };
+}));
+finance.post('/documents/:id/unlock', h(async (req) => {
+  if (!isAdmin(req.user)) throw new HttpError(403, 'Only the System Administrator can unlock an issued document');
+  const d = await loadDoc(req.user.company_id, Number(req.params.id));
+  const { reason } = z.object({ reason: z.string().min(3, 'Give a reason') }).parse(req.body);
+  await db('documents').where({ id: d.id }).update({ status: 'draft', hash: null, updated_at: now() });
+  await audit(db, req.user, 'document', d.id, 'unlocked for editing by System Admin', { reason, previousStatus: d.status, number: d.number });
   return { ok: true };
 }));
 finance.delete('/documents/:id', h(async (req) => {
@@ -185,29 +219,32 @@ finance.post('/workorders/:id/invoice', allow('invoices'), h(async (req) => {
     lines = ((q.data.lines ?? []) as LineInput[]).map((l) => ({ ...l, qty: l.qty || 1 }));
   }
   if (!lines.length) throw new HttpError(400, 'Nothing left to bill on this work order (all accepted tests are already invoiced).');
-  return createDocument(req.user, { kind: 'invoice', client_id: wo.client_id, site_id: wo.site_id, work_order_id: wo.id, data: { lines, customerRef: wo.customer_ref ?? '' } });
+  const accs = [...new Set((await db('samples').where({ work_order_id: wo.id })).map((x) => x.accreditation).filter(Boolean))];
+  return createDocument(req.user, { kind: 'invoice', client_id: wo.client_id, site_id: wo.site_id, work_order_id: wo.id, data: { lines, customerRef: wo.customer_ref ?? '', accreditation: accs.length === 1 ? accs[0] : null } });
 }));
 finance.post('/documents/:id/to-invoice', allow('invoices'), h(async (req) => {
   const d = await loadDoc(req.user.company_id, Number(req.params.id));
   if (d.kind !== 'quote') throw new HttpError(400, 'Only quotations can be converted');
   const lines = ((d.data.lines ?? []) as LineInput[]).map((l) => ({ ...l, qty: l.qty || 1 }));
-  return createDocument(req.user, { kind: 'invoice', client_id: d.client_id, site_id: d.site_id as number, work_order_id: d.work_order_id as number, contact_id: (d.data.contact as { id?: number })?.id ?? null, data: { lines, customerRef: d.data.customerRef } });
+  return createDocument(req.user, { kind: 'invoice', client_id: d.client_id, site_id: d.site_id as number, work_order_id: d.work_order_id as number, contact_id: (d.data.contact as { id?: number })?.id ?? null, data: { lines, customerRef: d.data.customerRef, accreditation: d.data.accreditation } });
 }));
 
 // ---------- issue (invoice, report) ----------
 finance.post('/documents/:id/issue', h(async (req) => {
   const cid = req.user.company_id;
   const d = await loadDoc(cid, Number(req.params.id));
-  if (d.kind === 'invoice' && !can(req.user, 'invoices')) throw new HttpError(403, 'Your role does not allow issuing invoices');
-  if (d.kind === 'report' && !can(req.user, 'reportIssue')) throw new HttpError(403, 'Only an authorised signatory can sign and issue reports');
+  const admin = isAdmin(req.user);
+  if (d.kind === 'invoice' && !can(req.user, 'issueInvoices')) throw new HttpError(403, 'Your role does not allow issuing invoices');
+  if (d.kind === 'report' && !can(req.user, 'signReports')) throw new HttpError(403, 'Only an authorised signatory can sign and issue reports');
   if (d.kind === 'invoice' && d.status !== 'draft') throw new HttpError(409, 'Invoice already issued');
-  if (d.kind === 'report' && d.status !== 'verified') throw new HttpError(409, 'Verify the report before signing and issuing it');
+  if (d.kind === 'report' && d.status !== 'verified' && !(admin && ['draft', 'review'].includes(d.status))) throw new HttpError(409, 'Verify the report before signing and issuing it');
   if (d.kind === 'invoice' && !((d.data.lines as unknown[]) ?? []).length) throw new HttpError(400, 'Add at least one line');
   return db.transaction(async (trx) => {
-    const date = today();
+    const unlocked = (d.data.unlocked ?? {}) as Record<string, boolean>;
+    const date = unlocked.date ? String(d.date) : today();
     const client = await trx('clients').where({ id: d.client_id }).first();
-    const { number } = await nextNumber(trx, cid, d.kind, { date, client: client?.short_code, material: String(d.data.material ?? '') });
-    const data = { ...d.data, issueText: formatDate(date), dateText: formatDate(date) };
+    const number = d.number ? String(d.number) : (await nextNumber(trx, cid, d.kind, { date, client: client?.short_code, material: String(d.data.material ?? '') })).number;
+    const data = { ...d.data, issueText: unlocked.issueText ? d.data.issueText : formatDate(date), dateText: unlocked.dateText ? d.data.dateText : formatDate(date) };
     const hash = sha256({ data, overrides: d.overrides, template: d.template_id });
     await trx('documents').where({ id: d.id }).update({ number, date, status: 'issued', data: toJson(data), issued_at: now(), issued_by: req.user.id, hash, updated_at: now() });
     if (d.kind === 'report') {
@@ -252,7 +289,7 @@ finance.post('/documents/:id/email', h(async (req) => {
 }));
 
 // ---------- payments & ledger ----------
-finance.get('/payments', h(async (req) => db('payments as p').leftJoin('clients as c', 'c.id', 'p.client_id').where('p.company_id', req.user.company_id)
+finance.get('/payments', allow('payment.read'), h(async (req) => db('payments as p').leftJoin('clients as c', 'c.id', 'p.client_id').where('p.company_id', req.user.company_id)
   .modify((b) => { if (req.query.client_id) b.andWhere('p.client_id', Number(req.query.client_id)); })
   .orderBy('p.id', 'desc').select('p.*', 'c.name as client_name').then((r: Record<string, unknown>[]) => r.map((x) => row(x, ['allocations'])))));
 finance.get('/invoices/outstanding', h(async (req) => {
@@ -268,7 +305,7 @@ finance.get('/invoices/outstanding', h(async (req) => {
     return { ...r, total, received, balance: Math.round((total - received) * 100) / 100, days, overdue: days > Number(r.payment_terms_days ?? 30) };
   });
 }));
-finance.post('/payments', allow('payments'), h(async (req) => {
+finance.post('/payments', allow('recordPayments'), h(async (req) => {
   const cid = req.user.company_id;
   const p = z.object({
     client_id: z.number(), date: z.string(), amount: z.number().positive(), tds: z.number().min(0).default(0), mode: z.string(), reference: z.string().optional().nullable(),
@@ -323,21 +360,21 @@ finance.get('/registers/:name', h(async (req) => {
     rows = docs.map((d) => {
       const t = parseJson<Record<string, number>>(d.totals, {}); const data = parseJson<Record<string, unknown>>(d.data, {});
       return { number: d.number ?? '(draft)', date: d.date, client: d.client_name, gstin: d.gstin, site: d.site_name, status: d.status, total: Number(d.total), taxable: t?.taxable, cgst: t?.cgst, sgst: t?.sgst, igst: t?.igst,
-        pos: data.placeOfSupplyName, received: paid.get(d.id) ?? 0, ulr: data.ulr, samples: data.jobCodeText, signatory: d.issuer, id: d.id };
+        pos: data.placeOfSupplyName, received: paid.get(d.id) ?? 0, accreditation: d.accreditation, ulr: data.ulr, samples: data.jobCodeText, signatory: d.issuer, id: d.id };
     });
     columns = name === 'invoices'
-      ? [{ key: 'number', label: 'Invoice no.' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'client', label: 'Client' }, { key: 'gstin', label: 'GSTIN' }, { key: 'pos', label: 'Place of supply' },
+      ? [{ key: 'number', label: 'Invoice no.' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'client', label: 'Client' }, { key: 'accreditation', label: 'Type' }, { key: 'gstin', label: 'GSTIN' }, { key: 'pos', label: 'Place of supply' },
         { key: 'taxable', label: 'Taxable', type: 'money' }, { key: 'cgst', label: 'CGST', type: 'money' }, { key: 'sgst', label: 'SGST', type: 'money' }, { key: 'igst', label: 'IGST', type: 'money' }, { key: 'total', label: 'Total', type: 'money' }, { key: 'received', label: 'Received', type: 'money' }, { key: 'status', label: 'Status' }]
       : name === 'reports'
-        ? [{ key: 'number', label: 'Report no.' }, { key: 'date', label: 'Issue date', type: 'date' }, { key: 'client', label: 'Client' }, { key: 'samples', label: 'Job code(s)' }, { key: 'ulr', label: 'ULR' }, { key: 'signatory', label: 'Signed by' }, { key: 'status', label: 'Status' }]
-        : [{ key: 'number', label: 'Quotation no.' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'client', label: 'Client' }, { key: 'site', label: 'Site / project' }, { key: 'total', label: 'Value', type: 'money' }, { key: 'status', label: 'Status' }];
+        ? [{ key: 'number', label: 'Report no.' }, { key: 'date', label: 'Issue date', type: 'date' }, { key: 'accreditation', label: 'Type' }, { key: 'client', label: 'Client' }, { key: 'samples', label: 'Job code(s)' }, { key: 'ulr', label: 'ULR' }, { key: 'signatory', label: 'Signed by' }, { key: 'status', label: 'Status' }]
+        : [{ key: 'number', label: 'Quotation no.' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'accreditation', label: 'Type' }, { key: 'client', label: 'Client' }, { key: 'site', label: 'Site / project' }, { key: 'total', label: 'Value', type: 'money' }, { key: 'status', label: 'Status' }];
   } else if (name === 'samples') {
     const s = await db('samples as s').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('sites as st', 'st.id', 's.site_id').where('s.company_id', cid).whereBetween('s.received_date', [from, to]).orderBy('s.id', 'desc')
       .select('s.*', 'c.name as client_name', 'st.name as site_name');
     const tests = s.length ? await db('tests as t').leftJoin('catalog as k', 'k.id', 't.catalog_id').whereIn('t.sample_id', s.map((x) => x.id)).select('t.sample_id', 'k.report_name', 'k.billing_name') : [];
-    rows = s.map((x) => ({ id: x.id, code: x.code, ulr: x.ulr, received: x.received_date, client: x.client_name, site: x.site_name, material: x.material, description: x.description, quantity: x.quantity, condition: x.condition,
+    rows = s.map((x) => ({ id: x.id, code: x.code, ulr: x.ulr, accreditation: x.accreditation, received: x.received_date, client: x.client_name, site: x.site_name, material: x.material, description: x.description, quantity: x.quantity, condition: x.condition,
       tests: tests.filter((t) => t.sample_id === x.id).map((t) => t.report_name || t.billing_name).join(', '), status: x.status }));
-    columns = [{ key: 'code', label: 'Job code' }, { key: 'ulr', label: 'ULR' }, { key: 'received', label: 'Received', type: 'date' }, { key: 'client', label: 'Client' }, { key: 'site', label: 'Site' }, { key: 'material', label: 'Material' },
+    columns = [{ key: 'code', label: 'Job code' }, { key: 'accreditation', label: 'Type' }, { key: 'ulr', label: 'ULR' }, { key: 'received', label: 'Received', type: 'date' }, { key: 'client', label: 'Client' }, { key: 'site', label: 'Site' }, { key: 'material', label: 'Material' },
       { key: 'description', label: 'Description' }, { key: 'quantity', label: 'Qty' }, { key: 'condition', label: 'Condition' }, { key: 'tests', label: 'Tests' }, { key: 'status', label: 'Status' }];
   } else if (name === 'tests') {
     const t = await db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('catalog as k', 'k.id', 't.catalog_id')

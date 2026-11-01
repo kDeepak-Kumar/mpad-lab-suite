@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CIVIL_LAB_TEMPLATES, DEFAULT_TEMPLATES, DEFAULT_NUMBERING, type DocKind } from '@suite/shared';
 import { db, insert, migrate, now, toJson } from './db';
-import { hashPassword } from './auth';
+import { hashPassword } from './auth-hash';
+import { ensurePlatform } from './meta';
 
 /**
  * First start: creates the company, the owner account, templates and a starter rate card.
@@ -108,6 +109,7 @@ if (process.argv[1]?.endsWith('seed.ts')) {
     }
     await migrate();
     await seedIfEmpty();
+    await ensurePlatform();
     await db.destroy();
   })();
 }

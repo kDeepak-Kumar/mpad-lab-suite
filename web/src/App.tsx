@@ -1,55 +1,68 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from 'react';
 import { Navigate, NavLink as RLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { AppShell, Avatar, Burger, Group, Loader, Menu, NavLink, ScrollArea, Text, Button, Center, Badge } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { ActionIcon, AppShell, Avatar, Burger, Center, Group, Indicator, Loader, Menu, NavLink, ScrollArea, Text, Badge, Tooltip, Kbd, UnstyledButton } from '@mantine/core';
+import { useDisclosure, useLocalStorage } from '@mantine/hooks';
+import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconLayoutDashboard, IconUsers, IconFileDollar, IconClipboardList, IconFlask, IconFileCertificate, IconReceipt, IconCash,
   IconBook, IconListDetails, IconSettings, IconLogout, IconPlus, IconBox, IconTool, IconTemplate, IconUserCog, IconChecklist,
+  IconSearch, IconChartBar, IconAdjustments, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles,
 } from '@tabler/icons-react';
-import { ROLES } from '@suite/shared';
-import { api } from './api';
+import { api, useApi } from './api';
+import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
 import { Login } from './pages/Login';
-import { Dashboard } from './pages/Dashboard';
-import { ClientsPage, ClientDetail } from './pages/Clients';
-import { DocumentsList } from './pages/DocumentsList';
-import { DocumentPage } from './pages/DocumentPage';
-import { WorkOrdersPage, WorkOrderDetail } from './pages/WorkOrders';
-import { SamplesPage } from './pages/Samples';
-import { TestsPage, TestSheetPage } from './pages/Tests';
-import { PrepareReport } from './pages/PrepareReport';
-import { PaymentsPage } from './pages/Payments';
-import { LedgerPage, ClientLedger } from './pages/Ledger';
-import { RegistersPage } from './pages/Registers';
-import { CompanySettings } from './pages/settings/Company';
-import { UsersSettings } from './pages/settings/Users';
-import { CatalogSettings } from './pages/settings/Catalog';
-import { EquipmentPage } from './pages/settings/Equipment';
-import { TemplatesPage, TemplateDesigner } from './pages/settings/Templates';
-import { GlobalSearch } from './components/GlobalSearch';
+import { Loading } from './components/ui';
 
-export interface Me { user: { id: number; name: string; email: string; role: string }; company: { id: number; name: string; stateCode: string; logo?: string } }
-const MeCtx = createContext<Me | null>(null);
-export const useMe = () => useContext(MeCtx)!;
-export const hasRole = (me: Me, ...roles: string[]) => me.user.role === 'owner' || roles.includes(me.user.role);
+// Pages load on demand, so the app opens fast and only fetches what a screen needs.
+const page = <K extends string>(loader: () => Promise<Record<K, ComponentType<any>>>, name: K) => lazy(() => loader().then((m) => ({ default: m[name] })));
+const Dashboard = page(() => import('./pages/Dashboard'), 'Dashboard');
+const ClientsPage = page(() => import('./pages/Clients'), 'ClientsPage');
+const ClientDetail = page(() => import('./pages/Clients'), 'ClientDetail');
+const DocumentsList = page(() => import('./pages/DocumentsList'), 'DocumentsList');
+const DocumentPage = page(() => import('./pages/DocumentPage'), 'DocumentPage');
+const WorkOrdersPage = page(() => import('./pages/WorkOrders'), 'WorkOrdersPage');
+const WorkOrderDetail = page(() => import('./pages/WorkOrders'), 'WorkOrderDetail');
+const SamplesPage = page(() => import('./pages/Samples'), 'SamplesPage');
+const TestsPage = page(() => import('./pages/Tests'), 'TestsPage');
+const TestSheetPage = page(() => import('./pages/Tests'), 'TestSheetPage');
+const PrepareReport = page(() => import('./pages/PrepareReport'), 'PrepareReport');
+const PaymentsPage = page(() => import('./pages/Payments'), 'PaymentsPage');
+const LedgerPage = page(() => import('./pages/Ledger'), 'LedgerPage');
+const ClientLedger = page(() => import('./pages/Ledger'), 'ClientLedger');
+const RegistersPage = page(() => import('./pages/Registers'), 'RegistersPage');
+const AnalyticsPage = page(() => import('./pages/Analytics'), 'AnalyticsPage');
+const CompanySettings = page(() => import('./pages/settings/Company'), 'CompanySettings');
+const UsersSettings = page(() => import('./pages/settings/Users'), 'UsersSettings');
+const CatalogSettings = page(() => import('./pages/settings/Catalog'), 'CatalogSettings');
+const EquipmentPage = page(() => import('./pages/settings/Equipment'), 'EquipmentPage');
+const TemplatesPage = page(() => import('./pages/settings/Templates'), 'TemplatesPage');
+const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'TemplateDesigner');
+const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 
-const NAV: { label: string; to: string; icon: React.ComponentType<{ size?: number | string }>; roles?: string[]; section?: string }[] = [
-  { label: 'Home', to: '/', icon: IconLayoutDashboard },
-  { label: 'Clients', to: '/clients', icon: IconUsers, section: 'Sales' },
-  { label: 'Quotations', to: '/quotes', icon: IconFileDollar },
-  { label: 'Work orders', to: '/workorders', icon: IconClipboardList },
-  { label: 'Sample register', to: '/samples', icon: IconBox, section: 'Laboratory' },
-  { label: 'Tests & observations', to: '/tests', icon: IconFlask },
-  { label: 'Prepare report', to: '/reports/prepare', icon: IconChecklist },
-  { label: 'Reports', to: '/reports', icon: IconFileCertificate },
-  { label: 'Invoices', to: '/invoices', icon: IconReceipt, section: 'Accounts' },
-  { label: 'Payments', to: '/payments', icon: IconCash },
-  { label: 'Ledgers', to: '/ledger', icon: IconBook },
-  { label: 'Registers', to: '/registers', icon: IconListDetails },
-  { label: 'Company & branding', to: '/settings/company', icon: IconSettings, section: 'Settings' },
-  { label: 'Rate card', to: '/settings/catalog', icon: IconFileDollar },
-  { label: 'Equipment', to: '/equipment', icon: IconTool },
-  { label: 'Templates', to: '/settings/templates', icon: IconTemplate },
-  { label: 'Users & roles', to: '/settings/users', icon: IconUserCog },
+export { useMe };
+export const hasRole = (me: Me, ...roles: string[]) => Boolean(me.role?.admin || me.user.role === 'owner' || roles.includes(me.user.role));
+
+type NavItem = { label: string; to: string; tab: string; icon: ComponentType<{ size?: number | string; stroke?: number | string }>; section?: string };
+const NAV: NavItem[] = [
+  { label: 'Home', to: '/', tab: 'home', icon: IconLayoutDashboard },
+  { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartBar },
+  { label: 'Clients', to: '/clients', tab: 'clients', icon: IconUsers, section: 'Sales' },
+  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar },
+  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardList },
+  { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconBox, section: 'Laboratory' },
+  { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask },
+  { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconChecklist },
+  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconFileCertificate },
+  { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconReceipt, section: 'Accounts' },
+  { label: 'Payments', to: '/payments', tab: 'payments', icon: IconCash },
+  { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook },
+  { label: 'Registers', to: '/registers', tab: 'registers', icon: IconListDetails },
+  { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconSettings, section: 'Settings' },
+  { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconFileDollar },
+  { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconTool },
+  { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate },
+  { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog },
+  { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustments },
 ];
 
 export function App() {
@@ -61,89 +74,146 @@ export function App() {
   }, [loc.pathname === '/login']);
   if (me === undefined) return <Center h="100vh"><Loader /></Center>;
   if (!me) return <Routes><Route path="/login" element={<Login onLogin={() => api<Me>('/auth/me').then(setMe)} />} /><Route path="*" element={<Navigate to="/login" />} /></Routes>;
-  return <MeCtx.Provider value={me}><Shell /></MeCtx.Provider>;
+  return <MeCtx.Provider value={me}><MetaLoader /></MeCtx.Provider>;
+}
+
+function MetaLoader() {
+  const { data, reload } = useApi<Meta>('/meta');
+  if (!data) return <Center h="100vh"><Loader /></Center>;
+  return <MetaCtx.Provider value={{ meta: data, reload }}><Shell /></MetaCtx.Provider>;
 }
 
 function Shell() {
   const me = useMe();
   const [opened, { toggle, close }] = useDisclosure();
+  const [mini, setMini] = useLocalStorage({ key: 'nav-mini', defaultValue: false });
   const nav = useNavigate();
   const loc = useLocation();
   useEffect(close, [loc.pathname]);
+  const { data: dash } = useApi<any>('/dashboard');
+  const items = NAV.filter((n) => hasTab(me, n.tab));
   const logout = async () => { await api('/auth/logout', { method: 'POST' }); window.location.href = '/login'; };
-  const roleLabel = ROLES.find((r) => r.key === me.user.role)?.label ?? me.user.role;
+  const reminders = dash?.reminders ?? [];
+
+  // command palette: navigate, create and search records
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<SpotlightActionData[]>([]);
+  const search = useCallback(async (q: string) => {
+    if (q.trim().length < 2) { setHits([]); return; }
+    const [c, d, s] = await Promise.all([
+      hasTab(me, 'clients') ? api<any[]>(`/clients?q=${encodeURIComponent(q)}`, { quiet: true }).catch(() => []) : [],
+      api<any[]>(`/documents?q=${encodeURIComponent(q)}`, { quiet: true }).catch(() => []),
+      hasTab(me, 'samples') ? api<any[]>(`/samples?q=${encodeURIComponent(q)}`, { quiet: true }).catch(() => []) : [],
+    ]);
+    setHits([
+      ...c.slice(0, 5).map((x) => ({ id: `c${x.id}`, label: x.name, description: `Client${x.gstin ? ' · ' + x.gstin : ''}`, group: 'Records', onClick: () => nav(`/clients/${x.id}`) })),
+      ...d.filter((x) => x.status !== 'cancelled').slice(0, 6).map((x) => ({ id: `d${x.id}`, label: `${x.number || 'Draft #' + x.id}`, description: `${{ quote: 'Quotation', invoice: 'Invoice', report: 'Report' }[x.kind as 'quote']} · ${x.client_name ?? ''}`, group: 'Records', onClick: () => nav(`/documents/${x.id}`) })),
+      ...s.slice(0, 5).map((x) => ({ id: `s${x.id}`, label: x.code, description: `Sample · ${x.client_name}`, group: 'Records', onClick: () => nav(`/samples?open=${x.id}`) })),
+    ]);
+  }, [me]);
+  useEffect(() => { const t = setTimeout(() => search(query), 220); return () => clearTimeout(t); }, [query]);
+  const actions: SpotlightActionData[] = [
+    ...(hasTab(me, 'analytics') ? [{ id: 'ask', label: `Ask AI: “${query || 'revenue by client this year'}”`, group: 'AI', leftSection: <IconSparkles size={18} />, onClick: () => nav(`/analytics?ask=${encodeURIComponent(query || 'revenue by client this year')}`) }] : []),
+    ...hits,
+    ...(hasTab(me, 'quotes') ? [{ id: 'nq', label: 'New quotation', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/quotes/new') }] : []),
+    ...(hasTab(me, 'samples') ? [{ id: 'ns', label: 'Register sample', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/samples?new=1') }] : []),
+    ...(hasTab(me, 'clients') ? [{ id: 'nc', label: 'New client', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/clients?new=1') }] : []),
+    ...(hasTab(me, 'invoices') ? [{ id: 'ni', label: 'New invoice', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/invoices/new') }] : []),
+    ...(hasTab(me, 'payments') ? [{ id: 'np', label: 'Record payment', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/payments?new=1') }] : []),
+    ...items.map((n) => ({ id: `go${n.to}`, label: n.label, group: 'Go to', leftSection: <n.icon size={18} />, onClick: () => nav(n.to) })),
+  ];
+
+  const width = mini ? 72 : 244;
   return (
-    <AppShell header={{ height: 56 }} navbar={{ width: 236, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding="md">
+    <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding="lg" styles={{ main: { background: 'var(--bg)' }, navbar: { borderRight: '1px solid var(--line)' }, header: { borderBottom: '1px solid var(--line)' } }}>
       <AppShell.Header className="no-print">
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            {me.company.logo && <img src={me.company.logo} alt="" style={{ height: 32 }} />}
+            <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={() => setMini(!mini)}>{mini ? <IconLayoutSidebarLeftExpand size={20} /> : <IconLayoutSidebarLeftCollapse size={20} />}</ActionIcon>
+            {me.company.logo && <img src={me.company.logo} alt="" style={{ height: 30 }} />}
             <Text fw={700} size="sm" visibleFrom="xs" lineClamp={1}>{me.company.name}</Text>
           </Group>
+          <UnstyledButton onClick={() => spotlight.open()} visibleFrom="sm" style={{ border: '1px solid #d0d5dd', borderRadius: 8, padding: '6px 10px', width: 360, background: '#f9fafb' }}>
+            <Group justify="space-between"><Group gap={8}><IconSearch size={16} color="#667085" /><Text size="sm" c="dimmed">Search, create or ask AI…</Text></Group><Kbd size="xs">Ctrl K</Kbd></Group>
+          </UnstyledButton>
           <Group gap="sm" wrap="nowrap">
-            <GlobalSearch />
-            <Menu position="bottom-end">
-              <Menu.Target><Button leftSection={<IconPlus size={16} />}>New</Button></Menu.Target>
+            <ActionIcon variant="subtle" color="gray" hiddenFrom="sm" onClick={() => spotlight.open()}><IconSearch size={20} /></ActionIcon>
+            <Menu position="bottom-end" width={380} shadow="lg">
+              <Menu.Target>
+                <Indicator disabled={!reminders.length} label={reminders.length} size={16} color="red" offset={4}>
+                  <ActionIcon variant="subtle" color="gray" size="lg"><IconBell size={20} /></ActionIcon>
+                </Indicator>
+              </Menu.Target>
               <Menu.Dropdown>
-                <Menu.Item onClick={() => nav('/quotes/new')}>Quotation</Menu.Item>
-                <Menu.Item onClick={() => nav('/samples?new=1')}>Sample (inward)</Menu.Item>
-                <Menu.Item onClick={() => nav('/clients?new=1')}>Client</Menu.Item>
-                <Menu.Item onClick={() => nav('/invoices/new')}>Invoice</Menu.Item>
-                <Menu.Item onClick={() => nav('/payments?new=1')}>Payment received</Menu.Item>
+                <Menu.Label>Reminders</Menu.Label>
+                {!reminders.length && <Text size="sm" c="dimmed" p="sm">All clear.</Text>}
+                {reminders.slice(0, 12).map((r: any, i: number) => <Menu.Item key={i} onClick={() => nav(r.link)}><Text size="xs" c={r.level === 'danger' ? 'red' : r.level === 'warning' ? 'orange' : 'blue'} fw={600}>{r.kind}</Text><Text size="sm">{r.text}</Text></Menu.Item>)}
               </Menu.Dropdown>
             </Menu>
-            <Menu position="bottom-end">
-              <Menu.Target><Avatar color="navy" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
+            <Menu position="bottom-end" shadow="lg">
+              <Menu.Target><Avatar color="brand" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
               <Menu.Dropdown>
-                <Menu.Label>{me.user.name}<br /><Badge size="xs" variant="light">{roleLabel}</Badge></Menu.Label>
+                <Menu.Label>{me.user.name}<br /><Badge size="xs" variant="light" color={me.role.admin ? 'red' : 'brand'}>{me.role.label}</Badge></Menu.Label>
+                <Menu.Item onClick={() => nav('/settings/users?me=1')}>My profile & signature</Menu.Item>
                 <Menu.Item leftSection={<IconLogout size={16} />} onClick={logout}>Sign out</Menu.Item>
               </Menu.Dropdown>
             </Menu>
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar className="no-print">
-        <ScrollArea p="xs">
-          {NAV.map((n) => (
-            <div key={n.to}>
-              {n.section && <Text size="xs" c="dimmed" fw={600} tt="uppercase" mt="md" mb={4} px="sm">{n.section}</Text>}
-              <NavLink component={RLink} to={n.to} label={n.label} leftSection={<n.icon size={18} />}
-                active={n.to === '/' ? loc.pathname === '/' : loc.pathname === n.to || (loc.pathname.startsWith(n.to + '/') && !NAV.some((o) => o.to !== n.to && o.to.startsWith(n.to) && loc.pathname.startsWith(o.to)))} />
-            </div>
-          ))}
+      <AppShell.Navbar className="no-print" p={6}>
+        <ScrollArea>
+          {items.map((n) => {
+            const active = n.to === '/' ? loc.pathname === '/' : loc.pathname === n.to || (loc.pathname.startsWith(n.to + '/') && !NAV.some((o) => o.to !== n.to && o.to.startsWith(n.to) && loc.pathname.startsWith(o.to)));
+            return (
+              <div key={n.to}>
+                {n.section && !mini && <div className="nav-section">{n.section}</div>}
+                {n.section && mini && <div style={{ height: 10 }} />}
+                <Tooltip label={n.label} position="right" disabled={!mini}>
+                  <NavLink component={RLink} to={n.to} className="nav-link" label={mini ? null : n.label} leftSection={<n.icon size={19} stroke={1.7} />} active={active} py={7} />
+                </Tooltip>
+              </div>
+            );
+          })}
         </ScrollArea>
       </AppShell.Navbar>
       <AppShell.Main>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/clients" element={<ClientsPage />} />
-          <Route path="/clients/:id" element={<ClientDetail />} />
-          <Route path="/quotes" element={<DocumentsList kind="quote" />} />
-          <Route path="/quotes/new" element={<DocumentPage kind="quote" />} />
-          <Route path="/invoices" element={<DocumentsList kind="invoice" />} />
-          <Route path="/invoices/new" element={<DocumentPage kind="invoice" />} />
-          <Route path="/reports" element={<DocumentsList kind="report" />} />
-          <Route path="/reports/prepare" element={<PrepareReport />} />
-          <Route path="/documents/:id" element={<DocumentPage />} />
-          <Route path="/workorders" element={<WorkOrdersPage />} />
-          <Route path="/workorders/:id" element={<WorkOrderDetail />} />
-          <Route path="/samples" element={<SamplesPage />} />
-          <Route path="/tests" element={<TestsPage />} />
-          <Route path="/tests/:id" element={<TestSheetPage />} />
-          <Route path="/payments" element={<PaymentsPage />} />
-          <Route path="/ledger" element={<LedgerPage />} />
-          <Route path="/ledger/:clientId" element={<ClientLedger />} />
-          <Route path="/registers" element={<RegistersPage />} />
-          <Route path="/equipment" element={<EquipmentPage />} />
-          <Route path="/settings/company" element={<CompanySettings />} />
-          <Route path="/settings/users" element={<UsersSettings />} />
-          <Route path="/settings/catalog" element={<CatalogSettings />} />
-          <Route path="/settings/templates" element={<TemplatesPage />} />
-          <Route path="/settings/templates/:id" element={<TemplateDesigner />} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+        <Suspense fallback={<Loading />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/clients" element={<ClientsPage />} />
+            <Route path="/clients/:id" element={<ClientDetail />} />
+            <Route path="/quotes" element={<DocumentsList kind="quote" />} />
+            <Route path="/quotes/new" element={<DocumentPage kind="quote" />} />
+            <Route path="/invoices" element={<DocumentsList kind="invoice" />} />
+            <Route path="/invoices/new" element={<DocumentPage kind="invoice" />} />
+            <Route path="/reports" element={<DocumentsList kind="report" />} />
+            <Route path="/reports/prepare" element={<PrepareReport />} />
+            <Route path="/documents/:id" element={<DocumentPage />} />
+            <Route path="/workorders" element={<WorkOrdersPage />} />
+            <Route path="/workorders/:id" element={<WorkOrderDetail />} />
+            <Route path="/samples" element={<SamplesPage />} />
+            <Route path="/tests" element={<TestsPage />} />
+            <Route path="/tests/:id" element={<TestSheetPage />} />
+            <Route path="/payments" element={<PaymentsPage />} />
+            <Route path="/ledger" element={<LedgerPage />} />
+            <Route path="/ledger/:clientId" element={<ClientLedger />} />
+            <Route path="/registers" element={<RegistersPage />} />
+            <Route path="/equipment" element={<EquipmentPage />} />
+            <Route path="/settings/company" element={<CompanySettings />} />
+            <Route path="/settings/users" element={<UsersSettings />} />
+            <Route path="/settings/catalog" element={<CatalogSettings />} />
+            <Route path="/settings/templates" element={<TemplatesPage />} />
+            <Route path="/settings/templates/:id" element={<TemplateDesigner />} />
+            <Route path="/setup" element={<SetupPage />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Suspense>
       </AppShell.Main>
+      <Spotlight actions={actions} query={query} onQueryChange={setQuery} filter={(q, a) => (!q ? a : (a as SpotlightActionData[]).filter((x) => x.group === 'Records' || x.group === 'AI' || String(x.label).toLowerCase().includes(q.toLowerCase())))} nothingFound="Nothing found" highlightQuery shortcut={['mod + K']}
+        searchProps={{ leftSection: <IconSearch size={18} />, placeholder: 'Search clients, documents, samples… or ask a question' }} limit={30} scrollable maxHeight={460} />
     </AppShell>
   );
 }

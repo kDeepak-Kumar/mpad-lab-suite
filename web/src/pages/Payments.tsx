@@ -3,16 +3,20 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Checkbox, Group, Modal, NumberInput, Select, SimpleGrid, Stack, Table, Text, TextInput, Paper } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { api, dmy, money, ok, useApi, localToday } from '../api';
-import { PageHeader, SimpleTable } from '../components/ui';
+import { PageHeader } from '../components/ui';
+import { ListView } from '../components/ListView';
+import { useCan, usePicklist } from '../ctx';
 
 export function PaymentsPage() {
   const [sp, setSp] = useSearchParams();
   const { data, reload } = useApi<any[]>('/payments');
+  const can = useCan();
   return (
     <>
-      <PageHeader title="Payments received" subtitle="Record receipts and TDS against invoices" actions={<Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>Record payment</Button>} />
-      <SimpleTable head={['Receipt', 'Date', 'Client', 'Amount', 'TDS', 'Mode', 'Reference']}
-        rows={(data ?? []).map((p) => [p.number, dmy(p.date), p.client_name, <span className="num">₹{money(p.amount, 2)}</span>, p.tds ? `₹${money(p.tds, 2)}` : '', p.mode, p.reference])} />
+      <PageHeader title="Payments received" subtitle="Record receipts and TDS against invoices" actions={can('recordPayments') && <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>Record payment</Button>} />
+      <ListView id="payments" rows={data} columns={[
+        { key: 'number', label: 'Receipt' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'client_name', label: 'Client', filter: 'select' },
+        { key: 'amount', label: 'Amount', type: 'money' }, { key: 'tds', label: 'TDS', type: 'money' }, { key: 'mode', label: 'Mode', filter: 'select' }, { key: 'reference', label: 'Reference' }]} />
       {sp.get('new') === '1' && <PaymentModal clientId={sp.get('client')} invoiceId={sp.get('invoice')} onClose={(saved) => { setSp({}); if (saved) reload(); }} />}
     </>
   );
@@ -25,6 +29,7 @@ function PaymentModal({ clientId, invoiceId, onClose }: { clientId: string | nul
   const [v, setV] = useState({ date: localToday(), amount: 0, tds: 0, mode: 'Bank transfer (NEFT/RTGS)', reference: '' });
   const [alloc, setAlloc] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
+  const modes = usePicklist('payment_mode');
   useEffect(() => {
     if (!open) return;
     if (invoiceId) { const inv = open.find((i) => String(i.id) === invoiceId); if (inv) { setAlloc({ [inv.id]: inv.balance }); setV((o) => ({ ...o, amount: inv.balance })); } }
@@ -45,7 +50,7 @@ function PaymentModal({ clientId, invoiceId, onClose }: { clientId: string | nul
           <TextInput type="date" label="Date" value={v.date} onChange={(e) => setV({ ...v, date: e.currentTarget.value })} />
           <NumberInput label="Amount received (₹)" thousandSeparator="," decimalScale={2} value={v.amount} onChange={(x) => setV({ ...v, amount: Number(x) || 0 })} />
           <NumberInput label="TDS deducted (₹)" thousandSeparator="," decimalScale={2} value={v.tds} onChange={(x) => setV({ ...v, tds: Number(x) || 0 })} />
-          <Select label="Mode" data={['Bank transfer (NEFT/RTGS)', 'UPI', 'Cheque', 'Cash', 'DD']} value={v.mode} onChange={(x) => setV({ ...v, mode: x ?? '' })} />
+          <Select label="Mode" data={modes} value={v.mode} onChange={(x) => setV({ ...v, mode: x ?? '' })} />
           <TextInput label="Reference / UTR / cheque no." value={v.reference} onChange={(e) => setV({ ...v, reference: e.currentTarget.value })} />
         </SimpleGrid>
         {client && (

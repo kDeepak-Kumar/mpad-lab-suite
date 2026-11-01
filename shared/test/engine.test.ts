@@ -101,3 +101,31 @@ describe('numbering', () => {
     expect(fillPlaceholders('For {{company.name}}', { company: { name: 'ACME' } })).toBe('For ACME');
   });
 });
+
+import { runReport, resolveRange, withTime, roleAllows, BUILTIN_ROLES } from '../src';
+describe('analytics', () => {
+  const rows = [
+    withTime({ date: '2026-08-10', client: 'A', total: 100, accreditation: 'NABL' }, '2026-08-10'),
+    withTime({ date: '2026-09-05', client: 'B', total: 200, accreditation: 'Non-NABL' }, '2026-09-05'),
+    withTime({ date: '2026-10-01', client: 'A', total: 300, accreditation: 'NABL' }, '2026-10-01'),
+    withTime({ date: '2026-10-20', client: 'A', total: 50, accreditation: 'NABL' }, '2026-10-20'),
+  ];
+  it('sums by client with filters and ranges', () => {
+    const r = runReport(rows, { object: 'invoices', measure: { agg: 'sum', field: 'total' }, groupBy: ['client'] }, '2026-11-01');
+    expect(r.rows[0]).toMatchObject({ label: 'A', value: 450 });
+    const n = runReport(rows, { object: 'invoices', measure: { agg: 'sum', field: 'total' }, filters: [{ field: 'accreditation', op: 'eq', value: 'nabl' }], dateRange: { preset: 'last_month' } }, '2026-11-01');
+    expect(n.total).toBe(350);
+    expect(resolveRange({ preset: 'this_fy' }, '2026-11-01')).toEqual({ from: '2026-04-01', to: '2027-03-31' });
+  });
+  it('fills month gaps and forecasts', () => {
+    const r = runReport(rows, { object: 'invoices', measure: { agg: 'sum', field: 'total' }, groupBy: ['month'], forecast: 2 }, '2026-11-01');
+    expect(r.rows.map((x) => x.label)).toEqual(['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']);
+    expect(r.rows.filter((x) => x.forecast).length).toBe(2);
+  });
+  it('roles', () => {
+    const tech = BUILTIN_ROLES.find((r) => r.key === 'technician');
+    expect(roleAllows(tech, 'enterObservations')).toBe(true);
+    expect(roleAllows(tech, 'signReports')).toBe(false);
+    expect(roleAllows(BUILTIN_ROLES[0], 'anything.at.all')).toBe(true);
+  });
+});

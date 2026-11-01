@@ -3,19 +3,23 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Button, Group, Paper, Text, Stack, Badge, Modal, Select, TextInput } from '@mantine/core';
 import { api, dmy, money, ok, useApi, localToday } from '../api';
 import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui';
+import { ListView } from '../components/ListView';
+import { useCan } from '../ctx';
 import { NewSampleModal } from './Samples';
 
 export function WorkOrdersPage() {
   const { data, reload } = useApi<any[]>('/workorders');
   const nav = useNavigate();
+  const can = useCan();
   const [open, setOpen] = useState(false);
   return (
     <>
       <PageHeader title="Work orders" subtitle="An accepted quotation becomes a work order; samples, reports and invoices hang off it"
-        actions={<Button onClick={() => setOpen(true)}>New work order</Button>} />
-      <SimpleTable head={['Number', 'Date', 'Client', 'Site', 'Customer ref', 'Samples', 'Status']}
-        rows={(data ?? []).map((w) => [<Text size="sm" fw={500}>{w.number}</Text>, dmy(w.date), w.client_name, w.site_name, w.customer_ref, w.samples, <StatusBadge status={w.status} />])}
-        onRow={(i) => nav(`/workorders/${data![i].id}`)} />
+        actions={can('workorder.create') && <Button onClick={() => setOpen(true)}>New work order</Button>} />
+      <ListView id="workorders" rows={data} onRow={(w) => nav(`/workorders/${w.id}`)} columns={[
+        { key: 'number', label: 'Number', render: (w) => <Text size="sm" fw={550}>{w.number}</Text> }, { key: 'date', label: 'Date', type: 'date' },
+        { key: 'client_name', label: 'Client', filter: 'select' }, { key: 'site_name', label: 'Site', filter: 'select' }, { key: 'customer_ref', label: 'Customer ref' },
+        { key: 'samples', label: 'Samples', type: 'number' }, { key: 'status', label: 'Status', type: 'status' }]} />
       {open && <NewWorkOrder onClose={(id) => { setOpen(false); if (id) { reload(); nav(`/workorders/${id}`); } }} />}
     </>
   );
@@ -43,6 +47,7 @@ function NewWorkOrder({ onClose }: { onClose: (id?: number) => void }) {
 export function WorkOrderDetail() {
   const { id } = useParams();
   const nav = useNavigate();
+  const can = useCan();
   const { data: wo, reload } = useApi<any>(`/workorders/${id}`, [id]);
   const [newSample, setNewSample] = useState(false);
   if (!wo) return <Loading />;
@@ -53,8 +58,8 @@ export function WorkOrderDetail() {
       <PageHeader title={`Work order ${wo.number}`} subtitle={<>{wo.client?.name}{wo.site ? ` · ${wo.site.name}` : ''} · {dmy(wo.date)}{wo.customer_ref ? ` · Ref: ${wo.customer_ref}` : ''}</>}
         actions={<>
           {wo.quote && <Button variant="default" onClick={() => nav(`/documents/${wo.quote.id}`)}>Quotation {wo.quote.number}</Button>}
-          <Button variant="default" onClick={invoice}>Invoice tested work</Button>
-          <Button onClick={() => setNewSample(true)}>Register sample</Button>
+          {can('invoice.create') && <Button variant="default" onClick={invoice}>Invoice tested work</Button>}
+          {can('sample.create') && <Button onClick={() => setNewSample(true)}>Register sample</Button>}
         </>} />
       {quoteLines.length > 0 && (
         <Paper withBorder p="sm" mb="md">
@@ -75,7 +80,7 @@ export function WorkOrderDetail() {
       <Text fw={600} mt="lg" mb="xs">Documents</Text>
       <SimpleTable head={['Type', 'Number', 'Date', 'Amount', 'Status']} rows={wo.documents.filter((d: any) => d.status !== 'cancelled').map((d: any) => [d.kind, d.number || '(draft)', dmy(d.date), d.total ? `₹${money(d.total)}` : '', <StatusBadge status={d.status} />])}
         onRow={(i) => nav(`/documents/${wo.documents.filter((d: any) => d.status !== 'cancelled')[i].id}`)} />
-      {newSample && <NewSampleModal preset={{ work_order_id: wo.id, client_id: wo.client_id, site_id: wo.site_id, customer_ref: wo.customer_ref, quoteCatalogIds: quoteLines.map((l) => l.catalogId).filter(Boolean) }} onClose={(saved) => { setNewSample(false); if (saved) reload(); }} />}
+      {newSample && <NewSampleModal preset={{ work_order_id: wo.id, client_id: wo.client_id, site_id: wo.site_id, customer_ref: wo.customer_ref, quoteCatalogIds: quoteLines.map((l) => l.catalogId).filter(Boolean), accreditation: wo.quote?.data?.accreditation ?? undefined }} onClose={(saved) => { setNewSample(false); if (saved) reload(); }} />}
     </>
   );
 }
