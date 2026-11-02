@@ -150,6 +150,7 @@ await api('owner', 'DELETE', `/files/${f.id}`);
 await api('owner', 'PUT', `/equipment/${eq.id}`, { cal_date: '2025-01-01', due_date: '2025-12-31' });
 const prev = await api('owner', 'GET', '/alerts/preview');
 expect(prev.some((i) => i.kind === 'cal' && /EXPIRED/.test(i.text) && i.isNew), `alert preview lists expired calibration (${prev.length} item(s))`);
+await api('owner', 'PUT', `/equipment/${eq.id}`, { cal_date: eq.cal_date, due_date: eq.due_date });
 m = await fail(() => api('owner', 'POST', '/alerts/run'));
 expect(m, `“Send now” explains what is missing (${m})`);
 console.log('\nALL CHECKS PASSED');
