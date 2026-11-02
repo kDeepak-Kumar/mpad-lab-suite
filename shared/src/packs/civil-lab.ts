@@ -1,4 +1,6 @@
 import type { ObservationTemplate } from '../observation';
+import { NDT_TEMPLATES } from './ndt';
+import { AGGREGATE_TEMPLATES } from './aggregate';
 
 /**
  * Civil testing laboratory pack: observation templates.
@@ -190,4 +192,4 @@ export const CUBE_COMPRESSION: ObservationTemplate = {
   reportRows: [{ name: 'Compressive strength (average)', unit: 'N/mm²', result: 'avg', decimals: 2 }],
 };
 
-export const CIVIL_LAB_TEMPLATES: ObservationTemplate[] = [CBR_LAB, PROCTOR_HEAVY, GRADATION_SOIL, ATTERBERG, FREE_SWELL, CUBE_COMPRESSION];
+export const CIVIL_LAB_TEMPLATES: ObservationTemplate[] = [CBR_LAB, PROCTOR_HEAVY, GRADATION_SOIL, ATTERBERG, FREE_SWELL, CUBE_COMPRESSION, ...NDT_TEMPLATES, ...AGGREGATE_TEMPLATES];

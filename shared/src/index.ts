@@ -4,6 +4,8 @@ export * from './money';
 export * from './numbering';
 export * from './doc-templates';
 export * from './packs/civil-lab';
+export * from './packs/equipment';
+export * from './packs/ndt';
 export * from './types';
 export * from './meta';
 export * from './analytics';

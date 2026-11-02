@@ -187,6 +187,36 @@ function interp(x: number, xs: Value[], ys: Value[]): Value {
   return NA;
 }
 
+function pairs(ys: Value, xs: Value): [number, number][] {
+  const a = Array.isArray(xs) ? flat(xs) : [], b = Array.isArray(ys) ? flat(ys) : [];
+  const out: [number, number][] = [];
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (typeof a[i] === 'number' && typeof b[i] === 'number') out.push([a[i] as number, b[i] as number]);
+  return out;
+}
+function regress(ys: Value, xs: Value, what: 'slope' | 'intercept' | 'rsq'): Value {
+  const p = pairs(ys, xs);
+  if (p.length < 2) return err('#DIV/0!');
+  const n = p.length, mx = p.reduce((s, q) => s + q[0], 0) / n, my = p.reduce((s, q) => s + q[1], 0) / n;
+  const sxx = p.reduce((s, q) => s + (q[0] - mx) ** 2, 0), sxy = p.reduce((s, q) => s + (q[0] - mx) * (q[1] - my), 0), syy = p.reduce((s, q) => s + (q[1] - my) ** 2, 0);
+  if (sxx === 0) return err('#DIV/0!');
+  const slope = sxy / sxx;
+  return what === 'slope' ? slope : what === 'intercept' ? my - slope * mx : syy === 0 ? 1 : (sxy * sxy) / (sxx * syy);
+}
+function peak(xs: Value, ys: Value, what: 'x' | 'y'): Value {
+  const p = pairs(ys, xs).sort((a, b) => a[0] - b[0]);
+  if (!p.length) return NA;
+  let i = 0; p.forEach((q, j) => { if (q[1] > p[i][1]) i = j; });
+  if (i === 0 || i === p.length - 1) return what === 'x' ? p[i][0] : p[i][1];
+  const [[x0, y0], [x1, y1], [x2, y2]] = [p[i - 1], p[i], p[i + 1]];
+  const den = (x0 - x1) * (x0 - x2) * (x1 - x2);
+  const A = (x2 * (y1 - y0) + x1 * (y0 - y2) + x0 * (y2 - y1)) / den;
+  const B = (x2 * x2 * (y0 - y1) + x1 * x1 * (y2 - y0) + x0 * x0 * (y1 - y2)) / den;
+  const C = (x1 * x2 * (x1 - x2) * y0 + x2 * x0 * (x2 - x0) * y1 + x0 * x1 * (x0 - x1) * y2) / den;
+  if (A >= 0) return what === 'x' ? x1 : y1;
+  const xv = -B / (2 * A);
+  return what === 'x' ? xv : A * xv * xv + B * xv + C;
+}
+
 type Fn = (args: Value[]) => Value;
 const FNS: Record<string, Fn> = {
   ABS: ([a]) => { const n = num(a); return isError(n) ? n : Math.abs(n); },
@@ -230,6 +260,50 @@ const FNS: Record<string, Fn> = {
   },
   /** INTERP(x, xs, ys): linear interpolation, e.g. load at 2.5 mm penetration. */
   INTERP: ([x, xs, ys]) => { const n = num(x); if (isError(n)) return n; if (!Array.isArray(xs) || !Array.isArray(ys)) return err('#REF!'); return interp(n, flat(xs), flat(ys)); },
+  MEDIAN: (args) => { const e = firstErr(args); if (e) return e; const n = nums(args).sort((a, b) => a - b); if (!n.length) return err('#NUM!'); const m = Math.floor(n.length / 2); return n.length % 2 ? n[m] : (n[m - 1] + n[m]) / 2; },
+  STDEV: (args) => { const e = firstErr(args); if (e) return e; const n = nums(args); if (n.length < 2) return err('#DIV/0!'); const mu = n.reduce((s, x) => s + x, 0) / n.length; return Math.sqrt(n.reduce((s, x) => s + (x - mu) ** 2, 0) / (n.length - 1)); },
+  LARGE: ([arr, k]) => { const n = nums([arr]).sort((a, b) => b - a); const i = num(k); return isError(i) ? i : i >= 1 && i <= n.length ? n[i - 1] : err('#NUM!'); },
+  SMALL: ([arr, k]) => { const n = nums([arr]).sort((a, b) => a - b); const i = num(k); return isError(i) ? i : i >= 1 && i <= n.length ? n[i - 1] : err('#NUM!'); },
+  /** SUMTO(list, n): sum of the first n items, e.g. cumulative mass retained up to this sieve. */
+  SUMTO: ([arr, k]) => { if (!Array.isArray(arr)) return err('#REF!'); const i = num(k); if (isError(i)) return i; return nums(flat(arr).slice(0, Math.max(0, i))).reduce((s, x) => s + x, 0); },
+  COUNTIF: ([arr, crit]) => {
+    const list = Array.isArray(arr) ? flat(arr) : [arr];
+    const m = typeof crit === 'string' ? /^(<=|>=|<>|<|>|=)?(.*)$/.exec(crit) : null;
+    const op = m?.[1] ?? '=', rhsRaw = m ? m[2] : crit;
+    const rhs: Value = typeof rhsRaw === 'string' && rhsRaw.trim() !== '' && !isNaN(Number(rhsRaw)) ? Number(rhsRaw) : rhsRaw as Value;
+    return list.filter((v) => { if (blank(v) || isError(v)) return false; const c = compare(v, rhs); return op === '=' ? c === 0 : op === '<>' ? c !== 0 : op === '<' ? c < 0 : op === '>' ? c > 0 : op === '<=' ? c <= 0 : c >= 0; }).length;
+  },
+  SLOPE: ([ys, xs]) => regress(ys, xs, 'slope'),
+  INTERCEPT: ([ys, xs]) => regress(ys, xs, 'intercept'),
+  RSQ: ([ys, xs]) => regress(ys, xs, 'rsq'),
+  /** FORECAST(x, ys, xs): value on the least-squares straight line, e.g. LL at 25 blows. */
+  FORECAST: ([x, ys, xs]) => { const a = regress(ys, xs, 'slope'), b = regress(ys, xs, 'intercept'), n = num(x); if (isError(a)) return a; if (isError(b)) return b; if (isError(n)) return n; return (b as number) + (a as number) * n; },
+  /** PEAKX/PEAKY(xs, ys): vertex of the parabola through the highest point and its neighbours (compaction curve). */
+  PEAKX: ([xs, ys]) => peak(xs, ys, 'x'),
+  PEAKY: ([xs, ys]) => peak(xs, ys, 'y'),
+  SIN: ([a]) => { const n = num(a); return isError(n) ? n : Math.sin(n); },
+  COS: ([a]) => { const n = num(a); return isError(n) ? n : Math.cos(n); },
+  TAN: ([a]) => { const n = num(a); return isError(n) ? n : Math.tan(n); },
+  ATAN: ([a]) => { const n = num(a); return isError(n) ? n : Math.atan(n); },
+  DEGREES: ([a]) => { const n = num(a); return isError(n) ? n : (n * 180) / Math.PI; },
+  RADIANS: ([a]) => { const n = num(a); return isError(n) ? n : (n * Math.PI) / 180; },
+  /** MROUND(x, 0.5): round to the nearest multiple, e.g. strength to 0.5 N/mm². */
+  MROUND: ([a, m]) => { const x = num(a), k = num(m); if (isError(x)) return x; if (isError(k)) return k; return k === 0 ? 0 : roundTo(Math.round(x / k + 1e-9 * Math.sign(x)) * k, 6); },
+  FIXED: ([a, d]) => { const x = num(a), k = num(d ?? 2); if (isError(x)) return x; if (isError(k)) return k; return roundTo(x, k).toFixed(Math.max(0, k)); },
+  /** MINUTES("10:45") = 645; numbers pass through. Use the difference of two clock times for setting time. */
+  MINUTES: ([a]) => {
+    if (typeof a === 'number') return a;
+    if (blank(a ?? null)) return null;
+    const m = /^(\d{1,2})[:.](\d{2})(?:\s*([AaPp])[Mm])?$/.exec(String(a).trim());
+    if (!m) return err('#VALUE!');
+    let h = Number(m[1]); const ap = m[3]?.toLowerCase();
+    if (ap === 'p' && h < 12) h += 12; if (ap === 'a' && h === 12) h = 0;
+    return h * 60 + Number(m[2]);
+  },
+  LEFT: ([a, n]) => { const k = num(n ?? 1); return isError(k) ? k : String(a ?? '').slice(0, Math.max(0, k)); },
+  RIGHT: ([a, n]) => { const k = num(n ?? 1); return isError(k) ? k : k <= 0 ? '' : String(a ?? '').slice(-k); },
+  LEN: ([a]) => String(a ?? '').length,
+  UPPER: ([a]) => String(a ?? '').toUpperCase(),
   CONCAT: (args) => flat(args).map((v) => (v === null ? '' : String(v))).join(''),
 };
 
@@ -281,6 +355,7 @@ function evalNode(n: Node, scope: Scope): Value {
         const hit = n.name === 'IFERROR' ? isError(v) : isError(v) && v.error === '#N/A';
         return hit ? evalNode(n.args[1], scope) : v;
       }
+      if (n.name === 'ROW') { const r = scope('_row'); return r === undefined ? err('#REF!') : r; }
       const fn = FNS[n.name];
       if (!fn) return err('#NAME?');
       return fn(n.args.map((a) => evalNode(a, scope)));
@@ -318,4 +393,4 @@ export function references(src: string): string[] {
   return [...out];
 }
 
-export const FUNCTION_NAMES = ['IF', 'IFERROR', 'IFNA', ...Object.keys(FNS)];
+export const FUNCTION_NAMES = ['IF', 'IFERROR', 'IFNA', 'ROW', ...Object.keys(FNS)];
