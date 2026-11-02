@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# one publish at a time, so quick successive pushes do not race for the deploy branch
+concurrency:
+  group: deploy-branch
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
