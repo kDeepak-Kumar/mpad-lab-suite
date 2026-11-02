@@ -31,11 +31,11 @@ export function TemplatesPage() {
             onRow={(i) => nav(`/settings/templates/${docs![i].id}`)} />
         </Tabs.Panel>
         <Tabs.Panel value="obs">
-          <Alert variant="light" mb="sm">Observation sheets are defined as data: fields, constants (calibration lookup or manual entry), Excel-style formulas, rule checks, IS requirements, charts and report rows. Open a sheet to read its procedure and worked example; advanced users can edit the definition – publishing creates a new version used by new tests only.</Alert>
+          <Alert variant="light" mb="sm">Observation sheets are defined as data: fields, constants (calibration lookup or manual entry), Excel-style formulas, rule checks, IS requirements, charts and report rows. Open a sheet to change its inputs, constants and IS limits, formulas, report text and graphs in plain forms – with a live check of every formula. Publishing creates a new version used by new tests only.</Alert>
           <SegmentedControl mb="sm" data={cats} value={cat} onChange={setCat} />
           <SimpleTable head={['Category', 'Test', 'IS method', 'Version', 'Notes']}
             rows={shown.map((t) => [t.category ?? t.material, t.name, t.method, `v${t.version}`, t.simplified ? <Badge color="yellow" variant="light">Simplified – replace with lab sheet</Badge> : t.procedure?.length ? <Badge color="teal" variant="light">Procedure & worked example</Badge> : ''])}
-            onRow={(i) => setJsonEdit(shown[i])} />
+            onRow={(i) => nav(`/settings/templates/obs/${encodeURIComponent(shown[i].code)}`)} />
         </Tabs.Panel>
       </Tabs>
       {jsonEdit && <ObsJsonModal tpl={jsonEdit} onClose={(s) => { setJsonEdit(null); if (s) reloadObs(); }} />}

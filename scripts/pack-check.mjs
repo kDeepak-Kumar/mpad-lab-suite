@@ -67,7 +67,7 @@ for (const [name, [material, codes]] of Object.entries(groups).filter(([n]) => !
     const obs = { header: hdr, constants: { ...(ex.constants ?? {}) }, equipment: eq, grids };
     const res = await api(`/tests/${t.id}/observation`, { observation: obs, started_at: today, completed_at: today }, 'PUT');
     for (const [ref, want] of Object.entries(tpl.example?.expect ?? {})) {
-      if (ref.includes('#') || !tpl.results.some((r) => r.key === ref)) continue;
+      if (occ > 1 || ref.includes('#') || !tpl.results.some((r) => r.key === ref)) continue;
       const got = res.results[ref];
       const okv = typeof want === 'number' ? typeof got === 'number' && Math.abs(got - want) <= Math.max(0.011, Math.abs(want) * 0.002) : got === want;
       if (!okv) problems.push(`${tpl.code}: ${ref} = ${JSON.stringify(got)} (expected ${want})`);

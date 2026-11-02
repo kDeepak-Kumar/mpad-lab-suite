@@ -469,6 +469,7 @@ function pileTest(kind: 'uplift' | 'lateral'): ObservationTemplate {
       { key: 'basis', label: 'Displacement taken as', type: 'select', options: ['Average of dial gauges (IS 2911-4)', 'Maximum of dial gauges'], default: 'Average of dial gauges (IS 2911-4)' },
       { key: 'reaction', label: 'Reaction system', type: 'text' },
       { key: 'coord_n', label: 'Coordinate N', type: 'text' }, { key: 'coord_e', label: 'Coordinate E', type: 'text' },
+      { key: 'failed', label: 'Failure observed (pile, section or soil)', type: 'select', options: ['No', 'Yes'], default: 'No' },
       { key: 'remarks', label: 'Observation at the end of the test', type: 'text', help: up ? 'e.g. JCB could not apply more load' : 'e.g. section bent and concrete cracked at 40.1 kN' },
     ],
     constants: [{ key: 'lc', label: 'Dial gauge least count', unit: 'mm/div', fromEquipment: 'dg.lc', value: 0.01 }, { key: 'dlim', label: 'IS 2911 reference displacement', unit: 'mm', value: 12 }, ...(up ? [] : [{ key: 'd5', label: 'IS 2911 lateral displacement limit', unit: 'mm', value: 5 }])],
@@ -497,7 +498,7 @@ function pileTest(kind: 'uplift' | 'lateral'): ObservationTemplate {
       { key: 'dmax', label: 'Displacement at maximum load', formula: 'IF(lmax="","",INDEX(ld.envd,MATCH(lmax,ld.envl,0)))', unit: 'mm', decimals: 2 },
       { key: 'dtarget', label: 'Displacement at target load', formula: 'IF(OR(target="",lmax=""),"",IF(target>lmax,"",INTERP(target,ld.envl,ld.envd)))', unit: 'mm', decimals: 2 },
       { key: 'resid', label: 'Residual displacement (last zero-load reading)', formula: 'IFERROR(INDEX(ld.d,MAX(ld.zrow))*1,"")', unit: 'mm', decimals: 2 },
-      { key: 'verdict', label: 'Result against permissible displacement', formula: 'IF(OR(perm="",dmax=""),"",IF(AND(dtarget<>"",dtarget<=perm),"Satisfactory – "&FIXED(dtarget,2)&" mm at target load",IF(AND(target<>"",target>lmax),IF(dmax<=perm,"Target load not reached; "&FIXED(dmax,2)&" mm at "&FIXED(lmax,1)&" kN","Not satisfactory"),IF(dmax<=perm,"Satisfactory","Not satisfactory"))))' },
+      { key: 'verdict', label: 'Result against permissible displacement', formula: 'IF(dmax="","",IF(failed="Yes","Failure at "&FIXED(lmax,1)&" kN ("&FIXED(dmax,2)&" mm)",IF(perm="","--",IF(AND(dtarget<>"",dtarget<=perm),"Satisfactory – "&FIXED(dtarget,2)&" mm at target load",IF(AND(target<>"",target>lmax),IF(dmax<=perm,"Target load not reached; "&FIXED(dmax,2)&" mm at "&FIXED(lmax,1)&" kN","Not satisfactory"),IF(dmax<=perm,"Satisfactory","Not satisfactory"))))))' },
       { key: 'l12', label: 'Load at reference displacement', formula: 'IF(OR(dmax="",MAX(ld.envd)<dlim),"",INTERP(dlim,ld.envd,ld.envl))', unit: 'kN', decimals: 1 },
       ...(up
         ? [{ key: 'safe', label: 'Safe uplift load (IS 2911-4: ⅔ of load at 12 mm)', formula: 'IF(l12="","",2/3*l12)', unit: 'kN', decimals: 1 }]
@@ -569,12 +570,12 @@ function pileTest(kind: 'uplift' | 'lateral'): ObservationTemplate {
         { tload: 4, hold: 1, dg1: 2136, dg2: 2245 }, { tload: 6, hold: 1, dg1: 2136, dg2: 2245 }, { tload: 8, hold: 1, dg1: 2135, dg2: 2243 }, { tload: 10, hold: 1, dg1: 2134, dg2: 2242 },
         { tload: 15, aload: 15.1, hold: 1, dg1: 2132, dg2: 2239 }, { tload: 20, hold: 1, dg1: 2130, dg2: 2236 }, { tload: 25, hold: 1, dg1: 2127, dg2: 2232 }, { aload: 36, hold: 1, dg1: 2112, dg2: 2214 }, {},
       ] } }, expect: { lmax: 36, dmax: 0.32, verdict: 'Satisfactory', safe_txt: 'Not reached – displacement stayed below 12 mm' } }
-      : { input: { header: { test_no: '2', pile: 'P18', ftype: 'L', section: 'SAP cage', embed: 1.524, hload: 0.76, hmeas: 0.1, perm: 25.4, remarks: 'At 40.10 kN the steel section bent and the concrete cracked.' }, grids: { ld: [
+      : { input: { header: { test_no: '2', pile: 'P18', ftype: 'L', section: 'SAP cage', embed: 1.524, hload: 0.76, hmeas: 0.1, perm: 25.4, remarks: 'At 40.10 kN the steel section bent and the concrete cracked.', failed: 'Yes' }, grids: { ld: [
         { tload: 0, hold: 1, dg1: 2069, dg2: 210 }, { tload: 1.5, hold: 1, dg1: 2065, dg2: 212 }, { tload: 3, hold: 1, dg1: 2058, dg2: 217 }, { tload: 4.5, hold: 1, dg1: 2050, dg2: 223 }, { tload: 0, hold: 1, dg1: 2068, dg2: 206 },
         { tload: 4.5, hold: 1, dg1: 2058, dg2: 222 }, { tload: 6, hold: 1, dg1: 2041, dg2: 230 }, { tload: 7.5, hold: 1, dg1: 2032, dg2: 239 }, { tload: 0, hold: 1, dg1: 2068, dg2: 207 }, { tload: 10.5, hold: 1, dg1: 2017, dg2: 250 },
         { tload: 12.5, hold: 1, dg1: 2006, dg2: 261 }, { tload: 15, aload: 15.1, hold: 1, dg1: 1956, dg2: 312 }, { tload: 0, hold: 1, dg1: 2050, dg2: 220 }, { tload: 15, aload: 15.1, hold: 1, dg1: 1948, dg2: 317 },
         { tload: 17, hold: 1, dg1: 1918, dg2: 342 }, { tload: 19, aload: 19.1, hold: 1, dg1: 1895, dg2: 368 }, { tload: 0, hold: 1, dg1: 2032, dg2: 230 }, { aload: 40.1, hold: 1, dg1: 809, dg2: 1420 },
-      ] } }, expect: { lmax: 40.1, dmax: 12.35, l12: 39.41, l5: 25.66, safe: 19.7 } },
+      ] } }, expect: { lmax: 40.1, dmax: 12.35, l12: 39.41, l5: 25.66, safe: 19.7, verdict: 'Failure at 40.1 kN (12.35 mm)' } },
   };
 }
 export const PILE_UPLIFT = pileTest('uplift');

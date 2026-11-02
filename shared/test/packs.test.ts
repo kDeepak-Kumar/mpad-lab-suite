@@ -70,3 +70,16 @@ describe('template pack', () => {
     });
   }
 });
+
+describe('validateTemplate', () => {
+  it('passes every pack template and catches mistakes', async () => {
+    const { validateTemplate } = await import('../src');
+    for (const t of all) expect(validateTemplate(t), t.code).toEqual([]);
+    const broken = structuredClone(all.find((t) => t.code === 'PLT')!);
+    broken.results[0].formula = 'MAX(ld.loadx';
+    broken.derived.push({ key: 'area', label: 'dup', formula: '1' });
+    const issues = validateTemplate(broken).map((i) => i.message).join(' | ');
+    expect(issues).toMatch(/Syntax/);
+    expect(issues).toMatch(/used twice/);
+  });
+});

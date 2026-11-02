@@ -60,7 +60,7 @@ export function BoreLog({ data, nMax = 50 }: { data: BoreLogData; nMax?: number 
           <line x1={col.graph[0]} x2={col.graph[1]} y1={y(d)} y2={y(d)} stroke="#eceef1" />
         </g>
       ))}
-      {[0, 0.25, 0.5, 0.75, 1].map((f) => { const xv = gx(f * nTop); return <g key={f}><line x1={xv} x2={xv} y1={top} y2={top + H} stroke="#e1e4e8" /><text x={xv} y={top + H - 3} fontSize={7.5} textAnchor="middle" fill="#6b7280">{Math.round(f * nTop)}</text></g>; })}
+      {[0, 0.2, 0.4, 0.6, 0.8, 1].map((f) => { const xv = gx(f * nTop); return <g key={f}><line x1={xv} x2={xv} y1={top} y2={top + H} stroke="#e1e4e8" /><text x={xv} y={top + H - 3} fontSize={7.5} textAnchor="middle" fill="#6b7280">{Math.round(f * nTop)}</text></g>; })}
       {data.strata.map((s, i) => (
         <g key={i}>
           <rect x={col.log[0]} y={y(s.from)} width={col.log[1] - col.log[0]} height={(s.to - s.from) * ppm} fill={`url(#${pid(s.soil)})`} stroke="#333" strokeWidth={0.8} />

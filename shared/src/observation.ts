@@ -1,4 +1,4 @@
-import { evaluate, isError, type Value } from './formula';
+import { evaluate, isError, parse, references, type Value } from './formula';
 
 /**
  * Observation sheet templates are pure data: fields, constants, formulas, rule checks,
@@ -331,4 +331,46 @@ export function renderSampleCalc(t: ObservationTemplate): string[] {
   if (!t.sampleCalc?.length) return [];
   const res = evaluateObservation(t, exampleInput(t));
   return t.sampleCalc.map((line) => fillRefs(line, res));
+}
+
+/** Every name a formula in this template may use. */
+export function templateNames(t: ObservationTemplate): Set<string> {
+  return new Set<string>([
+    ...t.headerFields.map((f) => f.key), ...t.constants.map((c) => c.key), ...t.derived.map((d) => d.key), ...t.results.map((r) => r.key),
+    ...t.grids.flatMap((g) => g.columns.flatMap((c) => [c.key, `${g.key}.${c.key}`])),
+    ...Object.entries(t.tables ?? {}).flatMap(([n, cols]) => Object.keys(cols).map((c) => `${n}.${c}`)), '_row',
+  ]);
+}
+
+/** Problem in a formula: syntax error or a name the template does not define. */
+export function formulaIssue(src: string, names: Set<string>): string | null {
+  if (!src?.trim()) return null;
+  try { parse(src); } catch (e) { return `Syntax: ${(e as Error).message}`; }
+  const unknown = references(src).filter((n) => !names.has(n) && !['TRUE', 'FALSE'].includes(n.toUpperCase()));
+  return unknown.length ? `Unknown name${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}` : null;
+}
+
+/** Checks a template before it is published: duplicate keys, formula errors, broken report and chart references. */
+export function validateTemplate(t: ObservationTemplate): { where: string; message: string }[] {
+  const out: { where: string; message: string }[] = [];
+  const names = templateNames(t);
+  const dup = (where: string, keys: string[]) => { const seen = new Set<string>(); for (const k of keys) { if (!k) out.push({ where, message: 'A key is empty' }); else if (seen.has(k)) out.push({ where, message: `Key "${k}" is used twice` }); seen.add(k); } };
+  dup('Inputs / constants / calculations', [...t.headerFields.map((f) => f.key), ...t.constants.map((c) => c.key), ...t.derived.map((d) => d.key), ...t.results.map((r) => r.key)]);
+  dup('Reading tables', t.grids.map((g) => g.key));
+  for (const g of t.grids) dup(`Table "${g.label || g.key}"`, g.columns.map((c) => c.key));
+  const f = (where: string, src?: string) => { const m = src ? formulaIssue(src, names) : null; if (m) out.push({ where, message: m }); };
+  for (const d of t.derived) f(`Derived "${d.label}"`, d.formula);
+  for (const g of t.grids) for (const c of g.columns) f(`Column "${c.label}" in "${g.label}"`, c.formula);
+  for (const r of t.results) f(`Result "${r.label}"`, r.formula);
+  for (const c of t.checks) f(`Check "${c.message}"`, c.when);
+  for (const r of t.reportRows) { if (!names.has(r.result)) out.push({ where: `Report row "${r.name}"`, message: `Result "${r.result}" does not exist` }); f(`Report row "${r.name}" requirement`, r.specFormula); }
+  for (const i of t.reportInfo ?? []) f(`Report detail "${i.label}"`, i.value);
+  for (const x of [...(t.reportText ?? []), ...(t.reportIntro ?? [])]) f('Report text condition', x.when);
+  if (t.reportLabel) f('Report label', t.reportLabel);
+  const gridCol = (grid: string, col: string) => t.grids.find((g) => g.key === grid)?.columns.some((c) => c.key === col);
+  for (const ch of allCharts(t)) for (const k of [ch.x, ch.y, ...(ch.series ?? []).flatMap((s) => [s.y, s.x ?? ch.x])]) if (!gridCol(ch.grid, k)) out.push({ where: `Graph "${ch.title}"`, message: `Column "${ch.grid}.${k}" does not exist` });
+  for (const rt of t.reportTables ?? []) for (const c of rt.columns) if (!gridCol(rt.grid, c.key)) out.push({ where: `Report table "${rt.title}"`, message: `Column "${rt.grid}.${c.key}" does not exist` });
+  const texts = [...(t.reportText ?? []), ...(t.reportIntro ?? [])].map((x) => x.text).concat(allCharts(t).map((c) => c.note ?? ''), t.sampleCalc ?? []);
+  for (const txt of texts) for (const m of txt.matchAll(/\{([\w.]+)(?:#\d+)?(?::\d+)?\}/g)) if (!names.has(m[1])) out.push({ where: 'Text placeholder', message: `{${m[1]}} is not a known name` });
+  return out;
 }

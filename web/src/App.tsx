@@ -38,6 +38,7 @@ const CatalogSettings = page(() => import('./pages/settings/Catalog'), 'CatalogS
 const EquipmentPage = page(() => import('./pages/settings/Equipment'), 'EquipmentPage');
 const TemplatesPage = page(() => import('./pages/settings/Templates'), 'TemplatesPage');
 const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'TemplateDesigner');
+const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'), 'ObsTemplateEditor');
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 
@@ -211,6 +212,7 @@ function Shell() {
             <Route path="/settings/users" element={<UsersSettings />} />
             <Route path="/settings/catalog" element={<CatalogSettings />} />
             <Route path="/settings/templates" element={<TemplatesPage />} />
+            <Route path="/settings/templates/obs/:code" element={<ObsTemplateEditor />} />
             <Route path="/settings/templates/:id" element={<TemplateDesigner />} />
             <Route path="/setup" element={<SetupPage />} />
             <Route path="*" element={<Navigate to="/" />} />
