@@ -50,6 +50,7 @@ table.grid-input td { border: 1px solid #e1e5ea; padding: 0; text-align: center;
 table.grid-input td.calc { background: #f8fafc; color: #1d5598; padding: 0 6px; font-variant-numeric: tabular-nums; }
 table.grid-input td.fixed { background: #f6f7f9; padding: 0 6px; white-space: nowrap; }
 table.grid-input input { width: 100%; height: 32px; border: 0; padding: 0 6px; text-align: center; background: #fffbea; color: #1d4ed8; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.grid-input input.bad { background: #fde8e8; color: #b42318; outline: 1px solid #e34948; }
 table.grid-input input:focus { outline: 2px solid var(--brand); background: #fff; }
 table.grid-input input:disabled { background: transparent; color: #111; }
 table.grid-input select { width: 100%; height: 32px; border: 0; padding: 0 4px; background: #fffbea; color: #1d4ed8; font-size: 13px; }

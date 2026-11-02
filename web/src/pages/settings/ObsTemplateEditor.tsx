@@ -130,7 +130,15 @@ export function ObsTemplateEditor() {
 
   const up = (patch: Partial<ObservationTemplate>) => { setDef({ ...def, ...patch }); setDirty(true); };
   const val = (k: string, d?: number) => (preview ? formatValue((preview.results[k] ?? preview.scalars[k]) as never, d) : '');
-  const publish = async (target = def.code, body: ObservationTemplate = def) => {
+  const publish = async (target = def.code, raw: ObservationTemplate = def) => {
+    // numbers typed as text in IS tables and pre-set rows are stored as numbers
+    const num = (v: unknown) => (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : v);
+    const body: ObservationTemplate = {
+      ...raw,
+      tables: raw.tables ? Object.fromEntries(Object.entries(raw.tables).map(([k, cols]) => [k, Object.fromEntries(Object.entries(cols).map(([c, vals]) => [c, vals.map(num) as (number | string)[]]))])) : undefined,
+      grids: raw.grids.map((g) => (g.fixedRows ? { ...g, fixedRows: g.fixedRows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, num(v) as number | string]))) } : g)),
+      headerFields: raw.headerFields.map((f) => (f.type === 'number' && f.default !== undefined ? { ...f, default: num(f.default) as number | string } : f)),
+    };
     setBusy(true);
     try { const r = await api<any>(`/obs-templates/${encodeURIComponent(target)}`, { method: 'PUT', body: { ...body, code: target } }); ok(`Published ${target} v${r.version} – new tests use it; earlier tests keep their version`); setDirty(false); return r; }
     finally { setBusy(false); }
@@ -232,7 +240,8 @@ export function ObsTemplateEditor() {
             </Section>
             <Section title="Results (after the reading tables)" help="Table columns are lists: AVERAGE(cubes.fc), MAX(ld.p), INTERP(2.5, readings.pen, readings.load).">
               <RowsEditor rows={def.results as any[]} onChange={(r) => up({ results: r })} names={names} blank={{ key: '', label: '', formula: '' }} addLabel="Add result" preview={(r) => val(r.key, r.decimals)}
-                cols={[{ key: 'key', label: 'Key', width: 100 }, { key: 'label', label: 'Label', width: 220 }, { key: 'formula', label: 'Formula', type: 'formula' }, { key: 'unit', label: 'Unit', width: 80 }, { key: 'decimals', label: 'Decimals', type: 'number', width: 70 }]} />
+                cols={[{ key: 'key', label: 'Key', width: 100 }, { key: 'label', label: 'Label', width: 220 }, { key: 'formula', label: 'Formula', type: 'formula' }, { key: 'unit', label: 'Unit', width: 80 }, { key: 'decimals', label: 'Decimals', type: 'number', width: 70 },
+                  { key: 'hidden', label: 'Hide on sheet', type: 'bool', width: 70, help: 'Still calculated and usable in formulas and the report, but not listed in the results box' }]} />
             </Section>
             <Section title="Rule checks" help="Shown to the tester when the condition is TRUE. Errors block submission (except for the System Admin).">
               <RowsEditor rows={def.checks as any[]} onChange={(r) => up({ checks: r })} names={names} blank={{ when: '', level: 'warning', message: '' }} addLabel="Add check"
@@ -246,7 +255,8 @@ export function ObsTemplateEditor() {
             <Section title="Result rows on the report" help="Requirement: fixed text, or a formula such as &quot;Min &quot;&FIXED(lim,0).">
               <RowsEditor rows={def.reportRows as any[]} onChange={(r) => up({ reportRows: r })} names={names} blank={{ name: '', unit: '', result: '' }} addLabel="Add report row"
                 cols={[{ key: 'group', label: 'Group', width: 140 }, { key: 'name', label: 'Name' }, { key: 'unit', label: 'Unit', width: 80 }, { key: 'result', label: 'Value', type: 'select', options: resultNames, width: 150 },
-                  { key: 'decimals', label: 'Decimals', type: 'number', width: 70 }, { key: 'spec', label: 'Requirement (text)', width: 150 }, { key: 'specFormula', label: 'Requirement (formula)', type: 'formula' }]} />
+                  { key: 'decimals', label: 'Decimals', type: 'number', width: 70 }, { key: 'spec', label: 'Requirement (text)', width: 150 }, { key: 'specFormula', label: 'Requirement (formula)', type: 'formula' },
+                  { key: 'hidden', label: 'Off by default', type: 'bool', width: 70, help: 'Not printed unless switched on for a test (Show on the report box on the sheet)' }]} />
             </Section>
             <Section title="Test details box" help="Label and a formula for the value, e.g. shape&amp;&quot; &quot;&amp;FIXED(bp,2)&amp;&quot; m&quot;.">
               <RowsEditor rows={(def.reportInfo ?? []) as any[]} onChange={(r) => up({ reportInfo: r })} names={names} blank={{ label: '', value: '' }} addLabel="Add detail"
@@ -264,20 +274,20 @@ export function ObsTemplateEditor() {
               <RowsEditor rows={(def.reportTables ?? []).map((t) => ({ ...t, cols: t.columns.map((c) => `${c.key}=${c.label}`).join(', ') })) as any[]}
                 onChange={(r) => up({ reportTables: r.map(({ cols, ...t }: any) => ({ ...t, columns: String(cols ?? '').split(',').map((x: string) => x.trim()).filter(Boolean).map((x: string) => { const [k, ...l] = x.split('='); const col = def.grids.find((g) => g.key === t.grid)?.columns.find((c) => c.key === k.trim()); return { key: k.trim(), label: l.join('=').trim() || col?.label || k.trim(), decimals: col?.decimals }; }) })) })}
                 blank={{ title: '', grid: gridKeys[0] ?? '', cols: '' }} addLabel="Add table"
-                cols={[{ key: 'title', label: 'Title', width: 200 }, { key: 'grid', label: 'Reading table', type: 'select', options: gridKeys, width: 120 }, { key: 'cols', label: 'Columns (key=Label, …)' }, { key: 'skipBlank', label: 'Skip if blank', width: 100 }]} />
+                cols={[{ key: 'title', label: 'Title', width: 200 }, { key: 'grid', label: 'Reading table', type: 'select', options: gridKeys, width: 120 }, { key: 'cols', label: 'Columns (key=Label, …)' }, { key: 'skipBlank', label: 'Skip if blank', width: 100 }, { key: 'hidden', label: 'Off by default', type: 'bool', width: 70 }]} />
             </Section>
           </Stack>
         </Tabs.Panel>
 
         <Tabs.Panel value="charts">
           <Section title="Graphs" help="Each graph plots two columns of a reading table. Scales adjust to the readings unless you fix them. Extra lines: column:Legend:dashed, separated by ; (e.g. lo:Lower limit:dashed; hi:Upper limit:dashed).">
-            <RowsEditor rows={charts.map((c) => ({ ...c, extra: (c.series ?? []).map((s) => [s.y, s.label, s.dashed ? 'dashed' : ''].filter(Boolean).join(':')).join('; ') })) as any[]}
-              onChange={(r) => setCharts(r.map(({ extra, ...c }: any) => ({ ...c, series: String(extra ?? '').split(';').map((x: string) => x.trim()).filter(Boolean).map((x: string) => { const [y, label, d] = x.split(':'); return { y: y.trim(), label: (label ?? y).trim(), dashed: d?.trim() === 'dashed' || undefined }; }) })))}
+            <RowsEditor rows={charts.map((c) => ({ ...c, off: c.report === false || undefined, extra: (c.series ?? []).map((s) => [s.y, s.label, s.dashed ? 'dashed' : ''].filter(Boolean).join(':')).join('; ') })) as any[]}
+              onChange={(r) => setCharts(r.map(({ extra, off, ...c }: any) => ({ ...c, report: off ? false : undefined, series: String(extra ?? '').split(';').map((x: string) => x.trim()).filter(Boolean).map((x: string) => { const [y, label, d] = x.split(':'); return { y: y.trim(), label: (label ?? y).trim(), dashed: d?.trim() === 'dashed' || undefined }; }) })))}
               blank={{ grid: gridKeys[0] ?? '', x: '', y: '', title: 'New graph', xLabel: '', yLabel: '' }} addLabel="Add graph"
               cols={[{ key: 'title', label: 'Title', width: 170 }, { key: 'grid', label: 'Table', type: 'select', options: gridKeys, width: 90 }, { key: 'x', label: 'X column', width: 80 }, { key: 'y', label: 'Y column', width: 80 },
                 { key: 'xLabel', label: 'X axis label', width: 140 }, { key: 'yLabel', label: 'Y axis label', width: 140 }, { key: 'xLog', label: 'X log', type: 'bool', width: 50 }, { key: 'yLog', label: 'Y log', type: 'bool', width: 50 },
                 { key: 'yReverse', label: 'Y down', type: 'bool', width: 55 }, { key: 'xTop', label: 'X on top', type: 'bool', width: 60 }, { key: 'xMin', label: 'X min', type: 'number', width: 70 }, { key: 'xMax', label: 'X max', type: 'number', width: 70 },
-                { key: 'yMin', label: 'Y min', type: 'number', width: 70 }, { key: 'yMax', label: 'Y max', type: 'number', width: 70 }, { key: 'extra', label: 'Extra lines', width: 180 }, { key: 'note', label: 'Explanation under the graph ({name} allowed)', type: 'textarea', width: 240 }]} />
+                { key: 'yMin', label: 'Y min', type: 'number', width: 70 }, { key: 'yMax', label: 'Y max', type: 'number', width: 70 }, { key: 'extra', label: 'Extra lines', width: 180 }, { key: 'off', label: 'Off on report', type: 'bool', width: 60, help: 'Shown on the sheet only, unless switched on for a test' }, { key: 'note', label: 'Explanation under the graph ({name} allowed)', type: 'textarea', width: 240 }]} />
           </Section>
         </Tabs.Panel>
 
@@ -352,7 +362,6 @@ function GridEditor({ grid, onChange, onDelete, names, preview }: { grid: ObsGri
 
 function TablesEditor({ tables, onChange }: { tables: Record<string, Record<string, (number | string)[]>>; onChange: (t: Record<string, Record<string, (number | string)[]>>) => void }) {
   const names = Object.keys(tables);
-  const conv = (v: string) => (v.trim() !== '' && !isNaN(Number(v)) ? Number(v) : v);
   return (
     <Section title="IS tables and lookup tables" help="Each table has named columns of equal length, used as name.column in formulas, e.g. LOOKUPX(grade, st.g, st.ys). Edit values like a spreadsheet.">
       <Stack>
@@ -360,7 +369,7 @@ function TablesEditor({ tables, onChange }: { tables: Record<string, Record<stri
           const cols = Object.keys(tables[n]);
           const len = Math.max(0, ...cols.map((c) => tables[n][c].length));
           const rows = Array.from({ length: len }, (_, i) => Object.fromEntries(cols.map((c) => [c, tables[n][c][i] ?? ''])));
-          const setRows = (r: Record<string, any>[]) => onChange({ ...tables, [n]: Object.fromEntries(cols.map((c) => [c, r.map((x) => conv(String(x[c] ?? '')))])) });
+          const setRows = (r: Record<string, any>[]) => onChange({ ...tables, [n]: Object.fromEntries(cols.map((c) => [c, r.map((x) => x[c] ?? '')])) });
           return (
             <Paper key={n} withBorder p="xs">
               <Group justify="space-between" mb={4}>

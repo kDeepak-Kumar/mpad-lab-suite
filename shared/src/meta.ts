@@ -22,10 +22,12 @@ export const OBJECTS: ObjectDef[] = [
     f('name', 'Client (legal) name', 'text', { required: true, system: true }), f('short_code', 'Short code', 'text', { help: 'Used in job codes, e.g. XDPL' }),
     f('type', 'Type', 'picklist', { picklist: 'client_type' }), f('gstin', 'GSTIN'), f('state_code', 'State (place of supply)', 'state'), f('pan', 'PAN'),
     f('email', 'Email', 'email'), f('phone', 'Phone', 'phone'), f('payment_terms_days', 'Payment terms (days)', 'integer'),
+    f('discount_pct', 'Discount %', 'number', { help: 'Applied by default on new quotations and invoices for this client' }),
     f('opening_balance', 'Opening balance', 'currency'), f('address', 'Billing address', 'textarea'), f('notes', 'Notes', 'textarea'),
   ] },
   { key: 'site', label: 'Site / project', plural: 'Sites', fields: [
-    f('name', 'Site name', 'text', { required: true, system: true }), f('project', 'Project name'), f('po_number', 'Client PO / WO no.'), f('state_code', 'State', 'state'), f('address', 'Site address', 'textarea'),
+    f('name', 'Site name', 'text', { required: true, system: true }), f('project', 'Project name'), f('po_number', 'Client PO / WO no.'), f('state_code', 'State', 'state'),
+    f('discount_pct', 'Site discount %', 'number', { help: 'Overrides the client discount for documents of this site' }), f('address', 'Site address', 'textarea'),
   ] },
   { key: 'contact', label: 'Contact', plural: 'Contacts', fields: [
     f('name', 'Name', 'text', { required: true, system: true }), f('role', 'Role'), f('phone', 'Phone', 'phone'), f('email', 'Email', 'email'),

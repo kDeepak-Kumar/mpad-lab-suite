@@ -1,6 +1,7 @@
+import { collectAlerts, runAlerts, type AlertSettings } from '../alerts';
 import { Router } from 'express';
 import { z } from 'zod';
-import { DEFAULT_TEMPLATES, type DocKind } from '@suite/shared';
+import { DEFAULT_TEMPLATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
 import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession } from '../auth';
 import { audit, getCompany, ledger } from '../services';
@@ -24,6 +25,15 @@ core.get('/auth/me', h(async (req) => {
   const company = await getCompany(req.user.company_id);
   const { roleDef, ...user } = req.user;
   return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo } };
+}));
+
+// ---------- email alerts (SLA / calibration) ----------
+core.get('/alerts/preview', allow('settings'), h(async (req) => {
+  const company = await getCompany(req.user.company_id);
+  return collectAlerts(req.user.company_id, (company.alerts ?? {}) as AlertSettings);
+}));
+core.post('/alerts/run', allow('settings'), h(async (req) => {
+  try { return await runAlerts(req.user.company_id, { force: true }); } catch (e) { throw new HttpError(400, (e as Error).message); }
 }));
 
 // ---------- company settings ----------
@@ -75,7 +85,7 @@ core.get('/users', h(async (req) => db('users').where({ company_id: req.user.com
 const userSchema = z.object({
   name: z.string().min(1), email: z.string().email(), role: z.string(), designation: z.string().optional().nullable(),
   qualifications: z.string().optional().nullable(), phone: z.string().optional().nullable(), signature: z.string().optional().nullable(),
-  active: z.boolean().optional(), password: z.string().min(6).optional(),
+  active: z.boolean().optional(), password: z.string().min(8, 'Password must be at least 8 characters').optional(),
 });
 async function checkRoleAssign(req: Express.Request & { user: any }, role?: string) {
   if (!role) return;
@@ -111,11 +121,13 @@ core.put('/users/:id', h(async (req) => {
 // ---------- clients, sites, contacts (with custom fields and field-level security) ----------
 const withCustom = (r: Record<string, any>, jsonCols: string[] = ['data']) => { const out = row(r, jsonCols) as Record<string, any>; return { ...out, custom: (out.data ?? {}).custom ?? {} }; };
 const custom = z.record(z.any()).optional();
+const isoDateOpt = z.string().refine((v) => v === '' || isIsoDate(v), 'must be a valid date').optional().nullable().transform((v) => v || null);
 const clientSchema = z.object({
   name: z.string().min(1), short_code: z.string().max(20).optional().nullable(), type: z.string().optional().nullable(),
   gstin: z.string().optional().nullable(), state_code: z.string().optional().nullable(), pan: z.string().optional().nullable(),
   address: z.string().optional().nullable(), email: z.string().optional().nullable(), phone: z.string().optional().nullable(),
-  payment_terms_days: z.coerce.number().optional().nullable(), opening_balance: z.coerce.number().optional().nullable(), notes: z.string().optional().nullable(), custom,
+  payment_terms_days: z.coerce.number().int().min(0).max(365).optional().nullable(), opening_balance: z.coerce.number().optional().nullable(), notes: z.string().optional().nullable(),
+  discount_pct: z.coerce.number().min(0, 'Discount cannot be negative').max(100, 'Discount cannot exceed 100%').optional().nullable(), custom,
 });
 function normaliseClient(c: Record<string, any>) {
   const out = { ...c };
@@ -190,7 +202,8 @@ core.delete('/clients/:id', allow('client.delete'), h(async (req) => {
   return { ok: true };
 }));
 
-const siteSchema = z.object({ name: z.string().min(1), address: z.string().optional().nullable(), project: z.string().optional().nullable(), po_number: z.string().optional().nullable(), state_code: z.string().optional().nullable(), custom });
+const siteSchema = z.object({ name: z.string().trim().min(1, 'Site name is required'), address: z.string().optional().nullable(), project: z.string().optional().nullable(), po_number: z.string().optional().nullable(), state_code: z.string().optional().nullable(),
+  discount_pct: z.coerce.number().min(0, 'Discount cannot be negative').max(100, 'Discount cannot exceed 100%').optional().nullable(), custom });
 core.post('/clients/:id/sites', allow('client.edit'), h(async (req) => {
   const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'site', siteSchema.parse(req.body), { creating: true }));
   const id = await insert(db, 'sites', { ...rest, data: toJson(mergeCustom(null, cu)), client_id: Number(req.params.id), company_id: req.user.company_id, created_at: now() });
@@ -232,9 +245,9 @@ core.delete('/contacts/:id', allow('client.edit'), h(async (req) => {
 const catSchema = z.object({
   code: z.string().optional().nullable(), material: z.string().optional().nullable(), billing_name: z.string().min(1),
   report_name: z.string().optional().nullable(), method: z.string().optional().nullable(), nabl: z.boolean().optional(),
-  unit: z.string().optional().nullable(), rate: z.coerce.number().optional(), sac: z.string().optional().nullable(), gst_rate: z.coerce.number().optional(),
+  unit: z.string().optional().nullable(), rate: z.coerce.number().min(0, 'Rate cannot be negative').optional(), sac: z.string().optional().nullable(), gst_rate: z.coerce.number().min(0).max(28, 'GST rate must be between 0 and 28 %').optional(),
   conditions: z.string().optional().nullable(), report_notes: z.string().optional().nullable(), obs_template_code: z.string().optional().nullable(),
-  tat_days: z.coerce.number().optional().nullable(), active: z.boolean().optional(), custom,
+  tat_days: z.coerce.number().int('Turnaround must be whole days').min(0).max(365).optional().nullable(), active: z.boolean().optional(), custom,
 });
 core.get('/catalog', h(async (req) => (await db('catalog').where({ company_id: req.user.company_id }).orderBy(['material', 'billing_name']))
   .map((r: Record<string, any>) => stripHidden(req.user.roleDef, 'catalog', withCustom(r)))));
@@ -264,10 +277,16 @@ core.delete('/catalog/:id', allow('catalog.delete'), h(async (req) => {
 }));
 
 // ---------- equipment ----------
-const eqSchema = z.object({
+const eqBase = z.object({
   name: z.string().min(1), category: z.string().optional().nullable(), id_no: z.string().optional().nullable(), make: z.string().optional().nullable(),
-  data: z.record(z.any()).optional(), cert_no: z.string().optional().nullable(), cal_date: z.string().optional().nullable(), due_date: z.string().optional().nullable(), active: z.boolean().optional(), custom,
+  data: z.record(z.any()).optional(), cert_no: z.string().optional().nullable(), cal_date: isoDateOpt, due_date: isoDateOpt, active: z.boolean().optional(), custom,
 });
+const eqCheck = (v: { cal_date?: string | null; due_date?: string | null; data?: Record<string, unknown> }, ctx: z.RefinementCtx) => {
+  if (v.cal_date && v.due_date && v.due_date < v.cal_date) ctx.addIssue({ code: 'custom', path: ['due_date'], message: 'Calibration due date cannot be before the calibration date' });
+  for (const [k, x] of Object.entries(v.data ?? {})) if (k !== 'custom' && x !== null && x !== undefined && x !== '' && (typeof x !== 'number' || !Number.isFinite(x)) && typeof x !== 'string') ctx.addIssue({ code: 'custom', path: ['data', k], message: 'Calibration value must be a number' });
+};
+const eqSchema = eqBase.superRefine(eqCheck);
+const eqPatch = eqBase.partial().superRefine(eqCheck);
 core.get('/equipment', h(async (req) => (await db('equipment').where({ company_id: req.user.company_id }).orderBy('name')).map((r: Record<string, any>) => withCustom(r))));
 core.post('/equipment', allow('equipment.create'), h(async (req) => {
   const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'equipment', eqSchema.parse(req.body), { creating: true }));
@@ -278,7 +297,7 @@ core.post('/equipment', allow('equipment.create'), h(async (req) => {
 core.put('/equipment/:id', allow('equipment.edit'), h(async (req) => {
   const ex = await db('equipment').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
   if (!ex) throw new HttpError(404, 'Equipment not found');
-  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'equipment', eqSchema.partial().parse(req.body), { creating: false }));
+  const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'equipment', eqPatch.parse(req.body), { creating: false }));
   const merged = mergeCustom(ex.data, cu);
   await db('equipment').where({ id: ex.id }).update({ ...rest, data: toJson({ ...merged, ...(rest.data ?? {}), custom: merged.custom ?? {} }) });
   await audit(db, req.user, 'equipment', ex.id, 'updated', rest);

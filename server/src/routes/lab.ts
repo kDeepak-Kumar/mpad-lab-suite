@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { evaluateObservation, type ObservationInput } from '@suite/shared';
+import { evaluateObservation, normalizeObservation, type ObservationInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin, type AuthUser } from '../auth';
 import { cleanWrite, mergeCustom } from '../meta';
 import { audit, buildReportData, getCompany, getObsTemplate, nextNumber, formatWithSeq } from '../services';
+import { isIsoDate } from '@suite/shared';
+const isoDate = z.string().refine(isIsoDate, 'Enter a valid date (YYYY-MM-DD)');
 
 export const lab = Router();
 
@@ -19,7 +21,7 @@ lab.get('/workorders', allow('workorder.read'), h(async (req) => {
   const m = new Map((counts as { work_order_id: number; n: number }[]).map((c) => [c.work_order_id, Number(c.n)]));
   return wos.map((w) => ({ ...w, samples: m.get(w.id) ?? 0 }));
 }));
-const woSchema = z.object({ client_id: z.number(), site_id: z.number().nullable().optional(), quote_id: z.number().nullable().optional(), customer_ref: z.string().optional().nullable(), date: z.string().optional(), notes: z.string().optional().nullable() });
+const woSchema = z.object({ client_id: z.number(), site_id: z.number().nullable().optional(), quote_id: z.number().nullable().optional(), customer_ref: z.string().optional().nullable(), date: isoDate.optional(), notes: z.string().optional().nullable() });
 export async function createWorkOrder(user: AuthUser, body: z.infer<typeof woSchema>) {
   const cid = user.company_id;
   return db.transaction(async (trx) => {
@@ -52,9 +54,9 @@ const sampleSchema = z.object({
   work_order_id: z.number().nullable().optional(), client_id: z.number(), site_id: z.number().nullable().optional(),
   accreditation: z.string().optional().nullable(), custom: z.record(z.any()).optional(),
   material: z.string().min(1), description: z.string().optional().nullable(), quantity: z.string().optional().nullable(),
-  condition: z.string().optional().nullable(), source: z.string().optional().nullable(), received_date: z.string(),
+  condition: z.string().optional().nullable(), source: z.string().optional().nullable(), received_date: isoDate,
   customer_ref: z.string().optional().nullable(), specification: z.string().optional().nullable(), sample_label: z.string().optional().nullable(),
-  tests: z.array(z.object({ catalog_id: z.number(), assigned_to: z.number().nullable().optional(), due_date: z.string().optional().nullable() })).min(1, 'Add at least one test'),
+  tests: z.array(z.object({ catalog_id: z.number(), assigned_to: z.number().nullable().optional(), due_date: isoDate.optional().nullable().or(z.literal('')) })).min(1, 'Add at least one test'),
 });
 lab.get('/samples', allow('sample.read'), h(async (req) => {
   const cid = req.user.company_id;
@@ -180,7 +182,11 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
     throw new HttpError(409, 'This observation sheet is locked. Ask the reviewer to return it for correction.');
   const body = z.object({ observation: z.any(), started_at: z.string().nullable().optional(), completed_at: z.string().nullable().optional(), reason: z.string().optional() }).parse(req.body);
   const tpl = await getObsTemplate(cid, t.template_code as string, t.template_version as number);
-  const obs = body.observation as ObservationInput;
+  if (!body.observation || typeof body.observation !== 'object') throw new HttpError(400, 'Observation data is missing');
+  const raw = body.observation as ObservationInput;
+  const norm = normalizeObservation(tpl, { ...raw, header: raw.header ?? {}, grids: raw.grids ?? {} });
+  if (norm.issues.length) throw new HttpError(400, `Please correct: ${norm.issues.slice(0, 3).join('; ')}${norm.issues.length > 3 ? ` (+${norm.issues.length - 3} more)` : ''}`);
+  const obs = norm.input;
   // refresh equipment calibration data from the register (never trust the client copy)
   for (const slot of tpl.equipment ?? []) {
     const sel = obs.equipment?.[slot.key];
@@ -201,6 +207,19 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
   if ((t.status === 'returned' || (admin && !['pending', 'in_progress'].includes(t.status as string))) && changes.length) await audit(db, req.user, 'test', id, 'correction', { changes, reason: body.reason ?? '' });
   else if (changes.length || !t.observation) await audit(db, req.user, 'test', id, t.observation ? 'observation edited' : 'observation started', { changes: changes.length });
   return { results: res.results, checks: res.checks };
+}));
+/** What this test shows on the report (template default unless switched here). Allowed until the report is issued. */
+lab.put('/tests/:id/report-options', h(async (req) => {
+  const cid = req.user.company_id, id = Number(req.params.id);
+  const t = row(await db('tests').where({ id, company_id: cid }).first(), ['observation']);
+  if (!t) throw new HttpError(404, 'Test not found');
+  if (t.status === 'reported') throw new HttpError(409, 'The report is already issued. Amend the report to change what it shows.');
+  if (!(can(req.user, 'enterObservations') || can(req.user, 'reviewTests') || can(req.user, 'reportPrepare'))) throw new HttpError(403, 'Your role cannot change report options');
+  const { show } = z.object({ show: z.record(z.boolean()) }).parse(req.body);
+  const obs = { header: {}, grids: {}, ...((t.observation as ObservationInput | null) ?? {}), show };
+  await db('tests').where({ id }).update({ observation: toJson(obs) });
+  await audit(db, req.user, 'test', id, 'report options changed', { show });
+  return { ok: true };
 }));
 lab.post('/tests/:id/submit', allow('observe'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
@@ -275,7 +294,7 @@ lab.post('/reports/:id/refresh', allow('reportPrepare'), h(async (req) => {
   if (!['draft'].includes(d.status as string)) throw new HttpError(409, 'Only draft reports can be refreshed');
   const old = d.data as Record<string, unknown>;
   const data = await buildReportData(cid, old.testIds as number[]);
-  const keep = Object.fromEntries(Object.entries(old).filter(([k]) => ['client', 'remarks', 'notes', 'accreditation', 'unlocked', 'custom', 'specification', 'condition', 'source', 'customerRef', 'samples'].includes(k) || (old.unlocked as any)?.[k]));
+  const keep = Object.fromEntries(Object.entries(old).filter(([k]) => ['client', 'remarks', 'notes', 'accreditation', 'unlocked', 'custom', 'specification', 'condition', 'source', 'customerRef', 'samples', 'hideCharts'].includes(k) || (old.unlocked as any)?.[k]));
   await db('documents').where({ id }).update({ data: toJson({ ...data, ...keep }), updated_at: now() });
   return { ok: true };
 }));

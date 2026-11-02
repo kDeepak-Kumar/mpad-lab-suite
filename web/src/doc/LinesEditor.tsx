@@ -33,6 +33,17 @@ export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kin
           </Group>
         </Paper>
       )}
+      {showQty && (
+        <Paper withBorder p="sm">
+          <Group gap="md" align="flex-end">
+            <NumberInput disabled={disabled} w={150} label="Discount %" min={0} max={100} decimalScale={2} clampBehavior="strict" value={data.discountPct ?? 0}
+              description={data.unlocked?.discountPct ? 'Set for this document' : 'From client / site'}
+              onChange={(v) => set({ discountPct: v === '' ? 0 : Number(v), unlocked: { ...(data.unlocked ?? {}), discountPct: true } })} />
+            <NumberInput disabled={disabled} w={170} label="Extra discount (₹)" min={0} decimalScale={2} thousandSeparator="," value={data.overallDiscount ?? 0} onChange={(v) => set({ overallDiscount: v === '' ? 0 : Number(v) })} />
+            {totals?.discount > 0 && <Text size="sm" c="dimmed" mb={6}>Total discount ₹{money(totals.discount)}</Text>}
+          </Group>
+        </Paper>
+      )}
       <Stack gap={6}>
         {lines.map((l, i) => (
           <Paper key={i} withBorder p="xs" radius="md">
@@ -45,7 +56,7 @@ export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kin
                 <Textarea disabled={disabled} size="xs" autosize minRows={1} placeholder="Description" value={l.description} onChange={(e) => setLine(i, { description: e.currentTarget.value })} />
                 <Group gap={6} grow wrap="nowrap">
                   <NumberInput disabled={disabled} size="xs" label="Rate (₹)" value={l.rate} min={0} thousandSeparator="," hideControls onChange={(v) => setLine(i, { rate: Number(v) || 0 })} />
-                  {showQty && <NumberInput disabled={disabled} size="xs" label="Qty" value={l.qty ?? 1} min={0} allowDecimal={false} onChange={(v) => setLine(i, { qty: Number(v) || 0 })} />}
+                  {showQty && <NumberInput disabled={disabled} size="xs" label="Qty" value={l.qty ?? 1} min={0} decimalScale={2} onChange={(v) => setLine(i, { qty: Number(v) || 0 })} />}
                   <TextInput disabled={disabled} size="xs" label="Unit" value={l.unit ?? ''} onChange={(e) => setLine(i, { unit: e.currentTarget.value })} />
                   <TextInput disabled={disabled} size="xs" label="Remarks" value={l.remarks ?? ''} onChange={(e) => setLine(i, { remarks: e.currentTarget.value })} />
                   {showQty && <TextInput size="xs" label="Amount" value={money((l.qty ?? 0) * l.rate)} readOnly variant="filled" />}

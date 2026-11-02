@@ -1,3 +1,4 @@
+import { startAlertScheduler } from './alerts';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
@@ -12,6 +13,7 @@ import { analytics } from './analytics';
 import { ensurePlatform } from './meta';
 import { syncTemplatePack } from './packs';
 import { crm, publicApi } from './routes/crm';
+import { files } from './routes/files';
 import compression from 'compression';
 
 const app = express();
@@ -20,7 +22,7 @@ app.use(compression());
 app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-app.use('/api', publicApi, core, lab, finance, analytics, crm);
+app.use('/api', publicApi, core, lab, finance, analytics, crm, files);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built web app (single deployment for cPanel / any Node host)
@@ -38,5 +40,6 @@ migrate()
   .then(() => seedIfEmpty())
   .then(() => ensurePlatform())
   .then(() => syncTemplatePack())
+  .then(() => { if (process.env.ALERTS !== 'off') startAlertScheduler(); })
   .then(() => app.listen(port, () => console.log(`Suite running on http://localhost:${port}${webDir ? '' : ' (API only; web not built)'}`)))
   .catch((e) => { console.error('Startup failed', e); process.exit(1); });

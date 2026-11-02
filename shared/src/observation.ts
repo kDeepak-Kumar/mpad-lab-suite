@@ -23,7 +23,7 @@ export interface Constant {
   /** Lock the value (no manual override on the sheet). By default testers may override constants with a reason. */
   locked?: boolean;
 }
-export interface Calc { key: string; label: string; formula: string; unit?: string; decimals?: number; note?: string }
+export interface Calc { key: string; label: string; formula: string; unit?: string; decimals?: number; note?: string; /** Calculated but not listed in the sheet's results box. */ hidden?: boolean }
 export interface GridColumn {
   key: string; label: string; unit?: string; decimals?: number;
   input?: boolean; formula?: string; width?: number;
@@ -84,6 +84,8 @@ export interface ReportRow {
   spec?: string;
   /** Formula giving the requirement text, e.g. depending on the grade selected on the sheet. */
   specFormula?: string;
+  /** Off by default; can be switched on for a test (customer asks for it). */
+  hidden?: boolean;
 }
 /** A grid printed on the report as its own table (sieve analysis, individual cubes, bars). */
 export interface ReportTable {
@@ -91,6 +93,8 @@ export interface ReportTable {
   columns: { key: string; label: string; decimals?: number }[];
   /** Skip rows where this column is blank. */
   skipBlank?: string;
+  /** Off by default; can be switched on for a test. */
+  hidden?: boolean;
 }
 export interface EquipmentSlot { key: string; label: string; category: string }
 
@@ -136,6 +140,8 @@ export interface ObservationTemplate {
 
 export interface ObservationInput {
   header: Record<string, string | number | null>;
+  /** Per-test choice of what goes on the report: keys from reportPartKeys(); missing keys use the template default. */
+  show?: Record<string, boolean>;
   constants?: Record<string, number | null>;
   equipment?: Record<string, { id: number; name: string; data: Record<string, number | string> } | null>;
   grids: Record<string, Record<string, number | string | null>[]>;
@@ -150,9 +156,8 @@ export interface ObservationResult {
 }
 
 const toNum = (v: unknown): number | null => {
-  if (v === null || v === undefined || v === '') return null;
-  const n = typeof v === 'number' ? v : Number(v);
-  return isNaN(n) ? null : n;
+  const n = parseNumberInput(v);
+  return n === undefined ? null : n;
 };
 
 export function emptyInput(t: ObservationTemplate): ObservationInput {
@@ -374,3 +379,62 @@ export function validateTemplate(t: ObservationTemplate): { where: string; messa
   for (const txt of texts) for (const m of txt.matchAll(/\{([\w.]+)(?:#\d+)?(?::\d+)?\}/g)) if (!names.has(m[1])) out.push({ where: 'Text placeholder', message: `{${m[1]}} is not a known name` });
   return out;
 }
+
+/** Text typed into a number cell → number. Accepts a decimal comma and surrounding spaces; returns undefined when it is not a number. */
+export function parseNumberInput(v: unknown): number | null | undefined {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  const s = String(v).trim().replace(/\s+/g, '');
+  if (s === '' || s === '-' || s === '--') return null;
+  const t = /^-?\d+,\d+$/.test(s) ? s.replace(',', '.') : s;
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t)) return undefined;
+  return Number(t);
+}
+
+/**
+ * Clean an observation before saving: numbers typed as text become numbers, and anything that is not a number
+ * in a number cell is reported (row and column named) instead of silently becoming blank.
+ */
+export function normalizeObservation(t: ObservationTemplate, input: ObservationInput): { input: ObservationInput; issues: string[] } {
+  const issues: string[] = [];
+  const header: ObservationInput['header'] = { ...input.header };
+  for (const f of t.headerFields) {
+    if (f.type !== 'number' || header[f.key] === undefined) continue;
+    const n = parseNumberInput(header[f.key]);
+    if (n === undefined) issues.push(`${f.label}: "${header[f.key]}" is not a number`); else header[f.key] = n;
+  }
+  const constants: Record<string, number | null> = {};
+  for (const [k, v] of Object.entries(input.constants ?? {})) {
+    const c = t.constants.find((x) => x.key === k);
+    const n = parseNumberInput(v);
+    if (n === undefined) issues.push(`${c?.label ?? k}: "${v}" is not a number`); else if (n !== null) constants[k] = n;
+  }
+  const grids: ObservationInput['grids'] = {};
+  for (const [gk, rows] of Object.entries(input.grids ?? {})) {
+    const g = t.grids.find((x) => x.key === gk);
+    grids[gk] = (rows ?? []).map((r, i) => {
+      const out: Record<string, number | string | null> = { ...r };
+      for (const c of g?.columns ?? []) {
+        if (!c.input || c.text || c.options || !(c.key in r)) continue;
+        const n = parseNumberInput(r[c.key]);
+        if (n === undefined) issues.push(`${g!.label || g!.key}, row ${i + 1}, ${c.label}: "${r[c.key]}" is not a number`); else out[c.key] = n;
+      }
+      return out;
+    });
+  }
+  return { input: { ...input, header, constants, grids }, issues };
+}
+
+/** Everything on the report that can be switched on or off for a test, with its template default. */
+export function reportParts(t: ObservationTemplate): { key: string; label: string; kind: 'row' | 'table' | 'chart' | 'info' | 'text'; on: boolean }[] {
+  return [
+    ...t.reportRows.map((r) => ({ key: `row:${r.group ?? ''}|${r.name}|${r.unit}`, label: `${r.group ? `${r.group} – ` : ''}${r.name}${r.unit && r.unit !== '--' ? ` (${r.unit})` : ''}`, kind: 'row' as const, on: !r.hidden })),
+    ...(t.reportTables ?? []).map((r) => ({ key: `table:${r.title}`, label: `Table: ${r.title}`, kind: 'table' as const, on: !r.hidden })),
+    ...allCharts(t).map((c) => ({ key: `chart:${c.title}`, label: `Graph: ${c.title}`, kind: 'chart' as const, on: c.report !== false })),
+    ...((t.reportInfo ?? []).length ? [{ key: 'info', label: 'Test details box', kind: 'info' as const, on: true }] : []),
+    ...((t.reportText ?? []).length ? [{ key: 'text', label: 'Interpretation / calculation text', kind: 'text' as const, on: true }] : []),
+  ];
+}
+/** Is this report part shown for a test (its own choice, else the template default)? */
+export const partShown = (t: ObservationTemplate, show: Record<string, boolean> | undefined, key: string) =>
+  show?.[key] ?? reportParts(t).find((p) => p.key === key)?.on ?? true;

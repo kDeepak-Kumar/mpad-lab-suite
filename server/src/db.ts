@@ -194,6 +194,24 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '004_discounts_files_alerts',
+    up: async (k) => {
+      await k.schema.alterTable('clients', (t) => { t.decimal('discount_pct', 6, 2).nullable(); });
+      await k.schema.alterTable('sites', (t) => { t.decimal('discount_pct', 6, 2).nullable(); });
+      await k.schema.createTable('files', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('entity', 30).notNullable(); t.integer('entity_id').unsigned().notNullable();
+        t.string('name', 255).notNullable(); t.string('mime', 100); t.integer('size').unsigned(); t.text('data', 'longtext'); t.string('note', 300);
+        t.integer('uploaded_by').unsigned().nullable(); t.string('created_at', 32);
+        t.index(['company_id', 'entity', 'entity_id']);
+      });
+      await k.schema.createTable('alert_log', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('kind', 30).notNullable(); t.string('ref', 60).notNullable();
+        t.string('sent_on', 10).notNullable(); t.string('created_at', 32);
+        t.unique(['company_id', 'kind', 'ref', 'sent_on']);
+      });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

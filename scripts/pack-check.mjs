@@ -46,6 +46,23 @@ for (const [name, [material, codes]] of Object.entries(groups).filter(([n]) => !
   if (cats.length !== codes.length) problems.push(`${name}: catalog items missing (${codes.filter((c) => !catalog.some((x) => x.code === c)).join(', ')})`);
   const s = await api('/samples', { client_id: 1, site_id: 1, accreditation: 'NABL', material, received_date: today, quantity: '1 lot', condition: 'Good', source: 'Sample supplied by the customer', tests: cats.map((c) => ({ catalog_id: c.id })) });
   const tests = (await api('/tests?status=pending')).filter((t) => t.sample_id === s.id);
+  // typing check: decimals typed key by key must stay as typed in every sheet (cells, inputs and constants)
+  for (const t of tests) {
+    await page.goto(`${base}/tests/${t.id}`); await page.waitForLoadState('networkidle');
+    const cell = page.locator('table.grid-input input[inputmode="decimal"]').first();
+    if (await cell.count()) {
+      await cell.click(); await cell.fill(''); await cell.pressSequentially('12.05');
+      const v = await cell.inputValue();
+      if (v !== '12.05') problems.push(`${t.template_code}: typed 12.05 in a reading cell, got "${v}"`);
+      await cell.fill(''); await cell.pressSequentially('3,5');
+      if (await cell.evaluate((el) => el.classList.contains('bad'))) problems.push(`${t.template_code}: decimal comma 3,5 flagged as invalid`);
+      await cell.fill(''); await cell.pressSequentially('abc');
+      if (!(await cell.evaluate((el) => el.classList.contains('bad')))) problems.push(`${t.template_code}: text "abc" in a number cell was not flagged`);
+      await cell.fill('');
+    }
+    const konst = page.locator('.mantine-Paper-root:has-text("Constants") input[inputmode="decimal"]').first();
+    if (await konst.count()) { await konst.click(); await konst.pressSequentially('0.25'); const v = await konst.inputValue(); if (v !== '0.25') problems.push(`${t.template_code}: typed 0.25 in a constant, got "${v}"`); await konst.fill(''); }
+  }
   const seen = {};
   for (const t of tests) {
     const full = await api(`/tests/${t.id}`);

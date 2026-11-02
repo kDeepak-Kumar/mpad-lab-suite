@@ -17,6 +17,7 @@ export interface Totals {
   lines: (LineInput & { amount: number; net: number })[];
   subtotal: number;          // sum of qty × rate
   discount: number;          // line discounts + overall discount
+  discountPct?: number;      // client / site / document discount %
   taxable: number;
   interState: boolean;
   cgst: number; sgst: number; igst: number;
@@ -29,7 +30,7 @@ export const r2 = (x: number) => Math.round((x + Number.EPSILON * Math.sign(x)) 
 
 export function computeTotals(
   lines: LineInput[],
-  opts: { supplierState: string; placeOfSupply: string; defaultGst?: number; overallDiscount?: number; roundToRupee?: boolean },
+  opts: { supplierState: string; placeOfSupply: string; defaultGst?: number; overallDiscount?: number; discountPct?: number; roundToRupee?: boolean },
 ): Totals {
   const interState = !!opts.placeOfSupply && opts.supplierState !== opts.placeOfSupply;
   const out = lines.map((l) => {
@@ -39,7 +40,8 @@ export function computeTotals(
   });
   const subtotal = r2(out.reduce((s, l) => s + l.amount, 0));
   const lineNet = r2(out.reduce((s, l) => s + l.net, 0));
-  const overall = r2(opts.overallDiscount ?? 0);
+  const pct = Math.min(100, Math.max(0, Number(opts.discountPct ?? 0) || 0));
+  const overall = Math.min(lineNet, r2(lineNet * pct / 100 + Math.max(0, opts.overallDiscount ?? 0)));
   const taxable = r2(lineNet - overall);
   // spread the overall discount across lines proportionally for the tax summary
   const factor = lineNet > 0 ? taxable / lineNet : 0;
@@ -60,7 +62,7 @@ export function computeTotals(
   const igst = r2(taxSummary.reduce((s, t) => s + t.igst, 0));
   const gross = r2(taxable + cgst + sgst + igst);
   const total = opts.roundToRupee === false ? gross : Math.round(gross);
-  return { lines: out, subtotal, discount: r2(subtotal - taxable), taxable, interState, cgst, sgst, igst, taxSummary, roundOff: r2(total - gross), total };
+  return { lines: out, subtotal, discount: r2(subtotal - taxable), discountPct: pct || undefined, taxable, interState, cgst, sgst, igst, taxSummary, roundOff: r2(total - gross), total };
 }
 
 /** 1234567.5 → "12,34,567.50" (Indian grouping). */

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Knex } from 'knex';
 import {
   counterScope, formatNumber, formatDate, DEFAULT_NUMBERING, type ObservationTemplate, evaluateObservation,
-  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries, allCharts, fillRefs, reportTexts, reportInfoRows, boreLogData, evaluate, isError, type BoreLogData,
+  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries, allCharts, fillRefs, reportTexts, reportInfoRows, boreLogData, evaluate, isError, partShown, type BoreLogData,
 } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from './db';
 import { HttpError, type AuthUser } from './auth';
@@ -58,6 +58,8 @@ export async function clientSnapshot(cid: number, clientId: number, siteId?: num
     client: { id: c.id, name: c.name, address: c.address, gstin: c.gstin, stateCode: c.state_code, stateName: stateName(c.state_code), shortCode: c.short_code, email: c.email, phone: c.phone },
     site: site ? { id: site.id, name: site.name, address: site.address, project: site.project, po: site.po_number } : null,
     contact: contact ? { id: contact.id, name: contact.name, phone: contact.phone, email: contact.email } : null,
+    /** Default discount: the site's if set, otherwise the client's. */
+    defaultDiscountPct: site?.discount_pct !== null && site?.discount_pct !== undefined ? Number(site.discount_pct) : c.discount_pct !== null && c.discount_pct !== undefined ? Number(c.discount_pct) : 0,
   };
 }
 
@@ -114,12 +116,14 @@ export async function buildReportData(cid: number, testIds: number[]) {
     const sIdx = sampleIds.indexOf(t.sample_id as number);
     const sampleLabel = samples[sIdx]?.sample_label || samples[sIdx]?.code || '';
     const results = (t.results ?? {}) as Record<string, unknown>;
-    const res = evaluateObservation(tpl, (t.observation ?? { header: {}, grids: {} }) as ObservationInput);
+    const obsIn = (t.observation ?? { header: {}, grids: {} }) as ObservationInput;
+    const res = evaluateObservation(tpl, obsIn);
+    const shown = (key: string) => partShown(tpl, obsIn.show, key);
     const lv = tpl.reportLabel ? evaluate(tpl.reportLabel, (n) => res.scalars[n] ?? res.results[n]) : '';
     const label = lv && !isError(lv) ? formatValue(lv) : '';
     const multi = (perKey.get(`${t.template_code}|${t.sample_id}`) ?? 1) > 1;
     const suffix = sampleIds.length > 1 ? ` – ${sampleLabel}` : '';
-    for (const rr of tpl.reportRows) {
+    for (const rr of tpl.reportRows.filter((x) => shown(`row:${x.group ?? ''}|${x.name}|${x.unit}`))) {
       const group = multi && label ? label : rr.group;
       const key = `${tpl.code}|${multi ? label : ''}|${rr.group ?? ''}|${rr.name}|${rr.unit}`;
       let r = rows.find((x) => x.key === key);
@@ -128,14 +132,14 @@ export async function buildReportData(cid: number, testIds: number[]) {
       if (!r.spec) r.spec = reportSpec(rr, res);
     }
     const dTables: Table[] = [];
-    for (const rt of tpl.reportTables ?? []) {
+    for (const rt of (tpl.reportTables ?? []).filter((x) => shown(`table:${x.title}`))) {
       const body = reportTableRows(tpl, rt, res);
       if (body.length) dTables.push({ title: rt.title, sample: sampleIds.length > 1 ? sampleLabel : '', columns: rt.columns.map((c) => c.label), rows: body });
     }
     if (tpl.reportIntro?.length && !intros.some((x) => x.code === tpl.code)) intros.push({ code: tpl.code, title: cat?.report_name || tpl.name, texts: reportTexts(tpl, res, 'intro') });
-    const info = reportInfoRows(tpl, res), texts = reportTexts(tpl, res);
+    const info = shown('info') ? reportInfoRows(tpl, res) : [], texts = shown('text') ? reportTexts(tpl, res) : [];
     const dCharts: typeof charts = [];
-    for (const ch of allCharts(tpl).filter((c) => c.report !== false)) {
+    for (const ch of allCharts(tpl).filter((c) => shown(`chart:${c.title}`))) {
       const series = chartSeries(tpl, res, ch);
       if ((series[0]?.points.length ?? 0) > 1) {
         const { grid: _g, x: _x, y: _y, series: _s, report: _r, note, title, ...opts } = ch;

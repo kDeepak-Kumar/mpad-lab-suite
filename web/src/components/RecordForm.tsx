@@ -1,5 +1,6 @@
 import { Checkbox, MultiSelect, NumberInput, Select, SimpleGrid, Textarea, TextInput } from '@mantine/core';
-import { INDIAN_STATES, type FieldDef } from '@suite/shared';
+import { useState } from 'react';
+import { INDIAN_STATES, fieldIssue, type FieldDef } from '@suite/shared';
 import { useFields, usePicklist } from '../ctx';
 
 type F = FieldDef & { access: 'edit' | 'read' | 'hidden' };
@@ -7,7 +8,10 @@ type F = FieldDef & { access: 'edit' | 'read' | 'hidden' };
 export function FieldInput({ f, value, onChange, disabled, error }: { f: FieldDef & { access?: string }; value: unknown; onChange: (v: unknown) => void; disabled?: boolean; error?: string }) {
   const options = usePicklist(f.picklist);
   const ro = disabled || f.access === 'read';
-  const common = { label: f.label, description: f.help, required: f.required, disabled: ro, error };
+  // Format problems (email, phone, GSTIN, PAN, PIN…) show once the user leaves the field, so typing isn't interrupted.
+  const [touched, setTouched] = useState(false);
+  const live = touched && !ro ? fieldIssue(f, value) : null;
+  const common = { label: f.label, description: f.help, required: f.required, disabled: ro, error: error || live || undefined, onBlur: () => setTouched(true) };
   switch (f.type) {
     case 'textarea': return <Textarea {...common} autosize minRows={2} value={(value as string) ?? ''} onChange={(e) => onChange(e.currentTarget.value)} />;
     case 'number': case 'integer': case 'currency':

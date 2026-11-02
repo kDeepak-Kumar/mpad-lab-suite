@@ -54,7 +54,23 @@ export const h = (fn: (req: Request, res: Response) => Promise<unknown>): Reques
   fn(req, res).then((out) => { if (!res.headersSent) res.json(out ?? { ok: true }); }).catch((e: unknown) => {
     const status = e instanceof HttpError ? e.status : (e as { name?: string })?.name === 'ZodError' ? 400 : e instanceof Error && /required|must be|not valid|checksum/.test(e.message) ? 400 : 500;
     if (status === 500) console.error(e);
-    const msg = (e as { name?: string })?.name === 'ZodError' ? 'Some fields are missing or invalid: ' + (e as any).issues.map((i: any) => i.path.join('.') + ' ' + i.message).join('; ') : e instanceof Error ? e.message : 'Unexpected error';
+    const msg = (e as { name?: string })?.name === 'ZodError' ? zodMessage(e) : e instanceof Error ? e.message : 'Unexpected error';
     res.status(status).json({ error: msg });
   });
 };
+
+/** Turn zod issues into short sentences a lab user can act on, e.g. "Received date: Enter a valid date". */
+export function zodMessage(e: unknown) {
+  const label = (p: (string | number)[]) => p.filter((x) => typeof x === 'string').map((x) => String(x).replace(/_id$/, '').replace(/_pct$/, ' %').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')).join(' › ').replace(/^./, (c) => c.toUpperCase());
+  const row = (p: (string | number)[]) => { const n = p.find((x) => typeof x === 'number'); return typeof n === 'number' ? ` (row ${n + 1})` : ''; };
+  const text = (i: any) => {
+    if (i.code === 'invalid_type' && i.received === 'undefined') return 'is required';
+    if (i.code === 'invalid_type') return `should be ${i.expected === 'number' ? 'a number' : i.expected === 'string' ? 'text' : i.expected}`;
+    if (i.code === 'too_small' && i.type === 'string' && i.minimum === 1) return 'is required';
+    if (i.code === 'too_small' && i.type === 'number') return i.message.startsWith('Number must') ? `must be at least ${i.minimum}` : i.message;
+    if (i.code === 'too_big' && i.type === 'number') return i.message.startsWith('Number must') ? `must be at most ${i.maximum}` : i.message;
+    return i.message === 'Invalid email' ? 'is not a valid email address' : i.message;
+  };
+  const issues = ((e as any).issues ?? []) as any[];
+  return 'Please check: ' + issues.slice(0, 6).map((i) => `${label(i.path) || 'Value'}${row(i.path)}: ${text(i)}`).join('; ') + (issues.length > 6 ? ` (+${issues.length - 6} more)` : '');
+}

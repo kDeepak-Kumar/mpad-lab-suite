@@ -11,3 +11,4 @@ export * from './meta';
 export * from './analytics';
 export * from './packs/soil-legend';
 export * from './packs/soil-field';
+export * from './validate';

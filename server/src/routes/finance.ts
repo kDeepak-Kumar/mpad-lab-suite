@@ -8,6 +8,8 @@ import { cleanWrite } from '../meta';
 import { audit, clientSnapshot, getCompany, getDocTemplate, ledger, nextNumber, paidAgainst, refreshInvoiceStatus, sha256 } from '../services';
 import { followUpsDue, scheduleQuoteFollowUp, verifyToken } from './crm';
 import { createWorkOrder } from './lab';
+import { isIsoDate } from '@suite/shared';
+const isoDate = z.string().refine(isIsoDate, 'Enter a valid date (YYYY-MM-DD)');
 
 export const finance = Router();
 
@@ -20,6 +22,22 @@ async function loadDoc(cid: number, id: number) {
   return d as Record<string, unknown> & { id: number; kind: string; status: string; data: Record<string, unknown>; client_id: number };
 }
 
+/** Lines and discounts must be sensible numbers before totals are worked out. */
+function checkDocData(data: Record<string, unknown> | undefined) {
+  if (!data) return;
+  const lines = (data.lines ?? []) as LineInput[];
+  if (!Array.isArray(lines)) throw new HttpError(400, 'Lines are not valid');
+  lines.forEach((l, i) => {
+    if (!String(l.description ?? '').trim()) throw new HttpError(400, `Line ${i + 1}: description is required`);
+    if (!Number.isFinite(Number(l.rate)) || Number(l.rate) < 0) throw new HttpError(400, `Line ${i + 1}: rate must be a number of 0 or more`);
+    if (l.qty !== null && l.qty !== undefined && (!Number.isFinite(Number(l.qty)) || Number(l.qty) < 0)) throw new HttpError(400, `Line ${i + 1}: quantity must be 0 or more`);
+    if (l.discountPct !== undefined && l.discountPct !== null && (Number(l.discountPct) < 0 || Number(l.discountPct) > 100)) throw new HttpError(400, `Line ${i + 1}: discount must be between 0 and 100%`);
+    if (l.gstRate !== undefined && l.gstRate !== null && (Number(l.gstRate) < 0 || Number(l.gstRate) > 28)) throw new HttpError(400, `Line ${i + 1}: GST rate must be between 0 and 28%`);
+  });
+  if (data.discountPct !== undefined && data.discountPct !== null && (Number(data.discountPct) < 0 || Number(data.discountPct) > 100 || isNaN(Number(data.discountPct)))) throw new HttpError(400, 'Discount must be between 0 and 100%');
+  if (data.overallDiscount !== undefined && data.overallDiscount !== null && (Number(data.overallDiscount) < 0 || isNaN(Number(data.overallDiscount)))) throw new HttpError(400, 'Discount amount cannot be negative');
+}
+
 async function totalsFor(cid: number, data: Record<string, unknown>) {
   const company = await getCompany(cid);
   const lines = (data.lines ?? []) as LineInput[];
@@ -27,7 +45,7 @@ async function totalsFor(cid: number, data: Record<string, unknown>) {
   const includeGst = data.includeGst ?? true;
   const t = computeTotals(lines.map((l) => ({ ...l, qty: showQty ? (l.qty ?? 1) : 0, gstRate: includeGst ? l.gstRate : 0 })), {
     supplierState: company.stateCode ?? '', placeOfSupply: String(data.placeOfSupply ?? company.stateCode ?? ''),
-    defaultGst: includeGst ? company.defaults?.gstRate ?? 18 : 0, overallDiscount: Number(data.overallDiscount ?? 0),
+    defaultGst: includeGst ? company.defaults?.gstRate ?? 18 : 0, overallDiscount: Number(data.overallDiscount ?? 0), discountPct: Number(data.discountPct ?? 0),
   });
   return t;
 }
@@ -65,9 +83,10 @@ finance.get('/documents/:id', h(async (req) => {
 // ---------- create / update ----------
 const docSchema = z.object({
   kind: z.enum(['quote', 'invoice']), client_id: z.number(), site_id: z.number().nullable().optional(), contact_id: z.number().nullable().optional(),
-  work_order_id: z.number().nullable().optional(), date: z.string().optional(), data: z.record(z.any()).default({}), template_id: z.number().nullable().optional(),
+  work_order_id: z.number().nullable().optional(), date: isoDate.optional(), data: z.record(z.any()).default({}), template_id: z.number().nullable().optional(),
 });
 export async function createDocument(user: { company_id: number; id: number }, body: z.infer<typeof docSchema>) {
+  checkDocData(body.data);
   const cid = user.company_id;
   const company = await getCompany(cid);
   const snap = await clientSnapshot(cid, body.client_id, body.site_id, body.contact_id);
@@ -79,6 +98,7 @@ export async function createDocument(user: { company_id: number; id: number }, b
     copyLabel: body.kind === 'invoice' ? 'ORIGINAL COPY' : undefined, sac: defaults.sac ?? '998346', validityDays: defaults.validityDays ?? 30,
     ...body.data, ...snap, placeOfSupply, placeOfSupplyName: stateName(placeOfSupply),
   };
+  if (body.data.discountPct === undefined) data.discountPct = snap.defaultDiscountPct;
   if (body.kind === 'quote' && !body.data.notes) data.notes = defaults.quoteNotes ?? '';
   const tpl = await getDocTemplate(cid, body.kind, body.template_id);
   const totals = await totalsFor(cid, data);
@@ -103,7 +123,7 @@ finance.put('/documents/:id', h(async (req) => {
   if (!can(req.user, permFor(d.kind))) throw new HttpError(403, 'Your role does not allow this action');
   const body = z.object({
     data: z.record(z.any()).optional(), overrides: z.record(z.any()).optional(), template_id: z.number().nullable().optional(),
-    client_id: z.number().optional(), site_id: z.number().nullable().optional(), contact_id: z.number().nullable().optional(), date: z.string().optional(),
+    client_id: z.number().optional(), site_id: z.number().nullable().optional(), contact_id: z.number().nullable().optional(), date: isoDate.optional(),
     number: z.string().nullable().optional(),
   }).parse(req.body);
   const admin = isAdmin(req.user);
@@ -111,6 +131,7 @@ finance.put('/documents/:id', h(async (req) => {
   const locked = issued || (!admin && ((d.kind === 'quote' && d.status !== 'draft') || (d.kind === 'report' && d.status === 'verified')));
   if (locked && (body.data || body.client_id || body.date || body.number !== undefined)) throw new HttpError(409, issued ? (admin ? 'Unlock the issued document first (System Admin).' : 'Issued documents cannot be changed. Use an amendment or credit note.') : 'This quotation was already sent. Create a revision to change it.');
   if (locked && body.overrides) throw new HttpError(409, 'Layout of an issued document is frozen');
+  checkDocData(body.data);
   let data = { ...d.data, ...(body.data ?? {}) };
   if (body.data?.custom) data.custom = (await cleanWrite(cid, req.user.roleDef, d.kind, { custom: body.data.custom }, { creating: false })).custom;
   if (body.client_id || body.site_id !== undefined || body.contact_id !== undefined) {
@@ -122,6 +143,7 @@ finance.put('/documents/:id', h(async (req) => {
       const before = (data as any)[part] ?? {};
       for (const k of Object.keys(before)) if (unlocked[`${part}.${k}`]) merged[part] = { ...(merged[part] ?? {}), [k]: before[k] };
     }
+    if (!(data.unlocked as Record<string, boolean> | undefined)?.discountPct) merged.discountPct = snap.defaultDiscountPct;
     data = merged;
   }
   if (data.placeOfSupply && !(data.unlocked as any)?.placeOfSupplyName) data.placeOfSupplyName = stateName(String(data.placeOfSupply));
@@ -229,7 +251,7 @@ finance.post('/documents/:id/to-invoice', allow('invoices'), h(async (req) => {
   const d = await loadDoc(req.user.company_id, Number(req.params.id));
   if (d.kind !== 'quote') throw new HttpError(400, 'Only quotations can be converted');
   const lines = ((d.data.lines ?? []) as LineInput[]).map((l) => ({ ...l, qty: l.qty || 1 }));
-  return createDocument(req.user, { kind: 'invoice', client_id: d.client_id, site_id: d.site_id as number, work_order_id: d.work_order_id as number, contact_id: (d.data.contact as { id?: number })?.id ?? null, data: { lines, customerRef: d.data.customerRef, accreditation: d.data.accreditation } });
+  return createDocument(req.user, { kind: 'invoice', client_id: d.client_id, site_id: d.site_id as number, work_order_id: d.work_order_id as number, contact_id: (d.data.contact as { id?: number })?.id ?? null, data: { lines, customerRef: d.data.customerRef, accreditation: d.data.accreditation, discountPct: d.data.discountPct, overallDiscount: d.data.overallDiscount } });
 }));
 
 // ---------- issue (invoice, report) ----------
@@ -311,9 +333,10 @@ finance.get('/invoices/outstanding', h(async (req) => {
 finance.post('/payments', allow('recordPayments'), h(async (req) => {
   const cid = req.user.company_id;
   const p = z.object({
-    client_id: z.number(), date: z.string(), amount: z.number().positive(), tds: z.number().min(0).default(0), mode: z.string(), reference: z.string().optional().nullable(),
+    client_id: z.number(), date: isoDate, amount: z.number().positive('Amount must be more than zero'), tds: z.number().min(0, 'TDS cannot be negative').default(0), mode: z.string().min(1, 'Choose a payment mode'), reference: z.string().optional().nullable(),
     notes: z.string().optional().nullable(), allocations: z.array(z.object({ invoiceId: z.number(), amount: z.number().positive() })).default([]),
   }).parse(req.body);
+  if (p.tds > p.amount) throw new HttpError(400, 'TDS cannot be more than the amount received');
   const alloc = p.allocations.reduce((s, a) => s + a.amount, 0);
   if (alloc - (p.amount + p.tds) > 0.5) throw new HttpError(400, 'Allocated amount is more than the payment plus TDS');
   return db.transaction(async (trx) => {

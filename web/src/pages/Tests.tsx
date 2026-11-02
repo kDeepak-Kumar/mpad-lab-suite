@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
+import { Alert, Button, Checkbox, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
 import { IconAlertTriangle, IconPrinter } from '@tabler/icons-react';
-import { emptyInput, evaluateObservation, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
+import { emptyInput, evaluateObservation, normalizeObservation, parseNumberInput, reportParts, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
@@ -77,15 +77,17 @@ export function TestSheetPage() {
   const editable = (['pending', 'in_progress', 'returned'].includes(t.status) && can('enterObservations')) || (admin && t.status !== 'reported');
   const canReview = (t.status === 'submitted' || (admin && ['in_progress', 'returned'].includes(t.status))) && can('reviewTests');
   const setHeader = (k: string, v: any) => { setObs({ ...obs, header: { ...obs.header, [k]: v } }); setDirty(true); };
-  const setConst = (k: string, v: string) => { const c = { ...(obs.constants ?? {}) }; if (v === '') delete c[k]; else c[k] = (isNaN(Number(v)) ? v : Number(v)) as never; setObs({ ...obs, constants: c }); setDirty(true); };
+  // keep exactly what is typed ("12.", "0.0", "-") – numbers are read when calculating and saving
+  const setConst = (k: string, v: string) => { const c = { ...(obs.constants ?? {}) }; if (v === '') delete c[k]; else c[k] = v as never; setObs({ ...obs, constants: c }); setDirty(true); };
   const setCell = (g: string, i: number, k: string, v: string, text = false) => {
-    const rows = [...(obs.grids[g] ?? [])]; rows[i] = { ...rows[i], [k]: v === '' ? null : text || isNaN(Number(v)) ? v : Number(v) };
+    const rows = [...(obs.grids[g] ?? [])]; rows[i] = { ...rows[i], [k]: v === '' ? null : v };
+    void text;
     setObs({ ...obs, grids: { ...obs.grids, [g]: rows } }); setDirty(true);
   };
   const save = async (reason?: string) => {
     setBusy(true);
     try {
-      const r = await api<any>(`/tests/${t.id}/observation`, { method: 'PUT', body: { observation: obs, started_at: dates.started_at || null, completed_at: dates.completed_at || null, reason } });
+      const r = await api<any>(`/tests/${t.id}/observation`, { method: 'PUT', body: { observation: normalizeObservation(tpl!, obs).input, started_at: dates.started_at || null, completed_at: dates.completed_at || null, reason } });
       setDirty(false); ok('Observation sheet saved'); await reload(); return r;
     } finally { setBusy(false); }
   };
@@ -97,7 +99,8 @@ export function TestSheetPage() {
     if (dirty) await save();
     await api(`/tests/${t.id}/review`, { body: { action, note } }); ok(action === 'accept' ? 'Accepted – ready for the report' : 'Returned to the technician'); reload();
   };
-  const errors = result.checks.filter((c) => c.level === 'error');
+  const inputIssues = normalizeObservation(tpl, obs).issues;
+  const errors = [...result.checks.filter((c) => c.level === 'error'), ...inputIssues.map((m) => ({ level: 'error' as const, message: m }))];
   const s = t.sample;
 
   return (
@@ -138,6 +141,7 @@ export function TestSheetPage() {
                     ? <Select key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} data={f.options ?? []} value={(obs.header[f.key] as string) ?? (f.default !== undefined ? String(f.default) : null)} disabled={!editable} onChange={(v) => setHeader(f.key, v)} description={f.help} />
                     : <TextInput key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} type={f.type === 'date' ? 'date' : 'text'} inputMode={f.type === 'number' ? 'decimal' : undefined}
                         placeholder={f.default !== undefined ? String(f.default) : undefined} description={f.help}
+                        error={f.type === 'number' && parseNumberInput(obs.header[f.key]) === undefined ? 'Enter a number' : undefined}
                         value={(obs.header[f.key] as string) ?? ''} disabled={!editable} onChange={(e) => setHeader(f.key, f.type === 'number' ? (e.currentTarget.value === '' ? null : e.currentTarget.value) : e.currentTarget.value)} />)}
                   {(tpl.equipment ?? []).map((slot) => {
                     const sel = obs.equipment?.[slot.key]?.id; const e = t.equipment.find((x: any) => x.id === sel);
@@ -160,6 +164,7 @@ export function TestSheetPage() {
                               description={manual ? 'Entered manually – clear to use the ' + src : c.note ?? `Using the ${src}`}
                               placeholder={formatValue(result.scalars[c.key] as never) || (c.fromEquipment ? 'select equipment or enter' : '')}
                               styles={manual ? { input: { borderColor: '#eda100', background: '#fffaf0' } } : undefined}
+                              error={manual && parseNumberInput(obs.constants![c.key]) === undefined ? 'Enter a number' : undefined}
                               value={manual ? String(obs.constants![c.key]) : ''} onChange={(e) => setConst(c.key, e.currentTarget.value)} />;
                       })}
                       {tpl.derived.map((c) => <Text key={c.key} size="xs" style={{ alignSelf: 'end' }}>{c.label}: <b>{formatValue(result.scalars[c.key] as never, c.decimals) || '—'}</b> {c.unit}</Text>)}
@@ -178,7 +183,8 @@ export function TestSheetPage() {
                             {g.columns.filter((c) => !c.hidden).map((c) => c.input
                               ? <td key={c.key} style={c.text ? { minWidth: 120 } : undefined}>{c.options
                                   ? <select value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, true)}><option value="" />{c.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
-                                  : <input inputMode={c.text || c.key === 'id' ? 'text' : 'decimal'} value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, c.text)} />}</td>
+                                  : <input inputMode={c.text || c.key === 'id' ? 'text' : 'decimal'} className={!c.text && parseNumberInput(row[c.key]) === undefined ? 'bad' : undefined} title={!c.text && parseNumberInput(row[c.key]) === undefined ? 'Not a number' : undefined}
+                                      value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, c.text)} />}</td>
                               : <td key={c.key} className={c.formula ? 'calc' : 'fixed'}>{formatValue(result.grids[g.key]?.[i]?.[c.key] as never, c.decimals)}</td>)}
                           </tr>
                         ))}
@@ -193,9 +199,10 @@ export function TestSheetPage() {
                 <Paper withBorder p="sm" bg="#f1f6ff">
                   <Text size="sm" fw={600} mb={4}>Results</Text>
                   <SimpleGrid cols={{ base: 1, md: 2 }} spacing={4}>
-                    {tpl.results.map((r) => <Text key={r.key} size="sm">{r.label}: <b>{formatValue(result.results[r.key] as never, r.decimals) || '—'}</b> {r.unit}</Text>)}
+                    {tpl.results.filter((r) => !r.hidden).map((r) => <Text key={r.key} size="sm">{r.label}: <b>{formatValue(result.results[r.key] as never, r.decimals) || '—'}</b> {r.unit}</Text>)}
                   </SimpleGrid>
                 </Paper>
+                {inputIssues.length > 0 && <Alert color="red" icon={<IconAlertTriangle size={16} />} py={6} title="Fix these entries before saving">{inputIssues.slice(0, 6).map((m, i) => <div key={i}>{m}</div>)}</Alert>}
                 {result.checks.map((c, i) => <Alert key={i} color={c.level === 'error' ? 'red' : 'orange'} icon={<IconAlertTriangle size={16} />} py={6}>{c.message}</Alert>)}
                 {allCharts(tpl).map((ch, i) => {
                   const series = chartSeries(tpl, result, ch);
@@ -211,6 +218,7 @@ export function TestSheetPage() {
           </div>
         </Grid.Col>
         <Grid.Col span={{ base: 12, xl: 4 }} className="no-print">
+          <ReportOptions t={t} tpl={tpl} obs={obs} onSaved={(show) => setObs({ ...obs, show })} />
           <TestGuide tpl={tpl} />
           <Paper withBorder p="md">
             <Text fw={600} mb="xs">History and corrections</Text>
@@ -232,6 +240,33 @@ export function TestSheetPage() {
       <ReasonModal opened={returnOpen} title="Return for correction – what needs fixing?" onClose={() => setReturnOpen(false)} onSubmit={async (n) => { setReturnOpen(false); await review('return', n); }} />
       <ReasonModal opened={reasonOpen} title="Reason for correction" onClose={() => setReasonOpen(false)} onSubmit={async (n) => { setReasonOpen(false); await save(n); }} />
     </>
+  );
+}
+
+/** Switch report rows, tables and graphs on or off for this test (customers need different parameters). */
+function ReportOptions({ t, tpl, obs, onSaved }: { t: any; tpl: ObservationTemplate; obs: ObservationInput; onSaved: (show: Record<string, boolean>) => void }) {
+  const can = useCan();
+  const parts = reportParts(tpl);
+  const [show, setShow] = useState<Record<string, boolean>>(obs.show ?? {});
+  useEffect(() => { setShow(obs.show ?? {}); }, [t.id]);
+  if (!parts.length) return null;
+  const allowed = t.status !== 'reported' && (can('enterObservations') || can('reviewTests') || can('reportPrepare'));
+  const toggle = async (key: string, on: boolean) => {
+    const next = { ...show, [key]: on };
+    const def = parts.find((p) => p.key === key)?.on;
+    if (on === def) delete next[key];
+    setShow(next);
+    await api(`/tests/${t.id}/report-options`, { method: 'PUT', body: { show: next } });
+    ok(t.report_id ? 'Saved – use “Refresh results” on the report draft' : 'Saved for this test'); onSaved(next);
+  };
+  return (
+    <Paper withBorder p="md" mb="md">
+      <Text fw={600} mb={2}>Show on the report</Text>
+      <Text size="xs" c="dimmed" mb="xs">Untick what this customer does not need. Everything is still calculated; the template sets the defaults.</Text>
+      <Stack gap={4}>
+        {parts.map((p) => <Checkbox key={p.key} size="xs" label={p.label} disabled={!allowed} checked={show[p.key] ?? p.on} onChange={(e) => toggle(p.key, e.currentTarget.checked)} />)}
+      </Stack>
+    </Paper>
   );
 }
 

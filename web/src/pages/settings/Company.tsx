@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor } from '@mantine/core';
-import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber } from '@suite/shared';
+import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
 
@@ -32,7 +32,7 @@ export function CompanySettings() {
     <>
       <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={<Button onClick={save}>Save settings</Button>} />
       <Tabs defaultValue="profile">
-        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="email">Email</Tabs.Tab></Tabs.List>
+        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="email">Email & alerts</Tabs.Tab></Tabs.List>
         <Tabs.Panel value="profile">
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
@@ -108,6 +108,7 @@ export function CompanySettings() {
             {T('Username (email address)', 'smtp.user')}{T('From (name <email>)', 'smtp.from', { placeholder: `${v.name} <lab@example.com>` })}
             <Switch label="Use SSL/TLS (port 465)" checked={v.smtp?.secure ?? true} onChange={(e) => set('smtp.secure', e.currentTarget.checked)} />
           </SimpleGrid>
+          <AlertSettings v={v} set={set} />
         </Tabs.Panel>
       </Tabs>
     </>
@@ -147,5 +148,39 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
       <Group><Button variant="default" loading={busy} onClick={runTest} disabled={!ai.model}>Test connection</Button><Text size="sm" c={test.startsWith('✓') ? 'teal' : 'red'}>{test}</Text></Group>
       <Text size="xs" c="dimmed">Remember to click “Save settings” at the top. The key is stored on your server and never shown again in the browser. <Anchor href="https://aistudio.google.com/apikey" target="_blank" size="xs">Get a free Gemini key</Anchor></Text>
     </Stack>
+  );
+}
+
+/** Daily email digest: tests past due date (SLA) and calibration due / expired. */
+function AlertSettings({ v, set }: { v: any; set: (path: string, value: unknown) => void }) {
+  const a = v.alerts ?? {};
+  const [preview, setPreview] = useState<any[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toBad = a.to && !isEmailList(a.to) ? 'Enter valid email addresses separated by commas' : undefined;
+  return (
+    <Paper withBorder p="md" mt="md">
+      <Text fw={600}>Email alerts</Text>
+      <Text size="xs" c="dimmed" mb="sm">One email a day (India time) listing tests that have crossed their due date without a report, and equipment whose calibration is due soon or has expired. Each item is flagged NEW the first time; the full list is repeated every Monday. Alerts also show in the bell icon inside the app.</Text>
+      <SimpleGrid cols={{ base: 1, md: 2 }}>
+        <Switch label="Send daily alert email" checked={Boolean(a.enabled)} onChange={(e) => set('alerts.enabled', e.currentTarget.checked)} />
+        <TextInput label="Send to" placeholder="qc@lab.com, manager@lab.com" value={a.to ?? ''} error={toBad} onChange={(e) => set('alerts.to', e.currentTarget.value)} />
+        <Switch label="Tests past due date (SLA breach)" checked={a.sla !== false} onChange={(e) => set('alerts.sla', e.currentTarget.checked)} />
+        <Switch label="Calibration due / expired" checked={a.calibration !== false} onChange={(e) => set('alerts.calibration', e.currentTarget.checked)} />
+        <NumberInput label="Warn this many days before calibration is due" min={0} max={120} value={a.leadDays ?? 15} onChange={(x) => set('alerts.leadDays', Number(x) || 0)} />
+        <NumberInput label="Send after (hour, 0–23, India time)" min={0} max={23} value={a.hour ?? 9} onChange={(x) => set('alerts.hour', Math.min(23, Math.max(0, Number(x) || 0)))} />
+        <Switch label="Repeat the full list every Monday" checked={a.weeklyRepeat !== false} onChange={(e) => set('alerts.weeklyRepeat', e.currentTarget.checked)} />
+      </SimpleGrid>
+      <Group mt="sm">
+        <Button size="xs" variant="light" onClick={async () => setPreview(await api('/alerts/preview'))}>Preview what would be sent</Button>
+        <Button size="xs" variant="light" loading={busy} disabled={!a.to || Boolean(toBad)} onClick={async () => { setBusy(true); try { const r = await api('/alerts/run', { method: 'POST' }); ok(r.sent ? `Alert email sent (${r.items} items)` : 'Nothing to alert right now'); } finally { setBusy(false); } }}>Send now</Button>
+        <Text size="xs" c="dimmed">Save settings first. “Send now” uses the SMTP details above.</Text>
+      </Group>
+      {preview && (
+        <Stack gap={2} mt="sm">
+          {!preview.length && <Text size="sm" c="dimmed">Nothing overdue and no calibration due. No email would be sent.</Text>}
+          {preview.map((i) => <Text key={i.ref} size="sm" c={i.kind === 'cal' && i.text.includes('EXPIRED') ? 'red' : undefined}>{i.kind === 'sla' ? '⏱' : '🔧'} {i.isNew ? <b>NEW </b> : ''}{i.text}</Text>)}
+        </Stack>
+      )}
+    </Paper>
   );
 }

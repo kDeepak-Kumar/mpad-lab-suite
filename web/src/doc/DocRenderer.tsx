@@ -28,7 +28,7 @@ function totalsRows(p: RenderInput, pr: Record<string, any>): [string, number][]
   const gstIn = p.kind !== 'quote' || (d.includeGst ?? d.mode !== 'rate');
   const rate = tt.taxSummary?.length === 1 ? tt.taxSummary[0].rate : null;
   const rows: [string, number][] = [[pr.subtotal, tt.subtotal]];
-  if (tt.discount > 0) rows.push([pr.discount, -tt.discount], ['Taxable value', tt.taxable]);
+  if (tt.discount > 0) rows.push([`${pr.discount}${tt.discountPct ? ` @ ${tt.discountPct}%` : ''}`, -tt.discount], ['Taxable value', tt.taxable]);
   if (gstIn) {
     if (tt.interState) rows.push([`${pr.igst}${rate !== null ? ` @ ${rate}%` : ''}`, tt.igst]);
     else rows.push([`${pr.cgst}${rate !== null ? ` @ ${rate / 2}%` : ''}`, tt.cgst], [`${pr.sgst}${rate !== null ? ` @ ${rate / 2}%` : ''}`, tt.sgst]);

@@ -99,7 +99,7 @@ function DocumentView({ id }: { id: number }) {
     const lines = (data.lines ?? []) as LineInput[];
     const showQty = doc.kind !== 'quote' || (data.showQty ?? data.mode !== 'rate');
     const includeGst = doc.kind !== 'quote' || (data.includeGst ?? data.mode !== 'rate');
-    return computeTotals(lines.map((l) => ({ ...l, qty: showQty ? l.qty ?? 1 : 0, gstRate: includeGst ? l.gstRate : 0 })), { supplierState: doc.company.stateCode ?? '', placeOfSupply: data.placeOfSupply ?? doc.company.stateCode, defaultGst: includeGst ? doc.company.defaults?.gstRate ?? 18 : 0, overallDiscount: Number(data.overallDiscount ?? 0) });
+    return computeTotals(lines.map((l) => ({ ...l, qty: showQty ? l.qty ?? 1 : 0, gstRate: includeGst ? l.gstRate : 0 })), { supplierState: doc.company.stateCode ?? '', placeOfSupply: data.placeOfSupply ?? doc.company.stateCode, defaultGst: includeGst ? doc.company.defaults?.gstRate ?? 18 : 0, overallDiscount: Number(data.overallDiscount ?? 0), discountPct: Number(data.discountPct ?? 0) });
   }, [doc, data]);
 
   const strip = (d: Record<string, any>) => { const { __id, ...rest } = d; return rest; };

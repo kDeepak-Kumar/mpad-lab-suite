@@ -1,10 +1,11 @@
 import type { Knex } from 'knex';
 import {
-  BUILTIN_ROLES, DEFAULT_PICKLISTS, objectDef, fieldAccess, validateGstin,
+  BUILTIN_ROLES, DEFAULT_PICKLISTS, objectDef, fieldAccess, validateGstin, fieldIssue,
   type FieldDef, type Layout, type Picklist, type RoleDef,
 } from '@suite/shared';
 import { db, insert, now, parseJson, toJson } from './db';
 import { hashPassword } from './auth-hash';
+import { HttpError } from './auth';
 
 export type MetaKind = 'picklist' | 'field' | 'layout' | 'role' | 'listview' | 'report' | 'dashboard';
 
@@ -79,6 +80,10 @@ export async function cleanWrite(cid: number, role: RoleDef, object: string, pat
     const access = fieldAccess(role, object, f.key);
     const present = f.custom ? f.key in custom : f.key in out;
     if (present && access !== 'edit') { if (f.custom) delete custom[f.key]; else delete out[f.key]; continue; }
+    if (present) {
+      const issue = fieldIssue(f, f.custom ? custom[f.key] : out[f.key]);
+      if (issue) throw new HttpError(400, issue);
+    }
     if (f.custom && present) {
       const v = custom[f.key];
       if (v !== null && v !== '' && v !== undefined) {
@@ -86,9 +91,11 @@ export async function cleanWrite(cid: number, role: RoleDef, object: string, pat
         if (f.type === 'integer') custom[f.key] = Math.round(Number(v));
       }
     }
-    if (opts.creating && f.required && f.custom && (custom[f.key] === undefined || custom[f.key] === '' || custom[f.key] === null) && !role.admin) throw new Error(`${f.label} is required`);
+    if (opts.creating && f.required && f.custom && (custom[f.key] === undefined || custom[f.key] === '' || custom[f.key] === null) && !role.admin) throw new HttpError(400, `${f.label} is required`);
+    if (f.required && !f.custom && present && (out[f.key] === null || (typeof out[f.key] === 'string' && out[f.key].trim() === ''))) throw new HttpError(400, `${f.label} is required`);
   }
-  if (out.gstin) { const g = validateGstin(out.gstin); if (!g.ok) throw new Error(g.message); }
+  if (out.gstin) { const g = validateGstin(out.gstin); if (!g.ok) throw new HttpError(400, `GSTIN: ${g.message}`); }
+  for (const [k, v] of Object.entries(out)) if (typeof v === 'string') out[k] = v.trim();
   if ('custom' in patch || Object.keys(custom).length) out.custom = custom;
   return out;
 }
