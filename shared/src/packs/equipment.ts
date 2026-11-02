@@ -29,6 +29,7 @@ export const EQUIPMENT_FIELDS: Record<string, EquipmentField[]> = {
   'Compaction mould': [{ key: 'volume', label: 'Volume of mould', unit: 'cm³' }, { key: 'mass', label: 'Mass of mould with base plate', unit: 'g' }],
   'Cylindrical measure': [{ key: 'volume', label: 'Volume of measure', unit: 'litre' }, { key: 'mass', label: 'Mass of empty measure', unit: 'kg' }],
   'Dial gauge': [{ key: 'lc', label: 'Least count', unit: 'mm/div' }],
+  'Hydraulic jack': [{ key: 'capacity', label: 'Capacity', unit: 'T' }, { key: 'ram_area', label: 'Ram area', unit: 'cm²' }],
   'Vicat apparatus': [],
   'Le Chatelier apparatus': [],
   'Los Angeles abrasion machine': [],

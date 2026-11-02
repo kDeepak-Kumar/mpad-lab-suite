@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Knex } from 'knex';
 import {
   counterScope, formatNumber, formatDate, DEFAULT_NUMBERING, type ObservationTemplate, evaluateObservation,
-  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries,
+  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries, allCharts, fillRefs, reportTexts, reportInfoRows, boreLogData, evaluate, isError, type BoreLogData,
 } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from './db';
 import { HttpError, type AuthUser } from './auth';
@@ -94,11 +94,19 @@ export async function buildReportData(cid: number, testIds: number[]) {
   const catById = new Map(catalog.map((c) => [c.id, c]));
 
   const rows: { key: string; group?: string; name: string; unit: string; method: string; spec: string; values: string[] }[] = [];
-  const charts: { title: string; xLabel: string; yLabel: string; sample: string; xLog?: boolean; fit?: string; points: [number, number][]; series: { label: string; dashed?: boolean; markers?: boolean; points: [number, number][] }[] }[] = [];
+  type Series = { label: string; dashed?: boolean; markers?: boolean; points: [number, number][] };
+  const charts: { title: string; xLabel: string; yLabel: string; sample: string; xLog?: boolean; yLog?: boolean; yReverse?: boolean; xTop?: boolean; xMin?: number; xMax?: number; yMin?: number; yMax?: number; fit?: string; note?: string; points: [number, number][]; series: Series[] }[] = [];
   const tables: { title: string; sample: string; columns: string[]; rows: string[][] }[] = [];
+  type Table = { title: string; sample: string; columns: string[]; rows: string[][] };
+  const details: { title: string; sample: string; info: [string, string][]; texts: { title?: string; text: string }[]; tables: Table[]; charts: typeof charts }[] = [];
+  const borelogs: (BoreLogData & { sample: string })[] = [];
+  const intros: { code: string; title: string; texts: { title?: string; text: string }[] }[] = [];
   const notes: string[] = [];
   const nabl: boolean[] = [];
-  for (const t of tests.sort((a, b) => (a.catalog_id as number) - (b.catalog_id as number) || (a.id as number) - (b.id as number))) {
+  const sorted = tests.sort((a, b) => (a.catalog_id as number) - (b.catalog_id as number) || (a.id as number) - (b.id as number));
+  const perKey = new Map<string, number>();
+  for (const t of sorted) { const k = `${t.template_code}|${t.sample_id}`; perKey.set(k, (perKey.get(k) ?? 0) + 1); }
+  for (const t of sorted) {
     const tpl = await getObsTemplate(cid, t.template_code as string, t.template_version as number);
     const cat = catById.get(t.catalog_id);
     nabl.push(Boolean(cat?.nabl));
@@ -107,22 +115,37 @@ export async function buildReportData(cid: number, testIds: number[]) {
     const sampleLabel = samples[sIdx]?.sample_label || samples[sIdx]?.code || '';
     const results = (t.results ?? {}) as Record<string, unknown>;
     const res = evaluateObservation(tpl, (t.observation ?? { header: {}, grids: {} }) as ObservationInput);
+    const lv = tpl.reportLabel ? evaluate(tpl.reportLabel, (n) => res.scalars[n] ?? res.results[n]) : '';
+    const label = lv && !isError(lv) ? formatValue(lv) : '';
+    const multi = (perKey.get(`${t.template_code}|${t.sample_id}`) ?? 1) > 1;
+    const suffix = sampleIds.length > 1 ? ` – ${sampleLabel}` : '';
     for (const rr of tpl.reportRows) {
-      const key = `${tpl.code}|${rr.group ?? ''}|${rr.name}`;
+      const group = multi && label ? label : rr.group;
+      const key = `${tpl.code}|${multi ? label : ''}|${rr.group ?? ''}|${rr.name}|${rr.unit}`;
       let r = rows.find((x) => x.key === key);
-      if (!r) { r = { key, group: rr.group, name: rr.name, unit: rr.unit, method: cat?.method || tpl.method, spec: '', values: sampleIds.map(() => '') }; rows.push(r); }
+      if (!r) { r = { key, group, name: rr.name, unit: rr.unit, method: cat?.method || tpl.method, spec: '', values: sampleIds.map(() => '') }; rows.push(r); }
       r.values[sIdx] = formatValue(results[rr.result] as never, rr.decimals);
       if (!r.spec) r.spec = reportSpec(rr, res);
     }
+    const dTables: Table[] = [];
     for (const rt of tpl.reportTables ?? []) {
       const body = reportTableRows(tpl, rt, res);
-      if (body.length) tables.push({ title: rt.title, sample: sampleIds.length > 1 ? sampleLabel : '', columns: rt.columns.map((c) => c.label), rows: body });
+      if (body.length) dTables.push({ title: rt.title, sample: sampleIds.length > 1 ? sampleLabel : '', columns: rt.columns.map((c) => c.label), rows: body });
     }
-    if (tpl.chart) {
-      const series = chartSeries(tpl, res);
-      if ((series[0]?.points.length ?? 0) > 1)
-        charts.push({ title: `${tpl.chart.title} – ${samples[sIdx]?.code ?? ''}`, xLabel: tpl.chart.xLabel, yLabel: tpl.chart.yLabel, sample: samples[sIdx]?.code, xLog: tpl.chart.xLog, fit: tpl.chart.fit, points: series[0].points, series });
+    if (tpl.reportIntro?.length && !intros.some((x) => x.code === tpl.code)) intros.push({ code: tpl.code, title: cat?.report_name || tpl.name, texts: reportTexts(tpl, res, 'intro') });
+    const info = reportInfoRows(tpl, res), texts = reportTexts(tpl, res);
+    const dCharts: typeof charts = [];
+    for (const ch of allCharts(tpl).filter((c) => c.report !== false)) {
+      const series = chartSeries(tpl, res, ch);
+      if ((series[0]?.points.length ?? 0) > 1) {
+        const { grid: _g, x: _x, y: _y, series: _s, report: _r, note, title, ...opts } = ch;
+        const c = { ...opts, title: `${title}${label ? ` – ${label}` : ''}${suffix}`, sample: samples[sIdx]?.code, note: note ? fillRefs(note, res) : undefined, points: series[0].points, series };
+        dCharts.push(c); charts.push(c);
+      }
     }
+    if (info.length || texts.length || dTables.length || dCharts.length) details.push({ title: label || cat?.report_name || tpl.name, sample: sampleIds.length > 1 ? sampleLabel : '', info, texts, tables: dTables, charts: dCharts });
+    const bl = boreLogData(tpl, res);
+    if (bl && bl.strata.length) borelogs.push({ ...bl, title: bl.title || label, sample: sampleLabel });
   }
   const company = await getCompany(cid);
   for (const n of (company.defaults?.reportNotes ?? '').split('\n').map((s) => s.trim()).filter(Boolean)) if (!notes.includes(n)) notes.push(n);
@@ -142,7 +165,7 @@ export async function buildReportData(cid: number, testIds: number[]) {
     material, materialUpper: material.toUpperCase(),
     nablAll: nabl.length > 0 && nabl.every(Boolean),
     rows: rows.map(({ key: _k, ...r }) => r),
-    tables, charts, notes, remarks: '',
+    tables, charts, details, borelogs, intros, notes, remarks: '',
   };
 }
 

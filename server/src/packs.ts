@@ -27,6 +27,14 @@ export const PACK_CATALOG: CatalogSeed[] = [
   t('SOIL-DST', 'Soil', 'Direct shear test of soil (c and φ)', 'Direct shear test', 'IS 2720 (Part 13) : 1986 RA 2021', 3000, 'SOIL-DST', 4),
   t('FLD-CC', 'Soil', 'Field dry density by core cutter method', 'Field dry density (core cutter)', 'IS 2720 (Part 29) : 1975 RA 2020', 500, 'SOIL-FDD-CC', 1, 'Per location'),
   t('FLD-SR', 'Soil', 'Field dry density by sand replacement method', 'Field dry density (sand replacement)', 'IS 2720 (Part 28) : 1974 RA 2020', 700, 'SOIL-FDD-SR', 1, 'Per location'),
+  // Soil field tests and foundations
+  t('FLD-PLT', 'Soil', 'Conducting plate load test on soil as per IS 1888 : 1982', 'Plate load test', 'IS 1888 : 1982 RA 2021', 18000, 'PLT', 5, 'Per point', { conditions: 'Reaction load should be provided from customer end along with 2 helpers.' }),
+  t('FLD-SPT', 'Soil', 'Standard penetration test in borehole', 'Standard penetration test', 'IS 2131 : 1981 RA 2021', 800, 'SPT', 3, 'Per borehole'),
+  t('FLD-BH', 'Soil', 'Drilling of borehole with SPT, sampling and logging', 'Borehole log', 'IS 1892 : 2021', 15000, 'BH-LOG', 7, 'Per borehole'),
+  t('SBC-SPT', 'Soil', 'Safe bearing capacity analysis from SPT data', 'Safe bearing capacity', 'IS 6403 : 1981 RA 2021', 2500, 'SBC-SPT', 3, 'Per report'),
+  t('SBC-SHEAR', 'Soil', 'Safe bearing capacity analysis from shear parameters', 'Safe bearing capacity', 'IS 6403 : 1981 RA 2021', 2500, 'SBC-IS6403', 3, 'Per report'),
+  t('PILE-UP', 'Pile / pier', 'Pull-out (uplift) load test on pile / pier', 'Pull-out load test', 'IS 2911 (Part 4) : 2013', 12000, 'PILE-UPLIFT', 3, 'Per test', { conditions: 'Reaction arrangement to be provided by the customer.' }),
+  t('PILE-LAT', 'Pile / pier', 'Lateral load test on pile / pier', 'Lateral load test', 'IS 2911 (Part 4) : 2013', 12000, 'PILE-LATERAL', 3, 'Per test', { conditions: 'Reaction arrangement to be provided by the customer.' }),
   // Coarse aggregate
   t('CA-SIEVE', 'Coarse aggregate', 'Sieve analysis of coarse aggregate', 'Sieve analysis', 'IS 2386 (Part 1) : 1963 RA 2021', 800, 'CA-SIEVE'),
   t('CA-FLAKY', 'Coarse aggregate', 'Flakiness and elongation index of coarse aggregate', 'Flakiness and elongation index', 'IS 2386 (Part 1) : 1963 RA 2021', 900, 'CA-FLAKY'),
@@ -67,7 +75,6 @@ export const PACK_CATALOG: CatalogSeed[] = [
 ];
 
 export const OTHER_CATALOG: CatalogSeed[] = [
-  t('FLD-PLT', 'Soil', 'Conducting plate load test on soil as per IS 1888 : 1982', 'Plate load test', 'IS 1888 : 1982', 18000, null, 5, 'Per point', { conditions: 'Reaction load should be provided from customer end along with 2 helpers.' }),
   { ...t('MISC-TRN', 'Service', 'Transportation charges', '', '', 7000, null, 0, 'Per visit'), nabl: false },
 ];
 
@@ -91,6 +98,12 @@ export async function syncTemplatePack(k: Knex = db) {
     const used = new Set(cat.map((r) => r.obs_template_code).filter(Boolean));
     let items = 0;
     for (const item of PACK_CATALOG) {
+      // link an existing item (same code, no sheet yet) to its new observation sheet
+      if (codes.has(item.code) && item.obs_template_code && !used.has(item.obs_template_code)) {
+        const n = await k('catalog').where({ company_id: c.id, code: item.code }).whereNull('obs_template_code').update({ obs_template_code: item.obs_template_code });
+        if (n) { used.add(item.obs_template_code); items++; }
+        continue;
+      }
       if (codes.has(item.code) || (item.obs_template_code && used.has(item.obs_template_code))) continue;
       await insert(k, 'catalog', { ...item, company_id: c.id, sac: '998346', gst_rate: 18, active: true, created_at: now() });
       items++;

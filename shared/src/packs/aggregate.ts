@@ -547,8 +547,8 @@ export const FA_SIEVE: ObservationTemplate = {
       { key: 'fm', label: 'For FM', formula: 'IF(OR(size=0,cump=""),0,cump)', decimals: 1 },
       { key: 'z1', label: 'Zone I', formula: zoneLimit(1) }, { key: 'z2', label: 'Zone II', formula: zoneLimit(2) },
       { key: 'z3', label: 'Zone III', formula: zoneLimit(3) }, { key: 'z4', label: 'Zone IV', formula: zoneLimit(4) },
-      { key: 'in1', label: 'In I', formula: zoneOk(1), decimals: 0 }, { key: 'in2', label: 'In II', formula: zoneOk(2), decimals: 0 },
-      { key: 'in3', label: 'In III', formula: zoneOk(3), decimals: 0 }, { key: 'in4', label: 'In IV', formula: zoneOk(4), decimals: 0 },
+      { key: 'in1', label: 'In I', formula: zoneOk(1), decimals: 0, hidden: true }, { key: 'in2', label: 'In II', formula: zoneOk(2), decimals: 0, hidden: true },
+      { key: 'in3', label: 'In III', formula: zoneOk(3), decimals: 0, hidden: true }, { key: 'in4', label: 'In IV', formula: zoneOk(4), decimals: 0, hidden: true },
     );
     return g;
   })()],

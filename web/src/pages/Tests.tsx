@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
 import { IconAlertTriangle, IconPrinter } from '@tabler/icons-react';
-import { emptyInput, evaluateObservation, formatValue, chartSeries, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
+import { emptyInput, evaluateObservation, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
 import { ListView } from '../components/ListView';
 import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui';
 import { LineChart } from '../doc/Chart';
+import { BoreLog, SoilLegend } from '../doc/BoreLog';
 
 export function TestsPage() {
   const me = useMe();
@@ -168,12 +169,12 @@ export function TestSheetPage() {
                   <div key={g.key} style={{ overflowX: 'auto' }}>
                     <Text size="sm" fw={600} mb={4}>{g.label}</Text>
                     <table className="grid-input">
-                      <thead><tr><th style={{ width: 36, minWidth: 36 }}>#</th>{g.columns.map((c) => <th key={c.key} style={{ minWidth: c.width ? c.width * 10 : c.text || c.options ? 150 : /^r\d+$/.test(c.key) ? 44 : 72 }}>{c.label}{c.unit ? <><br /><span style={{ fontWeight: 400 }}>({c.unit})</span></> : null}</th>)}</tr></thead>
+                      <thead><tr><th style={{ width: 36, minWidth: 36 }}>#</th>{g.columns.filter((c) => !c.hidden).map((c) => <th key={c.key} style={{ minWidth: c.width ? c.width * 10 : c.text || c.options ? 150 : /^r\d+$/.test(c.key) ? 44 : 72 }}>{c.label}{c.unit ? <><br /><span style={{ fontWeight: 400 }}>({c.unit})</span></> : null}</th>)}</tr></thead>
                       <tbody>
                         {(obs.grids[g.key] ?? []).map((row, i) => (
                           <tr key={i}>
                             <td className="fixed">{i + 1}</td>
-                            {g.columns.map((c) => c.input
+                            {g.columns.filter((c) => !c.hidden).map((c) => c.input
                               ? <td key={c.key} style={c.text ? { minWidth: 120 } : undefined}>{c.options
                                   ? <select value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, true)}><option value="" />{c.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
                                   : <input inputMode={c.text || c.key === 'id' ? 'text' : 'decimal'} value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, c.text)} />}</td>
@@ -195,10 +196,11 @@ export function TestSheetPage() {
                   </SimpleGrid>
                 </Paper>
                 {result.checks.map((c, i) => <Alert key={i} color={c.level === 'error' ? 'red' : 'orange'} icon={<IconAlertTriangle size={16} />} py={6}>{c.message}</Alert>)}
-                {tpl.chart && (() => {
-                  const series = chartSeries(tpl, result);
-                  return (series[0]?.points.length ?? 0) > 1 ? <div style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart series={series} xLog={tpl.chart.xLog} fit={tpl.chart.fit} title={tpl.chart.title} xLabel={tpl.chart.xLabel} yLabel={tpl.chart.yLabel} /></div> : null;
-                })()}
+                {allCharts(tpl).map((ch, i) => {
+                  const series = chartSeries(tpl, result, ch);
+                  return (series[0]?.points.length ?? 0) > 1 ? <div key={i} style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart series={series} xLog={ch.xLog} yLog={ch.yLog} yReverse={ch.yReverse} xTop={ch.xTop} xMin={ch.xMin} xMax={ch.xMax} yMin={ch.yMin} yMax={ch.yMax} fit={ch.fit} title={ch.title} xLabel={ch.xLabel} yLabel={ch.yLabel} note={ch.note ? fillRefs(ch.note, result) : undefined} /></div> : null;
+                })}
+                {(() => { const bl = boreLogData(tpl, result); return bl && bl.strata.length ? <div style={{ breakInside: 'avoid' }}><Text size="sm" fw={600} mb={4}>Borehole log {bl.title}</Text><BoreLog data={bl} /><SoilLegend soils={bl.strata.map((x) => x.soil)} /></div> : null; })()}
                 <Group justify="space-between" mt="sm">
                   <Text size="sm">Tested by: <b>{t.enteredBy ?? '—'}</b></Text>
                   <Text size="sm">Checked by: <b>{t.reviewedBy && ['accepted', 'reported'].includes(t.status) ? t.reviewedBy : '—'}</b></Text>

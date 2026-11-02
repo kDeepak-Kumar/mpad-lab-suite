@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Grid, Group, Menu, Modal, Paper, Select, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor } from '@mantine/core';
+import { Alert, Button, Grid, Group, Menu, Modal, Paper, Select, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
 import { IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck } from '@tabler/icons-react';
 import { applyOverrides, computeTotals, DEFAULT_TEMPLATES, type DocOverrides, type DocTemplate, type LineInput } from '@suite/shared';
 import { api, ok, useApi, dmy, money } from '../api';
@@ -251,7 +251,7 @@ function ReportDetails({ doc, data, onChange, disabled }: { doc: any; data: Reco
         <Textarea disabled={disabled} placeholder="e.g. The soil can be used for backfilling purpose." autosize minRows={2} value={data.remarks ?? ''} onChange={(e) => set({ remarks: e.currentTarget.value })} />
       </div>
       <Textarea disabled={disabled} label="Notes (one per line – only notes for the tests on this report are pre-filled)" autosize minRows={4} value={notes.join('\n')} onChange={(e) => set({ notes: e.currentTarget.value.split('\n') })} />
-      {(data.charts ?? []).length > 0 && <Text size="xs" c="dimmed">This report has {data.charts.length} graph(s). Turn on the “Graphs” block in Layout to include them.</Text>}
+      {(data.charts ?? []).length > 0 && <Switch disabled={disabled} label={`Include ${data.charts.length} graph(s) with explanations`} checked={!data.hideCharts} onChange={(e) => set({ hideCharts: !e.currentTarget.checked })} />}
       {doc.status === 'issued' && <Alert color="teal" variant="light">Issued on {data.issueText}.</Alert>}
     </Stack>
   );

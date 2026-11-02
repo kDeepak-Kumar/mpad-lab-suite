@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { amountInWords, fillPlaceholders, formatDate, inr, type Block, type Column, type DocTemplate } from '@suite/shared';
 import qrcode from 'qrcode-generator';
 import { LineChart } from './Chart';
+import { BoreLog, SiteProfile, SoilLegend } from './BoreLog';
 
 export interface RenderInput {
   template: DocTemplate;
@@ -314,15 +315,42 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
               })}
             </tbody>
           </table>
-          {pr.showTables !== false && tables.map((tb, k) => (
-            <div key={k} style={{ marginTop: 8, breakInside: 'avoid' }}>
-              <div style={{ fontWeight: 700, fontSize: '9.5pt', marginBottom: 2 }}>{tb.title}{tb.sample ? ` – ${tb.sample}` : ''}</div>
-              <table className="bx" style={{ fontSize: '9pt' }}>
-                <thead><tr><th style={{ width: '6%' }}>S.No</th>{tb.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
-                <tbody>{tb.rows.map((r, i) => <tr key={i}><td style={{ textAlign: 'center' }}>{i + 1}</td>{r.map((v, j) => <td key={j} style={{ textAlign: j === 0 ? 'left' : 'center' }}>{v || '--'}</td>)}</tr>)}</tbody>
-              </table>
+          {(d.intros ?? []).map((it: any, k: number) => (
+            <div key={'i' + k} style={{ marginTop: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: '10pt', textTransform: 'uppercase' }}>{it.title} – scope and method</div>
+              {it.texts.map((x: any, j: number) => <p key={j} style={{ margin: '3px 0', fontSize: '9.5pt', textAlign: 'justify' }}>{x.title && <b>{x.title}: </b>}{x.text}</p>)}
             </div>
           ))}
+          {(() => { let fig = 0; return (d.details ?? []).map((dt: any, k: number) => (
+            <div key={'d' + k} style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: '10pt', borderBottom: '1.5px solid #333', paddingBottom: 2, marginBottom: 4, breakAfter: 'avoid' }}>{dt.title}{dt.sample ? ` – ${dt.sample}` : ''}</div>
+              {dt.info.length > 0 && (
+                <table className="bx" style={{ fontSize: '9pt', tableLayout: 'fixed', marginBottom: 6 }}>
+                  <tbody>{Array.from({ length: Math.ceil(dt.info.length / 2) }, (_, r) => (
+                    <tr key={r}>{[0, 1].map((c) => { const it = dt.info[r * 2 + c]; return it ? [<td key={c + 'l'} style={{ width: '22%', background: '#f6f7f9' }}>{it[0]}</td>, <td key={c + 'v'} style={{ width: '28%' }}>{it[1]}</td>] : <td key={c} colSpan={2} />; })}</tr>
+                  ))}</tbody>
+                </table>
+              )}
+              {pr.showTables !== false && (dt.tables ?? []).map((tb: any, j: number) => <DetailTable key={j} tb={tb} />)}
+              {!d.hideCharts && (dt.charts ?? []).map((ch: any, j: number) => { fig++; return <div key={'c' + j} style={{ textAlign: 'center', breakInside: 'avoid', margin: '8px 0' }}><LineChart points={ch.points} series={ch.series} xLog={ch.xLog} yLog={ch.yLog} yReverse={ch.yReverse} xTop={ch.xTop} xMin={ch.xMin} xMax={ch.xMax} yMin={ch.yMin} yMax={ch.yMax} fit={ch.fit} title={`Fig. ${fig}: ${ch.title}`} xLabel={ch.xLabel} yLabel={ch.yLabel} note={ch.note} width={620} height={380} /></div>; })}
+              {dt.texts.map((x: any, j: number) => <p key={j} style={{ margin: '3px 0', fontSize: '9.5pt', textAlign: 'justify' }}>{x.title && <b>{x.title}: </b>}{x.text}</p>)}
+            </div>
+          )); })()}
+          {pr.showTables !== false && tables.map((tb, k) => <DetailTable key={k} tb={tb} />)}
+          {(d.borelogs ?? []).map((bl: any, k: number) => (
+            <div key={'b' + k} style={{ marginTop: 12, breakBefore: k === 0 ? 'auto' : 'page', breakInside: 'avoid' }}>
+              <div style={{ textAlign: 'center', fontWeight: 700, fontSize: '10.5pt', textDecoration: 'underline', marginBottom: 4 }}>Log of borehole {bl.title}</div>
+              <BoreLog data={bl} />
+              <SoilLegend soils={bl.strata.map((x: any) => x.soil)} />
+            </div>
+          ))}
+          {(d.borelogs ?? []).length > 1 && (
+            <div style={{ marginTop: 12, breakInside: 'avoid' }}>
+              <div style={{ textAlign: 'center', fontWeight: 700, fontSize: '10.5pt', textDecoration: 'underline', marginBottom: 4 }}>Geotechnical profile of the site</div>
+              <SiteProfile logs={d.borelogs} />
+            </div>
+          )}
+          {!(d.details ?? []).some((x: any) => x.charts?.length) && !p.template.blocks.some((x) => x.type === 'charts' && x.visible) && !d.hideCharts && (d.charts ?? []).length > 0 && <ChartList charts={d.charts} />}
         </>
       );
     }
@@ -331,7 +359,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       return <div style={{ border: '1px solid #333', borderTop: 0, padding: '3px 6px', fontWeight: 700 }}>{pr.label} {d.remarks}</div>;
     case 'charts':
       if (!(d.charts ?? []).length) return null;
-      return <div style={{ marginTop: 8 }}>{d.charts.map((ch: any, i: number) => <div key={i} style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart points={ch.points} series={ch.series} xLog={ch.xLog} fit={ch.fit} title={ch.title} xLabel={ch.xLabel} yLabel={ch.yLabel} /></div>)}</div>;
+      return d.hideCharts || (d.details ?? []).some((x: any) => x.charts?.length) ? null : <ChartList charts={d.charts} />;
     case 'receiptBody':
       return (
         <table className="bx" style={{ marginTop: 10 }}><tbody>
@@ -355,6 +383,31 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     default:
       return null;
   }
+}
+
+function DetailTable({ tb }: { tb: { title: string; sample?: string; columns: string[]; rows: string[][] } }) {
+  return (
+    <div style={{ marginTop: 6, breakInside: 'avoid' }}>
+      <div style={{ fontWeight: 700, fontSize: '9.5pt', marginBottom: 2 }}>{tb.title}{tb.sample ? ` – ${tb.sample}` : ''}</div>
+      <table className="bx" style={{ fontSize: '9pt' }}>
+        <thead><tr><th style={{ width: '6%' }}>S.No</th>{tb.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
+        <tbody>{tb.rows.map((r, i) => <tr key={i}><td style={{ textAlign: 'center' }}>{i + 1}</td>{r.map((v, j) => <td key={j} style={{ textAlign: j === 0 ? 'left' : 'center' }}>{v || '--'}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function ChartList({ charts }: { charts: any[] }) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      {charts.map((ch: any, i: number) => (
+        <div key={i} style={{ textAlign: 'center', breakInside: 'avoid', marginBottom: 12 }}>
+          <LineChart points={ch.points} series={ch.series} xLog={ch.xLog} yLog={ch.yLog} yReverse={ch.yReverse} xTop={ch.xTop} xMin={ch.xMin} xMax={ch.xMax} yMin={ch.yMin} yMax={ch.yMax} fit={ch.fit}
+            title={`Fig. ${i + 1}: ${ch.title}`} xLabel={ch.xLabel} yLabel={ch.yLabel} note={ch.note} width={620} height={380} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function VerifyQr({ url }: { url: string }) {

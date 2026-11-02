@@ -9,3 +9,5 @@ export * from './packs/ndt';
 export * from './types';
 export * from './meta';
 export * from './analytics';
+export * from './packs/soil-legend';
+export * from './packs/soil-field';

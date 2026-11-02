@@ -269,6 +269,9 @@ const FNS: Record<string, Fn> = {
   SMALL: ([arr, k]) => { const n = nums([arr]).sort((a, b) => a - b); const i = num(k); return isError(i) ? i : i >= 1 && i <= n.length ? n[i - 1] : err('#NUM!'); },
   /** SUMTO(list, n): sum of the first n items, e.g. cumulative mass retained up to this sieve. */
   SUMTO: ([arr, k]) => { if (!Array.isArray(arr)) return err('#REF!'); const i = num(k); if (isError(i)) return i; return nums(flat(arr).slice(0, Math.max(0, i))).reduce((s, x) => s + x, 0); },
+  /** MAXTO(list, n) / MINTO(list, n): largest / smallest of the first n items (running maximum, e.g. the highest load so far). */
+  MAXTO: ([arr, k]) => { if (!Array.isArray(arr)) return err('#REF!'); const i = num(k); if (isError(i)) return i; const n = nums(flat(arr).slice(0, Math.max(0, i))); return n.length ? Math.max(...n) : 0; },
+  MINTO: ([arr, k]) => { if (!Array.isArray(arr)) return err('#REF!'); const i = num(k); if (isError(i)) return i; const n = nums(flat(arr).slice(0, Math.max(0, i))); return n.length ? Math.min(...n) : 0; },
   COUNTIF: ([arr, crit]) => {
     const list = Array.isArray(arr) ? flat(arr) : [arr];
     const m = typeof crit === 'string' ? /^(<=|>=|<>|<|>|=)?(.*)$/.exec(crit) : null;

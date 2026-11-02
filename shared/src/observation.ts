@@ -31,6 +31,8 @@ export interface GridColumn {
   text?: boolean;
   /** Drop-down input, e.g. Pass / Fail. */
   options?: string[];
+  /** Helper calculation not shown on the sheet (still usable in formulas). */
+  hidden?: boolean;
 }
 export interface Grid {
   key: string; label: string; columns: GridColumn[];
@@ -39,7 +41,7 @@ export interface Grid {
   rows?: number;
 }
 export interface Check { when: string; level: 'warning' | 'error'; message: string }
-export interface ChartSeries { y: string; label: string; dashed?: boolean; markers?: boolean }
+export interface ChartSeries { y: string; label: string; dashed?: boolean; markers?: boolean; /** x column when it differs from the chart's (e.g. corrected N against depth). */ x?: string }
 export interface ChartDef {
   grid: string; x: string; y: string; title: string; xLabel: string; yLabel: string;
   /** Extra lines from the same grid, e.g. lower and upper grading limits. */
@@ -48,6 +50,33 @@ export interface ChartDef {
   xLog?: boolean;
   /** Draw a straight best-fit line instead of joining the points (flow curve, shear envelope). */
   fit?: 'line';
+  /** Logarithmic y axis (log-log plate load curve). */
+  yLog?: boolean;
+  /** Values increase downwards (settlement, depth). */
+  yReverse?: boolean;
+  /** Put the x axis along the top (load–settlement curves, depth logs). */
+  xTop?: boolean;
+  /** Fixed axis limits; leave out to scale automatically from the readings. */
+  xMin?: number; xMax?: number; yMin?: number; yMax?: number;
+  /** Explanation printed under the graph on the report; {name} placeholders are filled from the results. */
+  note?: string;
+  /** Show this graph on the report (default true). */
+  report?: boolean;
+  /** Legend name of the main line (defaults to the y-axis label). */
+  label?: string;
+}
+/** Paragraph on the report, e.g. interpretation of the results. Shown when `when` (a formula) is TRUE or absent. */
+export interface ReportText { title?: string; text: string; when?: string }
+/** One line of the test details box on the report (plate size, location, pile id …). */
+export interface ReportInfo { label: string; value: string; unit?: string; decimals?: number }
+/** Borehole log drawn from grids: strata, SPT, samples and core runs. */
+export interface BoreLogDef {
+  strata: { grid: string; from: string; to: string; soil: string; desc?: string };
+  spt?: { grid: string; depth: string; n: string; label?: string };
+  samples?: { grid: string; depth: string; type: string };
+  core?: { grid: string; from: string; to: string; rec?: string; rqd?: string };
+  /** Scalar names for the water table depth and the borehole title. */
+  waterTable?: string; title?: string;
 }
 export interface ReportRow {
   group?: string; name: string; unit: string; result: string; decimals?: number;
@@ -76,7 +105,18 @@ export interface ObservationTemplate {
   results: Calc[];
   checks: Check[];
   chart?: ChartDef;
+  /** Further graphs (e.g. natural and log-log plate load curves). */
+  charts?: ChartDef[];
   reportRows: ReportRow[];
+  /** Test details box on the report. */
+  reportInfo?: ReportInfo[];
+  /** Interpretation / calculation paragraphs on the report (for every test). */
+  reportText?: ReportText[];
+  /** Scope / method paragraphs printed once per report for this kind of test (filled from the first test). */
+  reportIntro?: ReportText[];
+  /** Formula naming the test on the report when a sample has several of them, e.g. "Test "&test_no&" – "&location. */
+  reportLabel?: string;
+  borelog?: BoreLogDef;
   reportTables?: ReportTable[];
   instructions?: string;
   simplified?: boolean;
@@ -209,12 +249,60 @@ export function reportTableRows(t: ObservationTemplate, rt: ReportTable, res: Ob
     .map((r) => rt.columns.map((c) => formatValue(r[c.key], c.decimals ?? g?.columns.find((x) => x.key === c.key)?.decimals)));
 }
 
+/** Every graph of a template (the main chart first). */
+export const allCharts = (t: ObservationTemplate): ChartDef[] => [...(t.chart ? [t.chart] : []), ...(t.charts ?? [])];
+
 /** Points for every line of a chart (main series first). */
-export function chartSeries(t: ObservationTemplate, res: ObservationResult): { label: string; dashed?: boolean; markers?: boolean; points: [number, number][] }[] {
-  const ch = t.chart; if (!ch) return [];
+export function chartSeries(t: ObservationTemplate, res: ObservationResult, chart?: ChartDef): { label: string; dashed?: boolean; markers?: boolean; points: [number, number][] }[] {
+  const ch = chart ?? t.chart; if (!ch) return [];
   const rows = res.grids[ch.grid] ?? [];
-  const pts = (y: string) => rows.map((r) => [r[ch.x], r[y]]).filter(([x, v]) => typeof x === 'number' && typeof v === 'number' && (!ch.xLog || (x as number) > 0)) as [number, number][];
-  return [{ label: ch.yLabel, markers: true, points: pts(ch.y) }, ...(ch.series ?? []).map((s) => ({ label: s.label, dashed: s.dashed, markers: s.markers, points: pts(s.y) }))];
+  const ok = (x: unknown, v: unknown) => typeof x === 'number' && typeof v === 'number' && (!ch.xLog || x > 0) && (!ch.yLog || v > 0);
+  const pts = (y: string, x = ch.x) => rows.map((r) => [r[x], r[y]]).filter(([a, v]) => ok(a, v)) as [number, number][];
+  return [{ label: ch.label ?? ch.yLabel, markers: true, points: pts(ch.y) }, ...(ch.series ?? []).map((s) => ({ label: s.label, dashed: s.dashed, markers: s.markers, points: pts(s.y, s.x) }))];
+}
+
+/** Fill {ref} / {ref:decimals} / {grid.col#row:decimals} placeholders from an evaluated sheet. */
+export function fillRefs(text: string, res: ObservationResult): string {
+  return text.replace(/\{([\w.#]+)(?::(\d+))?\}/g, (_, ref: string, d?: string) => formatValue(pickValue(res, ref), d === undefined ? undefined : Number(d)) || '—');
+}
+
+/** Report paragraphs whose condition holds, with values filled in. */
+export function reportTexts(t: ObservationTemplate, res: ObservationResult, which: 'text' | 'intro' = 'text'): { title?: string; text: string }[] {
+  return ((which === 'intro' ? t.reportIntro : t.reportText) ?? []).filter((x) => !x.when || evaluate(x.when, (n) => res.scalars[n] ?? res.results[n]) === true)
+    .map((x) => ({ title: x.title, text: fillRefs(x.text, res) }));
+}
+
+/** Test details box values. */
+export function reportInfoRows(t: ObservationTemplate, res: ObservationResult): [string, string][] {
+  return (t.reportInfo ?? []).map((i) => {
+    const v = evaluate(i.value, (n) => res.scalars[n] ?? res.results[n]);
+    const s = isError(v) ? '' : formatValue(v, i.decimals);
+    return [i.label, s ? `${s}${i.unit ? ` ${i.unit}` : ''}` : '--'] as [string, string];
+  });
+}
+
+export interface BoreLogData {
+  title: string; waterTable: string; depth: number;
+  strata: { from: number; to: number; soil: string; desc: string }[];
+  spt: { depth: number; n: number | null; label: string }[];
+  samples: { depth: number; type: string }[];
+  core: { from: number; to: number; rec: number | null; rqd: number | null }[];
+}
+/** Normalised borehole log (strata, SPT, samples, core runs) for drawing. */
+export function boreLogData(t: ObservationTemplate, res: ObservationResult): BoreLogData | null {
+  const b = t.borelog; if (!b) return null;
+  const num = (v: Value | undefined) => (typeof v === 'number' ? v : null);
+  const str = (v: Value | undefined) => (v === null || v === undefined || isError(v) ? '' : formatValue(v));
+  const strata = (res.grids[b.strata.grid] ?? []).map((r) => ({ from: num(r[b.strata.from]), to: num(r[b.strata.to]), soil: str(r[b.strata.soil]), desc: b.strata.desc ? str(r[b.strata.desc]) : '' }))
+    .filter((s): s is { from: number; to: number; soil: string; desc: string } => s.from !== null && s.to !== null && s.to > s.from);
+  const spt = b.spt ? (res.grids[b.spt.grid] ?? []).map((r) => ({ depth: num(r[b.spt!.depth]), n: num(r[b.spt!.n]), label: b.spt!.label ? str(r[b.spt!.label]) : str(r[b.spt!.n]) }))
+    .filter((s): s is { depth: number; n: number | null; label: string } => s.depth !== null) : [];
+  const samples = b.samples ? (res.grids[b.samples.grid] ?? []).map((r) => ({ depth: num(r[b.samples!.depth]), type: str(r[b.samples!.type]) }))
+    .filter((s): s is { depth: number; type: string } => s.depth !== null && !!s.type) : [];
+  const core = b.core ? (res.grids[b.core.grid] ?? []).map((r) => ({ from: num(r[b.core!.from]), to: num(r[b.core!.to]), rec: b.core!.rec ? num(r[b.core!.rec]) : null, rqd: b.core!.rqd ? num(r[b.core!.rqd]) : null }))
+    .filter((s): s is { from: number; to: number; rec: number | null; rqd: number | null } => s.from !== null && s.to !== null) : [];
+  const depth = Math.max(0, ...strata.map((s) => s.to), ...spt.map((s) => s.depth), ...core.map((c) => c.to));
+  return { title: b.title ? str(res.scalars[b.title]) : '', waterTable: b.waterTable ? str(res.scalars[b.waterTable]) : '', depth, strata, spt, samples, core };
 }
 
 /** Example inputs merged onto an empty sheet (fixed rows such as sieve sizes stay in place). */
@@ -242,8 +330,5 @@ export function pickValue(res: ObservationResult, ref: string): Value | undefine
 export function renderSampleCalc(t: ObservationTemplate): string[] {
   if (!t.sampleCalc?.length) return [];
   const res = evaluateObservation(t, exampleInput(t));
-  return t.sampleCalc.map((line) => line.replace(/\{([\w.#]+)(?::(\d+))?\}/g, (_, ref: string, d?: string) => {
-    const v = pickValue(res, ref);
-    return formatValue(v, d === undefined ? undefined : Number(d)) || '—';
-  }));
+  return t.sampleCalc.map((line) => fillRefs(line, res));
 }

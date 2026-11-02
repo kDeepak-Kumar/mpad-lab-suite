@@ -27,6 +27,7 @@ const api = async (path, body, method) => {
 
 const catalog = await api('/catalog');
 const equipment = await api('/equipment');
+const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
 const groups = {
   soil: ['Soil', ['SOIL-MC', 'SOIL-SG', 'SOIL-GR', 'SOIL-AL', 'SOIL-SL', 'SOIL-MP', 'SOIL-FSI', 'SOIL-UCS', 'SOIL-DST', 'FLD-CC', 'FLD-SR']],
   coarse: ['Coarse aggregate', ['CA-SIEVE', 'CA-FLAKY', 'CA-AIV', 'CA-ACV', 'CA-LAA', 'CA-SG', 'CA-BD', 'CA-SOUND', 'CA-10FINES', 'CA-DEL']],
@@ -35,13 +36,17 @@ const groups = {
   steel: ['Steel', ['STEEL-TMT']],
   concrete: ['Concrete', ['CON-CUBE', 'CON-FLEX', 'CON-SPLIT']],
   ndt: ['Concrete', ['NDT-RH', 'NDT-UPV', 'NDT-CORE', 'NDT-COVER']],
+  plate: ['Soil', ['FLD-PLT', 'FLD-PLT']],
+  boreholes: ['Soil', ['FLD-BH', 'FLD-BH', 'FLD-SPT', 'SBC-SPT', 'SBC-SHEAR']],
+  piles: ['Pile / pier', ['PILE-UP', 'PILE-LAT']],
 };
 const today = new Date().toLocaleDateString('en-CA');
-for (const [name, [material, codes]] of Object.entries(groups)) {
+for (const [name, [material, codes]] of Object.entries(groups).filter(([n]) => !only || only.includes(n))) {
   const cats = codes.map((c) => catalog.find((x) => x.code === c)).filter(Boolean);
   if (cats.length !== codes.length) problems.push(`${name}: catalog items missing (${codes.filter((c) => !catalog.some((x) => x.code === c)).join(', ')})`);
   const s = await api('/samples', { client_id: 1, site_id: 1, accreditation: 'NABL', material, received_date: today, quantity: '1 lot', condition: 'Good', source: 'Sample supplied by the customer', tests: cats.map((c) => ({ catalog_id: c.id })) });
   const tests = (await api('/tests?status=pending')).filter((t) => t.sample_id === s.id);
+  const seen = {};
   for (const t of tests) {
     const full = await api(`/tests/${t.id}`);
     const tpl = full.template;
@@ -54,7 +59,12 @@ for (const [name, [material, codes]] of Object.entries(groups)) {
     }
     const eq = {};
     if (!Object.keys(ex.constants ?? {}).length) for (const slot of tpl.equipment ?? []) { const e = equipment.find((x) => x.category === slot.category); if (e) eq[slot.key] = { id: e.id }; }
-    const obs = { header: { ...(ex.header ?? {}) }, constants: { ...(ex.constants ?? {}) }, equipment: eq, grids };
+    const occ = (seen[tpl.code] = (seen[tpl.code] ?? 0) + 1);
+    const hdr = { ...(ex.header ?? {}) };
+    if (occ > 1) { if ('test_no' in hdr) hdr.test_no = String(occ); if ('bh' in hdr) hdr.bh = `BH-${occ}`; if ('location' in hdr) hdr.location = `${hdr.location} (${occ})`;
+      for (const rows of Object.values(grids)) for (const r of rows) for (const k of ['dg1', 'dg2', 'p2', 'p3']) if (typeof r[k] === 'number' && r[k] > 0) r[k] = Math.round(r[k] * (k.startsWith('dg') ? 1.25 : 1.2));
+      if (grids.st) grids.st = [{ from: 0, to: 2, soil: 'Filled-up soil', desc: 'brown' }, { from: 2, to: 5, soil: 'Black cotton soil', desc: 'stiff' }, { from: 5, to: 8, soil: 'Gravelly soil (murrum)', desc: 'dense' }, { from: 8, to: 12, soil: 'Weathered rock', desc: 'grey' }]; }
+    const obs = { header: hdr, constants: { ...(ex.constants ?? {}) }, equipment: eq, grids };
     const res = await api(`/tests/${t.id}/observation`, { observation: obs, started_at: today, completed_at: today }, 'PUT');
     for (const [ref, want] of Object.entries(tpl.example?.expect ?? {})) {
       if (ref.includes('#') || !tpl.results.some((r) => r.key === ref)) continue;

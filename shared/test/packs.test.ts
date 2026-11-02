@@ -10,6 +10,9 @@ function formulaNames(t: ObservationTemplate): string[] {
   for (const r of t.results) out.push(r.formula);
   for (const c of t.checks) out.push(c.when);
   for (const r of t.reportRows) if (r.specFormula) out.push(r.specFormula);
+  for (const i of t.reportInfo ?? []) out.push(i.value);
+  for (const x of t.reportText ?? []) if (x.when) out.push(x.when);
+  if (t.reportLabel) out.push(t.reportLabel);
   return out;
 }
 
@@ -30,6 +33,10 @@ describe('template pack', () => {
         for (const f of formulaNames(t)) for (const n of references(f)) expect(known.has(n), `${t.code}: unknown name "${n}" in ${f}`).toBe(true);
         for (const rr of t.reportRows) expect(known.has(rr.result), `${t.code}: report row ${rr.name}`).toBe(true);
         for (const rt of t.reportTables ?? []) for (const c of rt.columns) expect(t.grids.find((g) => g.key === rt.grid)?.columns.some((x) => x.key === c.key), `${t.code}: table column ${c.key}`).toBe(true);
+        const texts = [...(t.reportText ?? []).map((x) => x.text), ...(t.reportIntro ?? []).map((x) => x.text), ...[t.chart, ...(t.charts ?? [])].map((c) => c?.note ?? ''), ...(t.sampleCalc ?? [])];
+        for (const txt of texts) for (const m of txt.matchAll(/\{([\w.]+)(?:#\d+)?(?::\d+)?\}/g)) expect(known.has(m[1]), `${t.code}: unknown placeholder {${m[1]}}`).toBe(true);
+        for (const ch of t.charts ?? []) { const g = t.grids.find((x) => x.key === ch.grid); expect(g, `${t.code} chart grid ${ch.grid}`).toBeTruthy(); for (const k of [ch.x, ch.y, ...(ch.series ?? []).flatMap((s) => [s.y, s.x ?? ch.x])]) expect(g!.columns.some((c) => c.key === k), `${t.code} chart ${k}`).toBe(true); }
+        if (t.borelog) for (const part of Object.values(t.borelog)) if (part && typeof part === 'object') { const p = part as Record<string, string>; const g = t.grids.find((x) => x.key === p.grid); expect(g, `${t.code} borelog grid ${p.grid}`).toBeTruthy(); for (const [k, v] of Object.entries(p)) if (k !== 'grid') expect(g!.columns.some((c) => c.key === v), `${t.code} borelog ${k}=${v}`).toBe(true); }
         if (t.chart) { const g = t.grids.find((x) => x.key === t.chart!.grid); expect(g).toBeTruthy(); for (const k of [t.chart.x, t.chart.y, ...(t.chart.series ?? []).map((s) => s.y)]) expect(g!.columns.some((c) => c.key === k), `${t.code} chart ${k}`).toBe(true); }
       });
 
