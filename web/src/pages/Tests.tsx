@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge } from '@mantine/core';
+import { Alert, Button, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
 import { IconAlertTriangle, IconPrinter } from '@tabler/icons-react';
-import { emptyInput, evaluateObservation, formatValue, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
+import { emptyInput, evaluateObservation, formatValue, chartSeries, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
@@ -65,7 +65,9 @@ export function TestSheetPage() {
     const eq: ObservationInput['equipment'] = {};
     for (const slot of tpl.equipment ?? []) {
       const sel = obs.equipment?.[slot.key]; const e = t.equipment.find((x: any) => x.id === sel?.id);
-      eq[slot.key] = e ? { id: e.id, name: e.name, data: e.data ?? {} } : null;
+      // locked sheets keep the calibration values they were saved with
+      const locked = !['pending', 'in_progress', 'returned'].includes(t.status) && sel?.data && Object.keys(sel.data).length;
+      eq[slot.key] = locked ? sel! : e ? { id: e.id, name: e.name, data: e.data ?? {} } : null;
     }
     return evaluateObservation(tpl, { ...obs, equipment: eq });
   }, [tpl, obs, t]);
@@ -74,8 +76,9 @@ export function TestSheetPage() {
   const editable = (['pending', 'in_progress', 'returned'].includes(t.status) && can('enterObservations')) || (admin && t.status !== 'reported');
   const canReview = (t.status === 'submitted' || (admin && ['in_progress', 'returned'].includes(t.status))) && can('reviewTests');
   const setHeader = (k: string, v: any) => { setObs({ ...obs, header: { ...obs.header, [k]: v } }); setDirty(true); };
-  const setCell = (g: string, i: number, k: string, v: string) => {
-    const rows = [...(obs.grids[g] ?? [])]; rows[i] = { ...rows[i], [k]: v === '' ? null : isNaN(Number(v)) ? v : Number(v) };
+  const setConst = (k: string, v: string) => { const c = { ...(obs.constants ?? {}) }; if (v === '') delete c[k]; else c[k] = (isNaN(Number(v)) ? v : Number(v)) as never; setObs({ ...obs, constants: c }); setDirty(true); };
+  const setCell = (g: string, i: number, k: string, v: string, text = false) => {
+    const rows = [...(obs.grids[g] ?? [])]; rows[i] = { ...rows[i], [k]: v === '' ? null : text || isNaN(Number(v)) ? v : Number(v) };
     setObs({ ...obs, grids: { ...obs.grids, [g]: rows } }); setDirty(true);
   };
   const save = async (reason?: string) => {
@@ -130,8 +133,9 @@ export function TestSheetPage() {
                   <TextInput size="xs" type="date" label="Test started" value={dates.started_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, started_at: e.currentTarget.value }); setDirty(true); }} />
                   <TextInput size="xs" type="date" label="Test completed" value={dates.completed_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, completed_at: e.currentTarget.value }); setDirty(true); }} />
                   {tpl.headerFields.map((f) => f.type === 'select'
-                    ? <Select key={f.key} size="xs" label={f.label} required={f.required} data={f.options ?? []} value={(obs.header[f.key] as string) ?? null} disabled={!editable} onChange={(v) => setHeader(f.key, v)} />
+                    ? <Select key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} data={f.options ?? []} value={(obs.header[f.key] as string) ?? (f.default !== undefined ? String(f.default) : null)} disabled={!editable} onChange={(v) => setHeader(f.key, v)} description={f.help} />
                     : <TextInput key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} type={f.type === 'date' ? 'date' : 'text'} inputMode={f.type === 'number' ? 'decimal' : undefined}
+                        placeholder={f.default !== undefined ? String(f.default) : undefined} description={f.help}
                         value={(obs.header[f.key] as string) ?? ''} disabled={!editable} onChange={(e) => setHeader(f.key, f.type === 'number' ? (e.currentTarget.value === '' ? null : e.currentTarget.value) : e.currentTarget.value)} />)}
                   {(tpl.equipment ?? []).map((slot) => {
                     const sel = obs.equipment?.[slot.key]?.id; const e = t.equipment.find((x: any) => x.id === sel);
@@ -143,10 +147,20 @@ export function TestSheetPage() {
                 </SimpleGrid>
                 {(tpl.constants.length > 0 || tpl.derived.length > 0) && (
                   <Paper withBorder p="xs" bg="#fafbfc">
-                    <Text size="xs" fw={600} mb={4}>Constants and derived values</Text>
-                    <SimpleGrid cols={{ base: 1, md: 3 }} spacing={2}>
-                      {tpl.constants.map((c) => <Text key={c.key} size="xs">{c.label}: <b>{formatValue(result.scalars[c.key] as never)}</b> {c.unit}{c.fromEquipment ? ' (from calibration)' : ''}</Text>)}
-                      {tpl.derived.map((c) => <Text key={c.key} size="xs">{c.label}: <b>{formatValue(result.scalars[c.key] as never, c.decimals)}</b> {c.unit}</Text>)}
+                    <Text size="xs" fw={600} mb={4}>Constants (from calibration or entered) and derived values</Text>
+                    <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing={6} verticalSpacing={4}>
+                      {tpl.constants.map((c) => {
+                        const manual = obs.constants?.[c.key] !== undefined && obs.constants?.[c.key] !== null;
+                        const src = c.fromEquipment ? 'calibration value' : 'standard value';
+                        return c.locked || !editable
+                          ? <Text key={c.key} size="xs">{c.label}: <b>{formatValue(result.scalars[c.key] as never) || '—'}</b> {c.unit} <Text span c="dimmed">({manual ? 'entered' : src})</Text></Text>
+                          : <TextInput key={c.key} size="xs" label={`${c.label}${c.unit ? ` (${c.unit})` : ''}`} inputMode="decimal"
+                              description={manual ? 'Entered manually – clear to use the ' + src : c.note ?? `Using the ${src}`}
+                              placeholder={formatValue(result.scalars[c.key] as never) || (c.fromEquipment ? 'select equipment or enter' : '')}
+                              styles={manual ? { input: { borderColor: '#eda100', background: '#fffaf0' } } : undefined}
+                              value={manual ? String(obs.constants![c.key]) : ''} onChange={(e) => setConst(c.key, e.currentTarget.value)} />;
+                      })}
+                      {tpl.derived.map((c) => <Text key={c.key} size="xs" style={{ alignSelf: 'end' }}>{c.label}: <b>{formatValue(result.scalars[c.key] as never, c.decimals) || '—'}</b> {c.unit}</Text>)}
                     </SimpleGrid>
                   </Paper>
                 )}
@@ -154,18 +168,24 @@ export function TestSheetPage() {
                   <div key={g.key} style={{ overflowX: 'auto' }}>
                     <Text size="sm" fw={600} mb={4}>{g.label}</Text>
                     <table className="grid-input">
-                      <thead><tr><th>#</th>{g.columns.map((c) => <th key={c.key}>{c.label}{c.unit ? <><br /><span style={{ fontWeight: 400 }}>({c.unit})</span></> : null}</th>)}</tr></thead>
+                      <thead><tr><th style={{ width: 36, minWidth: 36 }}>#</th>{g.columns.map((c) => <th key={c.key} style={{ minWidth: c.width ? c.width * 10 : c.text || c.options ? 150 : /^r\d+$/.test(c.key) ? 44 : 72 }}>{c.label}{c.unit ? <><br /><span style={{ fontWeight: 400 }}>({c.unit})</span></> : null}</th>)}</tr></thead>
                       <tbody>
                         {(obs.grids[g.key] ?? []).map((row, i) => (
                           <tr key={i}>
                             <td className="fixed">{i + 1}</td>
                             {g.columns.map((c) => c.input
-                              ? <td key={c.key}><input inputMode={c.key === 'id' ? 'text' : 'decimal'} value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value)} /></td>
+                              ? <td key={c.key} style={c.text ? { minWidth: 120 } : undefined}>{c.options
+                                  ? <select value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, true)}><option value="" />{c.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
+                                  : <input inputMode={c.text || c.key === 'id' ? 'text' : 'decimal'} value={row[c.key] === null || row[c.key] === undefined ? '' : String(row[c.key])} disabled={!editable} onChange={(e) => setCell(g.key, i, c.key, e.currentTarget.value, c.text)} />}</td>
                               : <td key={c.key} className={c.formula ? 'calc' : 'fixed'}>{formatValue(result.grids[g.key]?.[i]?.[c.key] as never, c.decimals)}</td>)}
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    {editable && !g.fixedRows && <Group gap={6} mt={4} className="no-print">
+                      <Button size="compact-xs" variant="subtle" onClick={() => { setObs({ ...obs, grids: { ...obs.grids, [g.key]: [...(obs.grids[g.key] ?? []), {}] } }); setDirty(true); }}>+ Add row</Button>
+                      {(obs.grids[g.key]?.length ?? 0) > (g.rows ?? 1) && <Button size="compact-xs" variant="subtle" color="gray" onClick={() => { setObs({ ...obs, grids: { ...obs.grids, [g.key]: (obs.grids[g.key] ?? []).slice(0, -1) } }); setDirty(true); }}>Remove last row</Button>}
+                    </Group>}
                   </div>
                 ))}
                 <Paper withBorder p="sm" bg="#f1f6ff">
@@ -176,8 +196,8 @@ export function TestSheetPage() {
                 </Paper>
                 {result.checks.map((c, i) => <Alert key={i} color={c.level === 'error' ? 'red' : 'orange'} icon={<IconAlertTriangle size={16} />} py={6}>{c.message}</Alert>)}
                 {tpl.chart && (() => {
-                  const pts = (result.grids[tpl.chart.grid] ?? []).map((r) => [r[tpl.chart!.x], r[tpl.chart!.y]]).filter(([x, y]) => typeof x === 'number' && typeof y === 'number') as [number, number][];
-                  return pts.length > 1 ? <div style={{ textAlign: 'center' }}><LineChart points={pts} title={tpl.chart.title} xLabel={tpl.chart.xLabel} yLabel={tpl.chart.yLabel} /></div> : null;
+                  const series = chartSeries(tpl, result);
+                  return (series[0]?.points.length ?? 0) > 1 ? <div style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart series={series} xLog={tpl.chart.xLog} fit={tpl.chart.fit} title={tpl.chart.title} xLabel={tpl.chart.xLabel} yLabel={tpl.chart.yLabel} /></div> : null;
                 })()}
                 <Group justify="space-between" mt="sm">
                   <Text size="sm">Tested by: <b>{t.enteredBy ?? '—'}</b></Text>
@@ -188,6 +208,7 @@ export function TestSheetPage() {
           </div>
         </Grid.Col>
         <Grid.Col span={{ base: 12, xl: 4 }} className="no-print">
+          <TestGuide tpl={tpl} />
           <Paper withBorder p="md">
             <Text fw={600} mb="xs">History and corrections</Text>
             <Timeline bulletSize={12}>
@@ -208,6 +229,31 @@ export function TestSheetPage() {
       <ReasonModal opened={returnOpen} title="Return for correction – what needs fixing?" onClose={() => setReturnOpen(false)} onSubmit={async (n) => { setReturnOpen(false); await review('return', n); }} />
       <ReasonModal opened={reasonOpen} title="Reason for correction" onClose={() => setReasonOpen(false)} onSubmit={async (n) => { setReasonOpen(false); await save(n); }} />
     </>
+  );
+}
+
+/** Procedure, worked example and references for testers learning the test. */
+function TestGuide({ tpl }: { tpl: ObservationTemplate }) {
+  const calc = useMemo(() => renderSampleCalc(tpl), [tpl]);
+  if (!tpl.procedure?.length && !calc.length && !tpl.references?.length) return null;
+  const first = tpl.procedure?.length ? 'procedure' : calc.length ? 'calc' : 'refs';
+  return (
+    <Paper withBorder p="md" mb="md">
+      <Text fw={600} mb={6}>How to test – {tpl.method}</Text>
+      <Tabs defaultValue={first} keepMounted={false}>
+        <Tabs.List mb="xs">
+          {!!tpl.procedure?.length && <Tabs.Tab value="procedure">Procedure</Tabs.Tab>}
+          {!!calc.length && <Tabs.Tab value="calc">Sample calculation</Tabs.Tab>}
+          {!!tpl.references?.length && <Tabs.Tab value="refs">IS references</Tabs.Tab>}
+        </Tabs.List>
+        <Tabs.Panel value="procedure"><List type="ordered" size="sm" spacing={4}>{tpl.procedure?.map((p, i) => <List.Item key={i}>{p}</List.Item>)}</List></Tabs.Panel>
+        <Tabs.Panel value="calc">
+          <Stack gap={6}>{calc.map((c, i) => <Text key={i} size="sm">{c}</Text>)}</Stack>
+          <Tooltip label="These numbers come from the template's worked example and are recalculated by the same formulas as this sheet." multiline w={260}><Text size="xs" c="dimmed" mt={6}>Worked example – not this sample's data</Text></Tooltip>
+        </Tabs.Panel>
+        <Tabs.Panel value="refs"><List size="sm" spacing={4}>{tpl.references?.map((r, i) => <List.Item key={i}>{r}</List.Item>)}</List></Tabs.Panel>
+      </Tabs>
+    </Paper>
   );
 }
 

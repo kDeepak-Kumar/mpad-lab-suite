@@ -16,6 +16,32 @@ export interface RenderInput {
 }
 
 const rateOnly = (kind: string, d: any) => kind === 'quote' && !(d.showQty ?? d.mode !== 'rate');
+
+/** Rows of the totals block (subtotal, discount, GST, round-off, total), or null when the document shows rates only. */
+function totalsRows(p: RenderInput, pr: Record<string, any>): [string, number][] | null {
+  const tt = p.totals, d = p.data;
+  if (!tt || rateOnly(p.kind, d)) return null;
+  const gstIn = p.kind !== 'quote' || (d.includeGst ?? d.mode !== 'rate');
+  const rate = tt.taxSummary?.length === 1 ? tt.taxSummary[0].rate : null;
+  const rows: [string, number][] = [[pr.subtotal, tt.subtotal]];
+  if (tt.discount > 0) rows.push([pr.discount, -tt.discount], ['Taxable value', tt.taxable]);
+  if (gstIn) {
+    if (tt.interState) rows.push([`${pr.igst}${rate !== null ? ` @ ${rate}%` : ''}`, tt.igst]);
+    else rows.push([`${pr.cgst}${rate !== null ? ` @ ${rate / 2}%` : ''}`, tt.cgst], [`${pr.sgst}${rate !== null ? ` @ ${rate / 2}%` : ''}`, tt.sgst]);
+  }
+  if (tt.roundOff) rows.push([pr.roundOff, tt.roundOff]);
+  rows.push([gstIn ? pr.total : 'Total (GST extra)', tt.total]);
+  return rows;
+}
+const money = (v: number) => inr(v, Math.abs(v % 1) > 0.001 ? 2 : 0);
+/** The totals block renders inside the items table (aligned under Amount) when both are visible. */
+const totalsInline = (p: RenderInput) => {
+  const tb = p.template.blocks.find((b) => b.type === 'totals' && b.visible);
+  const ib = p.template.blocks.find((b) => b.type === 'items' && b.visible);
+  if (!tb || !ib) return null;
+  const cols = ((ib.props as any).columns as Column[]).filter((c) => c.visible);
+  return cols.some((c) => c.key === 'amount') ? tb : null;
+};
 /** NABL documents use the NABL letterhead profile, others the standard one (Settings → Letterheads). */
 const letterhead = (c: any, d: any) => {
   const key = d.accreditation === 'NABL' ? 'nabl' : d.accreditation === 'Non-NABL' ? 'standard' : null;
@@ -138,29 +164,38 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
           default: return l[col.key];
         }
       };
+      const tb = totalsInline(p);
+      const trows = tb ? totalsRows(p, tb.props as Record<string, any>) : null;
+      const ai = cols.findIndex((c) => c.key === 'amount');
       return (
-        <table className="bx" style={{ marginTop: 4 }}>
-          <thead><tr>{cols.map((col) => <th key={col.key} style={{ width: col.width ? `${col.width}%` : undefined, textAlign: 'center', fontWeight: 400 }}>{col.label}</th>)}</tr></thead>
-          <tbody>{lines.map((l, i) => <tr key={i}>{cols.map((col) => <td key={col.key} style={{ textAlign: col.align ?? 'left' }}>{cell(col, l, i)}</td>)}</tr>)}</tbody>
+        <table className="bx doc-items" style={{ marginTop: 4 }}>
+          <colgroup>{cols.map((col) => <col key={col.key} style={{ width: col.width ? `${col.width}%` : undefined }} />)}</colgroup>
+          <thead><tr>{cols.map((col) => <th key={col.key} style={{ textAlign: 'center', fontWeight: 400 }}>{col.label}</th>)}</tr></thead>
+          <tbody>{lines.map((l, i) => <tr key={i}>{cols.map((col) => <td key={col.key} style={{ textAlign: col.align ?? (col.key === 'amount' || col.key === 'rate' ? 'right' : 'left') }}>{cell(col, l, i)}</td>)}</tr>)}</tbody>
+          {trows && ai > 0 && (
+            <tfoot>
+              {trows.map(([label, v], i) => {
+                const last = i === trows.length - 1;
+                return (
+                  <tr key={i} className={last ? 'doc-grand-total' : undefined}>
+                    <td colSpan={ai} style={{ textAlign: 'right', fontWeight: last ? 700 : 400, whiteSpace: 'nowrap' }}>{label}</td>
+                    <td style={{ textAlign: 'right', fontWeight: last ? 700 : 400, whiteSpace: 'nowrap' }}>{money(v)}</td>
+                    {ai < cols.length - 1 && <td colSpan={cols.length - 1 - ai} />}
+                  </tr>
+                );
+              })}
+            </tfoot>
+          )}
         </table>
       );
     }
     case 'totals': {
-      const tt = p.totals;
-      if (!tt || rateOnly(p.kind, d)) return null;
-      const gstIn = p.kind !== 'quote' || (d.includeGst ?? d.mode !== 'rate');
-      const rate = tt.taxSummary?.length === 1 ? tt.taxSummary[0].rate : null;
-      const rows: [string, number][] = [[pr.subtotal, tt.subtotal]];
-      if (tt.discount > 0) rows.push([pr.discount, -tt.discount], ['Taxable value', tt.taxable]);
-      if (gstIn) {
-        if (tt.interState) rows.push([`${pr.igst}${rate !== null ? ` -${rate}%` : ''}`, tt.igst]);
-        else rows.push([`${pr.cgst}${rate !== null ? ` -${rate / 2}%` : ''}`, tt.cgst], [`${pr.sgst}${rate !== null ? ` -${rate / 2}%` : ''}`, tt.sgst]);
-      }
-      if (tt.roundOff) rows.push([pr.roundOff, tt.roundOff]);
-      rows.push([gstIn ? pr.total : 'Total (GST extra)', tt.total]);
+      if (totalsInline(p)) return null;
+      const rows = totalsRows(p, pr);
+      if (!rows) return null;
       return (
         <table className="bx" style={{ width: '100%', borderTop: 0 }}><tbody>
-          {rows.map(([l, v], i) => <tr key={i}><td style={{ border: 0 }} /><td style={{ width: '22%', textAlign: 'center', fontWeight: i === rows.length - 1 ? 700 : 400 }}>{l}</td><td style={{ width: '14%', textAlign: 'right', fontWeight: i === rows.length - 1 ? 700 : 400 }}>{inr(v, Math.abs(v % 1) > 0.001 ? 2 : 0)}</td></tr>)}
+          {rows.map(([l, v], i) => <tr key={i}><td style={{ textAlign: 'right', fontWeight: i === rows.length - 1 ? 700 : 400 }}>{l}</td><td style={{ width: '18%', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: i === rows.length - 1 ? 700 : 400 }}>{money(v)}</td></tr>)}
         </tbody></table>
       );
     }
@@ -226,35 +261,58 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       );
     }
     case 'results': {
-      const rows = (d.rows ?? []) as { group?: string; name: string; unit: string; method: string; values: string[] }[];
+      const rows = (d.rows ?? []) as { group?: string; name: string; unit: string; method: string; spec?: string; values: string[] }[];
       const samples = (d.samples ?? []) as { label: string }[];
+      const tables = (d.tables ?? []) as { title: string; sample?: string; columns: string[]; rows: string[][] }[];
+      const showSpec = pr.showSpec !== false && rows.some((r) => r.spec && r.spec !== '--');
+      const grouped = rows.some((r) => r.group);
       const span = (i: number, key: 'group' | 'method') => {
         const v = rows[i][key]; if (!v) return 1;
         if (i > 0 && rows[i - 1][key] === v) return 0;
         let n = 1; while (i + n < rows.length && rows[i + n][key] === v) n++; return n;
       };
       return (
-        <table className="bx" style={{ fontSize: '10pt' }}>
-          <thead>
-            <tr><th rowSpan={3} style={{ width: '7%' }}>{pr.sno}</th><th rowSpan={3} colSpan={2}>{pr.test}</th><th rowSpan={3} style={{ width: '9%' }}>{pr.units}</th><th rowSpan={3}>{pr.method}</th><th colSpan={samples.length}>{pr.sampleHeader}</th></tr>
-            <tr>{samples.map((s, i) => <th key={i}>{s.label}</th>)}</tr>
-            <tr>{samples.map((_, i) => <th key={i}>{pr.resultsLabel}</th>)}</tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => {
-              const gs = span(i, 'group'), ms = span(i, 'method');
-              return (
-                <tr key={i}>
-                  <td style={{ textAlign: 'center' }}>{i + 1}</td>
-                  {r.group ? <>{gs > 0 && <td rowSpan={gs} style={{ textAlign: 'center', width: '20%' }}>{r.group}</td>}<td style={{ textAlign: 'center' }}>{r.name}</td></> : <td colSpan={2}>{r.name}</td>}
-                  <td style={{ textAlign: 'center' }}>{r.unit}</td>
-                  {ms > 0 && <td rowSpan={ms} style={{ textAlign: 'center' }}>{r.method}</td>}
-                  {r.values.map((v, j) => <td key={j} style={{ textAlign: 'center' }}>{v}</td>)}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <>
+          <table className="bx doc-results" style={{ fontSize: '10pt' }}>
+            <colgroup>
+              <col style={{ width: '6%' }} />
+              {grouped && <col style={{ width: '15%' }} />}<col />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: showSpec ? '17%' : '22%' }} />
+              {showSpec && <col style={{ width: '15%' }} />}
+              {samples.map((_, i) => <col key={i} style={{ width: `${Math.max(8, 16 / Math.max(1, samples.length))}%` }} />)}
+            </colgroup>
+            <thead>
+              <tr><th rowSpan={3}>{pr.sno}</th><th rowSpan={3} colSpan={grouped ? 2 : 1}>{pr.test}</th><th rowSpan={3}>{pr.units}</th><th rowSpan={3}>{pr.method}</th>{showSpec && <th rowSpan={3}>{pr.specLabel || 'Requirement as per IS'}</th>}<th colSpan={samples.length}>{pr.sampleHeader}</th></tr>
+              <tr>{samples.map((s, i) => <th key={i}>{s.label}</th>)}</tr>
+              <tr>{samples.map((_, i) => <th key={i}>{pr.resultsLabel}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const gs = span(i, 'group'), ms = span(i, 'method');
+                return (
+                  <tr key={i}>
+                    <td style={{ textAlign: 'center' }}>{i + 1}</td>
+                    {r.group ? <>{gs > 0 && <td rowSpan={gs} style={{ textAlign: 'center' }}>{r.group}</td>}<td style={{ textAlign: 'center' }}>{r.name}</td></> : <td colSpan={grouped ? 2 : 1}>{r.name}</td>}
+                    <td style={{ textAlign: 'center' }}>{r.unit}</td>
+                    {ms > 0 && <td rowSpan={ms} style={{ textAlign: 'center' }}>{r.method}</td>}
+                    {showSpec && <td style={{ textAlign: 'center' }}>{r.spec || '--'}</td>}
+                    {r.values.map((v, j) => <td key={j} style={{ textAlign: 'center' }}>{v || '--'}</td>)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {pr.showTables !== false && tables.map((tb, k) => (
+            <div key={k} style={{ marginTop: 8, breakInside: 'avoid' }}>
+              <div style={{ fontWeight: 700, fontSize: '9.5pt', marginBottom: 2 }}>{tb.title}{tb.sample ? ` – ${tb.sample}` : ''}</div>
+              <table className="bx" style={{ fontSize: '9pt' }}>
+                <thead><tr><th style={{ width: '6%' }}>S.No</th>{tb.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
+                <tbody>{tb.rows.map((r, i) => <tr key={i}><td style={{ textAlign: 'center' }}>{i + 1}</td>{r.map((v, j) => <td key={j} style={{ textAlign: j === 0 ? 'left' : 'center' }}>{v || '--'}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          ))}
+        </>
       );
     }
     case 'remarks':
@@ -262,7 +320,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       return <div style={{ border: '1px solid #333', borderTop: 0, padding: '3px 6px', fontWeight: 700 }}>{pr.label} {d.remarks}</div>;
     case 'charts':
       if (!(d.charts ?? []).length) return null;
-      return <div style={{ marginTop: 8 }}>{d.charts.map((ch: any, i: number) => <div key={i} style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart points={ch.points} title={ch.title} xLabel={ch.xLabel} yLabel={ch.yLabel} /></div>)}</div>;
+      return <div style={{ marginTop: 8 }}>{d.charts.map((ch: any, i: number) => <div key={i} style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart points={ch.points} series={ch.series} xLog={ch.xLog} fit={ch.fit} title={ch.title} xLabel={ch.xLabel} yLabel={ch.yLabel} /></div>)}</div>;
     case 'receiptBody':
       return (
         <table className="bx" style={{ marginTop: 10 }}><tbody>

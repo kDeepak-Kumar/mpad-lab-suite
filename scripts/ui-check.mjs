@@ -110,8 +110,10 @@ const s2 = await api(ad, '/samples', { client_id: 2, site_id: 3, accreditation: 
 if (!s2.ulr) problems.push('admin: NABL sample has no ULR');
 const t2 = (await api(ad, '/tests?status=pending')).find((t) => t.sample_id === s2.id).id;
 await ad.goto(`${base}/tests/${t2}`);
-await ad.getByRole('textbox', { name: /Volume of soil in distilled water/ }).fill('12');
-await ad.getByRole('textbox', { name: /Volume of soil in kerosene/ }).fill('10');
+// FSI sheet: first row of the cylinder grid (Vd, Vk)
+await ad.locator('table.grid-input tbody tr').first().locator('input').nth(0).fill('12');
+await ad.locator('table.grid-input tbody tr').first().locator('input').nth(1).fill('10');
+await shot(ad, 'test-fsi-guide');
 await ad.getByRole('button', { name: 'Save' }).click(); await ad.waitForTimeout(800);
 await ad.getByRole('button', { name: 'Submit for review' }).click(); await ad.waitForTimeout(800);
 await ad.getByRole('button', { name: 'Accept' }).click(); await ad.waitForTimeout(800);

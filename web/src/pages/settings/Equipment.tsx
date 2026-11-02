@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Button, Group, Modal, NumberInput, Stack, Switch, Text } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, SimpleGrid, Stack, Switch, Text } from '@mantine/core';
+import { EQUIPMENT_FIELDS } from '@suite/shared';
 import { api, ok, useApi, localToday } from '../../api';
 import { useCan } from '../../ctx';
 import { PageHeader } from '../../components/ui';
@@ -19,7 +20,7 @@ export function EquipmentPage() {
         actions={can('equipment.create') && <Button onClick={() => setEdit({ category: 'Proving ring', data: {}, active: true })}>Add equipment</Button>} />
       <ListView id="equipment" rows={data} onRow={(e) => setEdit(e)} columns={[
         { key: 'name', label: 'Equipment' }, { key: 'category', label: 'Category', filter: 'select' }, { key: 'id_no', label: 'ID' }, { key: 'cert_no', label: 'Certificate' },
-        { key: 'factor', label: 'Factor', value: (e) => e.data?.factor ?? '' }, { key: 'cal_date', label: 'Calibrated', type: 'date' }, { key: 'due_date', label: 'Due', type: 'date' },
+        { key: 'factor', label: 'Calibration values', value: (e) => Object.entries(e.data ?? {}).filter(([k, x]) => k !== 'custom' && x !== undefined && x !== null && x !== '').map(([k, x]) => `${k}: ${x}`).join(', ') }, { key: 'cal_date', label: 'Calibrated', type: 'date' }, { key: 'due_date', label: 'Due', type: 'date' },
         { key: 'status', label: 'Status', type: 'status', value: status }, ...custom]}
         quickFilters={[{ label: 'Expired', filters: [{ key: 'status', op: 'in', value: ['EXPIRED'] }] }]} />
       {edit && <EqModal item={edit} readOnly={!can(edit.id ? 'equipment.edit' : 'equipment.create')} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
@@ -39,8 +40,20 @@ function EqModal({ item, onClose, readOnly }: { item: any; onClose: (s: boolean)
     <Modal opened onClose={() => onClose(false)} title={item.id ? 'Edit equipment' : 'Add equipment'} size="lg">
       <Stack>
         <RecordForm object="equipment" value={v} onChange={setV} disabled={readOnly} />
-        <NumberInput label="Calibration factor (e.g. kN/div)" decimalScale={6} disabled={readOnly} value={v.data?.factor ?? ''} onChange={(x) => setV({ ...v, data: { ...v.data, factor: x === '' ? undefined : Number(x) } })} />
-        <Text size="xs" c="dimmed">When re-calibrated, update the factor, certificate and dates. Earlier observation sheets keep the factor they were tested with.</Text>
+        {(() => {
+          const fields = EQUIPMENT_FIELDS[v.category] ?? [{ key: 'factor', label: 'Calibration factor', unit: '' }];
+          if (!fields.length) return <Text size="xs" c="dimmed">No calibration values are used in calculations for this category; keep the certificate and due date current.</Text>;
+          return (
+            <>
+              <Text size="sm" fw={600}>Calibration values used in observation sheets</Text>
+              <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                {fields.map((f) => <NumberInput key={f.key} label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} description={f.note} decimalScale={6} disabled={readOnly}
+                  value={v.data?.[f.key] ?? ''} onChange={(x) => setV({ ...v, data: { ...v.data, [f.key]: x === '' ? undefined : Number(x) } })} />)}
+              </SimpleGrid>
+            </>
+          );
+        })()}
+        <Text size="xs" c="dimmed">When re-calibrated, update these values, the certificate and the dates. Earlier observation sheets keep the values they were tested with; testers can still enter a value manually on a sheet.</Text>
         <Switch label="Active" disabled={readOnly} checked={v.active !== false} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} />
         {!readOnly && <Group justify="flex-end"><Button onClick={save} disabled={!v.name}>Save</Button></Group>}
       </Stack>

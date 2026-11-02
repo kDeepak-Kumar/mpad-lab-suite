@@ -4,6 +4,7 @@ import { CIVIL_LAB_TEMPLATES, DEFAULT_TEMPLATES, DEFAULT_NUMBERING, type DocKind
 import { db, insert, migrate, now, toJson } from './db';
 import { hashPassword } from './auth-hash';
 import { ensurePlatform } from './meta';
+import { PACK_CATALOG, OTHER_CATALOG, type CatalogSeed } from './packs';
 
 /**
  * First start: creates the company, the owner account, templates and a starter rate card.
@@ -28,20 +29,6 @@ const DEMO_COMPANY = {
   },
   smtp: {},
 };
-
-type CatalogSeed = { code: string; material: string; billing_name: string; report_name: string; method: string; nabl: boolean; unit: string; rate: number; obs_template_code: string | null; tat_days: number; conditions?: string; report_notes?: string };
-const DEMO_CATALOG: CatalogSeed[] = [
-  { code: 'SOIL-MP', material: 'Soil', billing_name: 'Determining MDD and OMC of soil by heavy compaction method', report_name: 'Modified Proctor', method: 'IS 2720 (Part 8) : 1983 RA 2020', nabl: true, unit: 'Per sample', rate: 3000, obs_template_code: 'PROCTOR-HEAVY', tat_days: 3 },
-  { code: 'SOIL-GR', material: 'Soil', billing_name: 'Gradation analysis of soil', report_name: 'Gradation analysis of soil', method: 'IS 2720 (Part 4) : 1985 RA 2020', nabl: true, unit: 'Per sample', rate: 900, obs_template_code: 'GRADATION-SOIL', tat_days: 2 },
-  { code: 'SOIL-AL', material: 'Soil', billing_name: 'Atterberg limits of soil', report_name: 'Atterberg limits', method: 'IS 2720 (Part 5) : 1985 RA 2020', nabl: true, unit: 'Per sample', rate: 1000, obs_template_code: 'ATTERBERG', tat_days: 2 },
-  { code: 'SOIL-FSI', material: 'Soil', billing_name: 'Free swell index of soil', report_name: 'Free swell index', method: 'IS 2720 (Part 40) : 1977 RA 2021', nabl: true, unit: 'Per sample', rate: 600, obs_template_code: 'FSI', tat_days: 2 },
-  { code: 'SOIL-CBR', material: 'Soil', billing_name: 'California bearing ratio (CBR) of soil, soaked', report_name: 'CBR', method: 'IS 2720 (Part 16) : 1987 RA 2021', nabl: true, unit: 'Per sample', rate: 2500, obs_template_code: 'CBR-LAB', tat_days: 6,
-    report_notes: 'As per IS 2720 (Part 16) : 1987, Clause 7.3: generally the CBR value at 2.5 mm penetration will be greater than that at 5 mm penetration, and in such a case the former shall be taken as the CBR value for design purposes.' },
-  { code: 'CON-CUBE', material: 'Concrete', billing_name: 'Compressive strength of concrete cubes (set of 3)', report_name: 'Compressive strength of concrete cubes', method: 'IS 516 (Part 1/Sec 1) : 2021', nabl: true, unit: 'Per set', rate: 600, obs_template_code: 'CUBE-COMP', tat_days: 1 },
-  { code: 'FLD-PLT', material: 'Soil', billing_name: 'Conducting plate load test on soil as per IS 1888 : 1982', report_name: 'Plate load test', method: 'IS 1888 : 1982', nabl: true, unit: 'Per point', rate: 18000, obs_template_code: null, tat_days: 5,
-    conditions: 'Reaction load should be provided from customer end along with 2 helpers.' },
-  { code: 'MISC-TRN', material: 'Service', billing_name: 'Transportation charges', report_name: '', method: '', nabl: false, unit: 'Per visit', rate: 7000, obs_template_code: null, tat_days: 0 },
-];
 
 function gstin(state: string, pan: string, entity = '1') {
   const base = `${state}${pan}${entity}Z`;
@@ -73,7 +60,7 @@ export async function seedIfEmpty() {
     const def = DEFAULT_TEMPLATES[kind];
     await insert(db, 'doc_templates', { company_id: cid, kind, version: 1, name: def.name, definition: toJson(def), is_default: true, created_at: now() });
   }
-  for (const c of priv.catalog ?? DEMO_CATALOG) await insert(db, 'catalog', { ...c, company_id: cid, sac: '998346', gst_rate: 18, active: true, created_at: now() });
+  for (const c of priv.catalog ?? [...PACK_CATALOG, ...OTHER_CATALOG]) await insert(db, 'catalog', { ...c, company_id: cid, sac: '998346', gst_rate: 18, active: true, created_at: now() });
 
   if (process.env.SEED_DEMO === 'true' || !process.env.ADMIN_EMAIL) {
     const pass = await hashPassword(adminPass);
@@ -86,6 +73,16 @@ export async function seedIfEmpty() {
     ];
     for (const u of staff) await insert(db, 'users', { company_id: cid, ...u, email: u.email.toLowerCase(), password_hash: pass, created_at: now() });
     await insert(db, 'equipment', { company_id: cid, name: 'Proving ring 50 kN (PR-01)', category: 'Proving ring', id_no: 'PR-01', make: 'Demo', data: toJson({ factor: 0.04995 }), cert_no: 'CAL/DEMO/1274-01', cal_date: '2026-08-24', due_date: '2027-08-23', active: true, created_at: now() });
+    const eqp = (name: string, category: string, id_no: string, data: Record<string, number>) => insert(db, 'equipment', { company_id: cid, name, category, id_no, make: 'Demo', data: toJson(data), cert_no: `CAL/DEMO/${id_no}`, cal_date: '2026-06-01', due_date: '2027-05-31', active: true, created_at: now() });
+    await eqp('Rebound hammer type N (RH-01)', 'Rebound hammer', 'RH-01', { anvil_avg: 80, anvil_nominal: 80 });
+    await eqp('UPV tester 54 kHz (UPV-01)', 'Ultrasonic pulse velocity tester', 'UPV-01', { ref_time: 25.4 });
+    await eqp('Universal testing machine 1000 kN (UTM-01)', 'Universal testing machine', 'UTM-01', { correction: 1 });
+    await eqp('Blaine apparatus (BL-01)', 'Blaine air permeability apparatus', 'BL-01', { bed_volume: 1.85, ref_area: 300, ref_time: 58, ref_density: 3.15, ref_porosity: 0.5 });
+    await eqp('Sand pouring cylinder (SPC-01)', 'Sand pouring cylinder', 'SPC-01', { cone_mass: 450, sand_density: 1.45 });
+    await eqp('Core cutter 1000 cc (CC-01)', 'Core cutter', 'CC-01', { volume: 1000, mass: 1050 });
+    await eqp('Heavy compaction mould 1000 cc (MLD-01)', 'Compaction mould', 'MLD-01', { volume: 1000, mass: 4250 });
+    await eqp('Cylindrical measure 15 litre (CM-15)', 'Cylindrical measure', 'CM-15', { volume: 15, mass: 9.2 });
+    await eqp('Cylindrical measure 3 litre (CM-03)', 'Cylindrical measure', 'CM-03', { volume: 3, mass: 2.1 });
     await insert(db, 'equipment', { company_id: cid, name: 'Compression testing machine 2000 kN (CTM-01)', category: 'Compression testing machine', id_no: 'CTM-01', make: 'Demo', data: toJson({}), cert_no: 'CAL/DEMO/2201', cal_date: '2026-02-10', due_date: '2027-02-09', active: true, created_at: now() });
     const c1 = await insert(db, 'clients', { company_id: cid, name: 'Sunrise Infra Projects Pvt Ltd', short_code: 'SIPL', type: 'company', gstin: gstin('36', 'AAECS1234K'), state_code: '36', pan: 'AAECS1234K', address: 'Plot 22, Financial District, Gachibowli, Hyderabad - 500032, Telangana', email: 'qc@sunrise.example', phone: '+91 90000 11111', payment_terms_days: 30, opening_balance: 0, created_at: now() });
     await insert(db, 'sites', { company_id: cid, client_id: c1, name: 'Tower A – Kokapet', address: 'Kokapet, Hyderabad', project: 'Residential towers phase 1', created_at: now() });

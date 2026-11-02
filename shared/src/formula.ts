@@ -142,9 +142,12 @@ function firstErr(vals: Value[]): FormulaError | undefined { return flat(vals).f
 const roundTo = (x: number, d: number) => { const f = Math.pow(10, d); return Math.round((x + Number.EPSILON * Math.sign(x)) * f) / f; };
 
 function compare(a: Value, b: Value): number {
-  if (blank(a) && blank(b)) return 0;
-  const an = blank(a) ? (typeof b === 'string' ? '' : 0) : a;
-  const bn = blank(b) ? (typeof a === 'string' ? '' : 0) : b;
+  // As in Excel: an empty cell equals "" and 0, but a cell holding 0 is not equal to "".
+  const na = a === null || a === undefined, nb = b === null || b === undefined;
+  if (na && nb) return 0;
+  const def = (v: Value) => (typeof v === 'string' ? '' : typeof v === 'boolean' ? false : 0);
+  const an = na ? def(b) : a;
+  const bn = nb ? def(a) : b;
   if (typeof an === 'number' && typeof bn === 'number') return an - bn;
   if (typeof an === 'string' && typeof bn === 'string') return an.toLowerCase().localeCompare(bn.toLowerCase());
   if (typeof an === 'boolean' && typeof bn === 'boolean') return Number(an) - Number(bn);

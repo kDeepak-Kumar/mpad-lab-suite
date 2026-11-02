@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Knex } from 'knex';
 import {
   counterScope, formatNumber, formatDate, DEFAULT_NUMBERING, type ObservationTemplate, evaluateObservation,
-  formatValue, stateName, type ObservationInput,
+  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries,
 } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from './db';
 import { HttpError, type AuthUser } from './auth';
@@ -93,8 +93,9 @@ export async function buildReportData(cid: number, testIds: number[]) {
   const catalog = await db('catalog').whereIn('id', tests.map((t) => t.catalog_id).filter(Boolean));
   const catById = new Map(catalog.map((c) => [c.id, c]));
 
-  const rows: { key: string; group?: string; name: string; unit: string; method: string; values: string[] }[] = [];
-  const charts: { title: string; xLabel: string; yLabel: string; sample: string; points: [number, number][] }[] = [];
+  const rows: { key: string; group?: string; name: string; unit: string; method: string; spec: string; values: string[] }[] = [];
+  const charts: { title: string; xLabel: string; yLabel: string; sample: string; xLog?: boolean; fit?: string; points: [number, number][]; series: { label: string; dashed?: boolean; markers?: boolean; points: [number, number][] }[] }[] = [];
+  const tables: { title: string; sample: string; columns: string[]; rows: string[][] }[] = [];
   const notes: string[] = [];
   const nabl: boolean[] = [];
   for (const t of tests.sort((a, b) => (a.catalog_id as number) - (b.catalog_id as number) || (a.id as number) - (b.id as number))) {
@@ -103,19 +104,24 @@ export async function buildReportData(cid: number, testIds: number[]) {
     nabl.push(Boolean(cat?.nabl));
     if (cat?.report_notes) for (const n of String(cat.report_notes).split('\n').map((s) => s.trim()).filter(Boolean)) if (!notes.includes(n)) notes.push(n);
     const sIdx = sampleIds.indexOf(t.sample_id as number);
+    const sampleLabel = samples[sIdx]?.sample_label || samples[sIdx]?.code || '';
     const results = (t.results ?? {}) as Record<string, unknown>;
+    const res = evaluateObservation(tpl, (t.observation ?? { header: {}, grids: {} }) as ObservationInput);
     for (const rr of tpl.reportRows) {
       const key = `${tpl.code}|${rr.group ?? ''}|${rr.name}`;
       let r = rows.find((x) => x.key === key);
-      if (!r) { r = { key, group: rr.group, name: rr.name, unit: rr.unit, method: cat?.method || tpl.method, values: sampleIds.map(() => '') }; rows.push(r); }
+      if (!r) { r = { key, group: rr.group, name: rr.name, unit: rr.unit, method: cat?.method || tpl.method, spec: '', values: sampleIds.map(() => '') }; rows.push(r); }
       r.values[sIdx] = formatValue(results[rr.result] as never, rr.decimals);
+      if (!r.spec) r.spec = reportSpec(rr, res);
+    }
+    for (const rt of tpl.reportTables ?? []) {
+      const body = reportTableRows(tpl, rt, res);
+      if (body.length) tables.push({ title: rt.title, sample: sampleIds.length > 1 ? sampleLabel : '', columns: rt.columns.map((c) => c.label), rows: body });
     }
     if (tpl.chart) {
-      const res = evaluateObservation(tpl, (t.observation ?? { header: {}, grids: {} }) as ObservationInput);
-      const pts = (res.grids[tpl.chart.grid] ?? [])
-        .map((g) => [g[tpl.chart!.x], g[tpl.chart!.y]])
-        .filter(([x, y]) => typeof x === 'number' && typeof y === 'number') as [number, number][];
-      charts.push({ title: `${tpl.chart.title} – ${samples[sIdx]?.code ?? ''}`, xLabel: tpl.chart.xLabel, yLabel: tpl.chart.yLabel, sample: samples[sIdx]?.code, points: pts });
+      const series = chartSeries(tpl, res);
+      if ((series[0]?.points.length ?? 0) > 1)
+        charts.push({ title: `${tpl.chart.title} – ${samples[sIdx]?.code ?? ''}`, xLabel: tpl.chart.xLabel, yLabel: tpl.chart.yLabel, sample: samples[sIdx]?.code, xLog: tpl.chart.xLog, fit: tpl.chart.fit, points: series[0].points, series });
     }
   }
   const company = await getCompany(cid);
@@ -136,7 +142,7 @@ export async function buildReportData(cid: number, testIds: number[]) {
     material, materialUpper: material.toUpperCase(),
     nablAll: nabl.length > 0 && nabl.every(Boolean),
     rows: rows.map(({ key: _k, ...r }) => r),
-    charts, notes, remarks: '',
+    tables, charts, notes, remarks: '',
   };
 }
 

@@ -32,7 +32,7 @@ export const STEEL_TMT: ObservationTemplate = {
     { key: 'd', label: 'Nominal diameter', formula: 'IF(dia="","",dia*1)', unit: 'mm', decimals: 0 },
     { key: 'an', label: 'Nominal area', formula: 'IF(d="","",PI()*d^2/4)', unit: 'mm²', decimals: 1 },
     { key: 'mn', label: 'Nominal mass', formula: 'IF(d="","",d^2/162.2)', unit: 'kg/m', decimals: 3 },
-    { key: 'tol', label: 'Mass tolerance (individual sample)', formula: 'IF(d="","",IF(d<=10,8,IF(d<=16,6,4)))', unit: '± %', decimals: 0 },
+    { key: 'tol', label: 'Mass tolerance (±, individual sample)', formula: 'IF(d="","",IF(d<=10,8,IF(d<=16,6,4)))', unit: '%', decimals: 0 },
     { key: 'ys_min', label: 'Min 0.2% proof / yield stress', formula: L('ys'), unit: 'N/mm²', decimals: 0 },
     { key: 'ts_min', label: 'Min tensile strength', formula: L('ts'), unit: 'N/mm²', decimals: 0 },
     { key: 'ratio_min', label: 'Min TS / YS ratio', formula: L('ratio'), decimals: 2 },

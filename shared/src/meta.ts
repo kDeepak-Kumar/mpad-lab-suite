@@ -1,3 +1,4 @@
+import { EQUIPMENT_CATEGORIES } from './packs/equipment';
 /**
  * Metadata: objects, fields, picklists, layouts and roles. Admins customise these at runtime
  * (Setup), the same way a Salesforce admin adds fields, picklist values and permissions.
@@ -66,7 +67,7 @@ export const DEFAULT_PICKLISTS: Picklist[] = [
   { key: 'client_type', label: 'Client type', values: [{ value: 'company', label: 'Company', active: true }, { value: 'government', label: 'Government', active: true }, { value: 'individual', label: 'Individual', active: true }, { value: 'walkin', label: 'Walk-in / cash', active: true }] },
   pl('unit', 'Pricing unit', ['Per sample', 'Per set', 'Per point', 'Per visit', 'Per borehole', 'Per metre', 'Per day', 'Lump sum']),
   pl('payment_mode', 'Payment mode', ['Bank transfer (NEFT/RTGS)', 'UPI', 'Cheque', 'Cash', 'DD']),
-  pl('equipment_category', 'Equipment category', ['Proving ring', 'Compression testing machine', 'Universal testing machine', 'Balance', 'Oven', 'Dial gauge', 'Sieve set', 'Other']),
+  pl('equipment_category', 'Equipment category', EQUIPMENT_CATEGORIES),
 ];
 
 /** Per-object layout: field order and visibility in forms, default list columns. */

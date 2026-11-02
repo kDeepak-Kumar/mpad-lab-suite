@@ -48,10 +48,13 @@ table.grid-input { border-collapse: collapse; width: 100%; font-size: 13px; }
 table.grid-input th { background: #f6f7f9; font-weight: 600; padding: 6px; border: 1px solid #e1e5ea; text-align: center; color: #344054; }
 table.grid-input td { border: 1px solid #e1e5ea; padding: 0; text-align: center; height: 32px; }
 table.grid-input td.calc { background: #f8fafc; color: #1d5598; padding: 0 6px; font-variant-numeric: tabular-nums; }
-table.grid-input td.fixed { background: #f6f7f9; padding: 0 6px; }
+table.grid-input td.fixed { background: #f6f7f9; padding: 0 6px; white-space: nowrap; }
 table.grid-input input { width: 100%; height: 32px; border: 0; padding: 0 6px; text-align: center; background: #fffbea; color: #1d4ed8; font-size: 13px; font-variant-numeric: tabular-nums; }
 table.grid-input input:focus { outline: 2px solid var(--brand); background: #fff; }
 table.grid-input input:disabled { background: transparent; color: #111; }
+table.grid-input select { width: 100%; height: 32px; border: 0; padding: 0 4px; background: #fffbea; color: #1d4ed8; font-size: 13px; }
+table.grid-input select:disabled { background: transparent; color: #111; appearance: none; }
+table.grid-input th { white-space: normal; min-width: 64px; }
 
 /* lockable fields */
 .lockfield .mantine-Input-section { cursor: pointer; }
@@ -61,6 +64,13 @@ table.grid-input input:disabled { background: transparent; color: #111; }
 .doc-page { background: #fff; margin: 0 auto; box-shadow: 0 4px 18px rgba(16,24,40,.12); color: #111; line-height: 1.35; position: relative; }
 .doc-page table { border-collapse: collapse; width: 100%; }
 .doc-page .bx td, .doc-page .bx th { border: 1px solid #333; padding: 3px 6px; vertical-align: middle; }
+.doc-page table.doc-items, .doc-page table.doc-results { table-layout: fixed; }
+.doc-page .bx td, .doc-page .bx th { overflow-wrap: break-word; }
+.doc-page .doc-items tfoot td { border-top-width: 1px; }
+.doc-page .doc-items tfoot tr:first-child td { border-top: 1.5px solid #333; }
+.doc-page .doc-grand-total td { background: #f3f4f6; }
+.doc-page .bx thead { display: table-header-group; }
+.doc-page tr { break-inside: avoid; }
 .doc-block { position: relative; }
 .doc-block.selectable:hover { outline: 1px dashed var(--brand); outline-offset: 2px; cursor: pointer; }
 .doc-block.selected { outline: 2px solid var(--brand); outline-offset: 2px; }
@@ -76,4 +86,11 @@ table.grid-input input:disabled { background: transparent; color: #111; }
   .doc-zoom { zoom: 1 !important; }
   .doc-block.selectable:hover, .doc-block.selected { outline: none !important; }
   .no-print { display: none !important; }
+  /* observation sheets: fit wide grids on the page instead of scrolling */
+  .print-root [style*="overflow-x"] { overflow: visible !important; }
+  .print-root table.grid-input { font-size: 8pt; table-layout: auto; }
+  .print-root table.grid-input th { min-width: 0 !important; padding: 2px; font-size: 7.5pt; }
+  .print-root table.grid-input td { height: 20px; }
+  .print-root table.grid-input input, .print-root table.grid-input select { height: 20px; font-size: 8pt; padding: 0 2px; background: transparent; color: #111; }
+  .print-root .mantine-Paper-root { border: 0; box-shadow: none; }
 }

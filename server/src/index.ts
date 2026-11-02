@@ -10,6 +10,7 @@ import { finance } from './routes/finance';
 import { seedIfEmpty } from './seed';
 import { analytics } from './analytics';
 import { ensurePlatform } from './meta';
+import { syncTemplatePack } from './packs';
 import compression from 'compression';
 
 const app = express();
@@ -35,5 +36,6 @@ const port = Number(process.env.PORT || 4000);
 migrate()
   .then(() => seedIfEmpty())
   .then(() => ensurePlatform())
+  .then(() => syncTemplatePack())
   .then(() => app.listen(port, () => console.log(`Suite running on http://localhost:${port}${webDir ? '' : ' (API only; web not built)'}`)))
   .catch((e) => { console.error('Startup failed', e); process.exit(1); });

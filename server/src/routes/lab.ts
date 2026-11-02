@@ -210,7 +210,7 @@ lab.post('/tests/:id/submit', allow('observe'), h(async (req) => {
   if (!['in_progress', 'returned'].includes(t.status as string)) throw new HttpError(409, 'Save the observation sheet before submitting');
   const tpl = await getObsTemplate(cid, t.template_code as string, t.template_version as number);
   const obs = t.observation as ObservationInput;
-  const missing = tpl.headerFields.filter((f) => f.required && (obs?.header?.[f.key] === null || obs?.header?.[f.key] === undefined || obs?.header?.[f.key] === ''));
+  const missing = tpl.headerFields.filter((f) => f.required && f.default === undefined && (obs?.header?.[f.key] === null || obs?.header?.[f.key] === undefined || obs?.header?.[f.key] === ''));
   if (missing.length && !admin) throw new HttpError(400, `Fill in: ${missing.map((m) => m.label).join(', ')}`);
   const errs = ((t.checks ?? []) as { level: string; message: string }[]).filter((c) => c.level === 'error');
   if (errs.length && !admin) throw new HttpError(400, errs.map((e) => e.message).join(' '));

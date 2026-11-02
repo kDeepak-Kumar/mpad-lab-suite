@@ -49,8 +49,8 @@ export const REBOUND_HAMMER: ObservationTemplate = {
   grids: [{
     key: 'loc', label: 'Rebound numbers at each test location (10 to 12 impacts, at least 20 mm apart)', rows: 6,
     columns: [
-      { key: 'member', label: 'Member / location', input: true, text: true, width: 14 },
-      { key: 'dir', label: 'Direction', input: true, options: DIRS, width: 12 },
+      { key: 'member', label: 'Member / location', input: true, text: true, width: 18 },
+      { key: 'dir', label: 'Direction', input: true, options: DIRS, width: 19 },
       ...R.map((r, i) => ({ key: r, label: `R${i + 1}`, input: true })),
       { key: 'n', label: 'Readings', formula: `IF(COUNT(${R.join(',')})=0,"",COUNT(${R.join(',')}))`, decimals: 0 },
       { key: 'med', label: 'Median', formula: `IF(n="","",MEDIAN(${R.join(',')}))`, decimals: 1 },
@@ -158,7 +158,7 @@ export const UPV: ObservationTemplate = {
   ],
   reportRows: [
     { name: 'Average pulse velocity', unit: 'km/s', result: 'v_avg', decimals: 2 },
-    { name: 'Concrete quality grading', unit: '--', result: 'quality', spec: 'Excellent > 4.40, Good 3.75–4.40, Doubtful 3.00–3.75, Poor < 3.00 km/s' },
+    { name: 'Concrete quality grading', unit: '--', result: 'quality', spec: 'IS 516 (Part 5/Sec 1) grading' },
   ],
   reportTables: [{ title: 'Ultrasonic pulse velocity results', grid: 'pts', skipBlank: 'v', columns: [{ key: 'member', label: 'Member / location' }, { key: 'mode', label: 'Transmission' }, { key: 'l', label: 'Path length (mm)', decimals: 0 }, { key: 't', label: 'Transit time (µs)', decimals: 1 }, { key: 'v', label: 'Velocity (km/s)', decimals: 2 }, { key: 'grade_q', label: 'Quality' }] }],
   references: ['IS 516 (Part 5/Sec 1) : 2018 – Ultrasonic pulse velocity (earlier IS 13311 Part 1 : 1992).', 'Quality grading for direct (cross) probing: Excellent above 4.4, Good 3.75–4.4, Doubtful 3.0–3.75, Poor below 3.0 km/s. Grading limits can be edited above if the lab follows a different table.'],

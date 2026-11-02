@@ -50,14 +50,16 @@ const today = new Date().toISOString().slice(0, 10);
 for (const t of tests) {
   const full = await api('tech', 'GET', `/tests/${t.id}`);
   const code = full.template.code;
-  let obs;
-  if (code === 'CBR-LAB') {
-    const prr = { 0: 0, 50: 21.6, 100: 28.6, 150: 35.7, 200: 39.5, 250: 43.2, 300: 45.8, 350: 47.1, 400: 49.3, 500: 52.6, 600: 55.1, 700: 57.9 };
-    obs = { header: { test_condition: 'Soaked', surcharge_kg: 5 }, equipment: { ring: { id: eq.id } }, grids: { readings: full.template.grids[0].fixedRows.map((r) => ({ dial: r.dial, prr: prr[r.dial] ?? null })) } };
-  } else if (code === 'PROCTOR-HEAVY') obs = { header: { mould_mass: 4000, mould_vol: 1000 }, grids: { trials: [{ mass_ms: 6000, w: 8 }, { mass_ms: 6165, w: 10.2 }, { mass_ms: 6150, w: 12.1 }, {}, {}] } };
-  else if (code === 'GRADATION-SOIL') obs = { header: { total: 1000, pan: 270 }, grids: { sieves: full.template.grids[0].fixedRows.map((r, i) => ({ sieve: r.sieve, ret: [80, 150, 160, 120, 80, 60, 50, 30][i] })) } };
-  else if (code === 'ATTERBERG') obs = { header: { ll: 28, pl: 13 }, grids: {} };
-  else obs = { header: { vd: 12, vk: 10 }, grids: {} };
+  // every pack template carries a worked example; enter it the way a technician would
+  const ex = full.template.example?.input ?? { header: {}, grids: {} };
+  const grids = {};
+  for (const g of full.template.grids) {
+    const base = g.fixedRows ?? Array.from({ length: g.rows ?? 5 }, () => ({}));
+    const rows = ex.grids?.[g.key] ?? [];
+    grids[g.key] = Array.from({ length: Math.max(base.length, rows.length) }, (_, i) => ({ ...(base[i] ?? {}), ...(rows[i] ?? {}) }));
+  }
+  const obs = { header: { ...(ex.header ?? {}) }, constants: { ...(ex.constants ?? {}) }, grids, equipment: {} };
+  if (code === 'CBR-LAB') obs.equipment = { ring: { id: eq.id } };
   const res = await api('tech', 'PUT', `/tests/${t.id}/observation`, { observation: obs, started_at: today, completed_at: today });
   if (code === 'CBR-LAB') expect(Math.abs(res.results.cbr - 16.01) < 0.01, `CBR computed ${res.results.cbr.toFixed(2)}% (expected 16.0)`);
   await api('tech', 'POST', `/tests/${t.id}/submit`);
@@ -77,6 +79,8 @@ console.log('5. Report: prepare → verify → sign & issue');
 const rep = await api('reviewer', 'POST', '/reports', { testIds: tests.map((t) => t.id) });
 const rd = await api('reviewer', 'GET', `/documents/${rep.id}`);
 expect(rd.data.rows.length >= 9, `report draft has ${rd.data.rows.length} result rows`);
+expect(rd.data.tables?.length >= 1 && rd.data.charts?.some((c) => c.series?.length >= 1), `report carries ${rd.data.tables.length} detail table(s) and ${rd.data.charts.length} chart(s)`);
+expect(rd.data.rows.some((r) => r.name === 'Soil classification (IS 1498)' && r.values[0] === 'CI'), 'Atterberg limits classify the soil as CI');
 await api('reviewer', 'PUT', `/documents/${rep.id}`, { data: { remarks: 'The soil can be used for backfilling purpose.' } });
 await api('reviewer', 'POST', `/reports/${rep.id}/workflow`, { action: 'submit' });
 await api('signatory', 'POST', `/reports/${rep.id}/workflow`, { action: 'sendback', note: 'Add remark on CBR' });
