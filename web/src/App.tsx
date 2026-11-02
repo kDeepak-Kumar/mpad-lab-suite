@@ -6,11 +6,12 @@ import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlig
 import {
   IconLayoutDashboard, IconUsers, IconFileDollar, IconClipboardList, IconFlask, IconFileCertificate, IconReceipt, IconCash,
   IconBook, IconListDetails, IconSettings, IconLogout, IconPlus, IconBox, IconTool, IconTemplate, IconUserCog, IconChecklist,
-  IconSearch, IconChartBar, IconAdjustments, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles,
+  IconSearch, IconChartBar, IconAdjustments, IconPhoneCall, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles,
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
 import { Login } from './pages/Login';
+import { VerifyPage } from './pages/Verify';
 import { Loading } from './components/ui';
 
 // Pages load on demand, so the app opens fast and only fetches what a screen needs.
@@ -38,6 +39,7 @@ const EquipmentPage = page(() => import('./pages/settings/Equipment'), 'Equipmen
 const TemplatesPage = page(() => import('./pages/settings/Templates'), 'TemplatesPage');
 const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'TemplateDesigner');
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
+const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 
 export { useMe };
 export const hasRole = (me: Me, ...roles: string[]) => Boolean(me.role?.admin || me.user.role === 'owner' || roles.includes(me.user.role));
@@ -47,6 +49,7 @@ const NAV: NavItem[] = [
   { label: 'Home', to: '/', tab: 'home', icon: IconLayoutDashboard },
   { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartBar },
   { label: 'Clients', to: '/clients', tab: 'clients', icon: IconUsers, section: 'Sales' },
+  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconPhoneCall },
   { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar },
   { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardList },
   { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconBox, section: 'Laboratory' },
@@ -72,7 +75,8 @@ export function App() {
     if (loc.pathname === '/login') { setMe(null); return; }
     api<Me>('/auth/me', { quiet: true }).then(setMe).catch(() => setMe(null));
   }, [loc.pathname === '/login']);
-  if (me === undefined) return <Center h="100vh"><Loader /></Center>;
+  if (me === undefined && !loc.pathname.startsWith('/verify/')) return <Center h="100vh"><Loader /></Center>;
+  if (loc.pathname.startsWith('/verify/')) return <Routes><Route path="/verify/:token" element={<VerifyPage />} /></Routes>;
   if (!me) return <Routes><Route path="/login" element={<Login onLogin={() => api<Me>('/auth/me').then(setMe)} />} /><Route path="*" element={<Navigate to="/login" />} /></Routes>;
   return <MeCtx.Provider value={me}><MetaLoader /></MeCtx.Provider>;
 }
@@ -185,6 +189,7 @@ function Shell() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/clients" element={<ClientsPage />} />
             <Route path="/clients/:id" element={<ClientDetail />} />
+            <Route path="/followups" element={<FollowUpsPage />} />
             <Route path="/quotes" element={<DocumentsList kind="quote" />} />
             <Route path="/quotes/new" element={<DocumentPage kind="quote" />} />
             <Route path="/invoices" element={<DocumentsList kind="invoice" />} />

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ClientActivity } from './FollowUps';
 import { Button, Group, Modal, Paper, Stack, Tabs, Text, Badge, Timeline, MultiSelect, Select, Anchor, SimpleGrid, ActionIcon, Menu } from '@mantine/core';
 import { IconPlus, IconPencil, IconDots } from '@tabler/icons-react';
 import { INDIAN_STATES, validateGstin } from '@suite/shared';
@@ -139,13 +140,14 @@ export function ClientDetail() {
         <Kpi label="Samples" value={c.samples.length} />
         <Kpi label="Invoiced (all time)" value={`₹${money(docs('invoice').filter((d: any) => d.status !== 'draft').reduce((a: number, d: any) => a + d.total, 0))}`} />
       </SimpleGrid>
-      <Tabs defaultValue="sites" keepMounted={false}>
+      <Tabs defaultValue={new URLSearchParams(window.location.search).get('tab') ?? 'sites'} keepMounted={false}>
         <Tabs.List mb="sm">
           <Tabs.Tab value="sites">Sites & contacts</Tabs.Tab>
           <Tabs.Tab value="quotes">Quotations <Badge size="xs" variant="light">{docs('quote').length}</Badge></Tabs.Tab>
           <Tabs.Tab value="samples">Samples & reports</Tabs.Tab>
           <Tabs.Tab value="invoices">Invoices</Tabs.Tab>
           <Tabs.Tab value="ledger">Ledger</Tabs.Tab>
+          <Tabs.Tab value="activity">Follow-ups</Tabs.Tab>
           <Tabs.Tab value="timeline">Timeline</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="sites">
@@ -172,6 +174,7 @@ export function ClientDetail() {
             { key: 'date', label: 'Date', type: 'date' }, { key: 'type', label: 'Particulars' }, { key: 'ref', label: 'Ref' },
             { key: 'debit', label: 'Debit', type: 'money' }, { key: 'credit', label: 'Credit', type: 'money' }, { key: 'balance', label: 'Balance', render: (e) => `₹${money(e.balance, 2)}`, align: 'right' }]} />
         </Tabs.Panel>
+        <Tabs.Panel value="activity"><ClientActivity clientId={Number(id)} /></Tabs.Panel>
         <Tabs.Panel value="timeline">
           <Paper withBorder p="md"><Timeline bulletSize={14} lineWidth={2}>
             {c.timeline.map((t: any) => <Timeline.Item key={t.id} title={<Text size="sm">{t.action}</Text>}><Text size="xs" c="dimmed">{t.user} · {new Date(t.at).toLocaleString('en-IN')} · {t.entity} #{t.entity_id}</Text></Timeline.Item>)}

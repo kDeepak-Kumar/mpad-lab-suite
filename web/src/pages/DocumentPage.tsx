@@ -206,7 +206,7 @@ function DocumentView({ id }: { id: number }) {
           <div className="print-root" ref={printRef}>
             <div className="doc-stage" onClick={() => setSelected(null)}><FitWidth>
               <DocRenderer template={template} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
-                issuer={doc.issuer} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
+                issuer={doc.issuer} verifyUrl={doc.verify ? `${window.location.origin}/verify/${doc.verify}` : null} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
             </FitWidth></div>
           </div>
         </Grid.Col>

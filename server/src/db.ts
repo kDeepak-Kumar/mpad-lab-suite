@@ -181,6 +181,19 @@ const migrations: Migration[] = [
       await k('documents').where({ kind: 'report' }).update({ accreditation: 'NABL' });
     },
   },
+  {
+    id: '003_crm',
+    up: async (k) => {
+      await k.schema.createTable('activities', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.integer('client_id').unsigned().nullable();
+        t.string('type', 20).notNullable(); t.string('subject', 300).notNullable(); t.text('notes');
+        t.string('due_date', 10).nullable(); t.string('done_at', 32).nullable(); t.string('outcome', 300).nullable();
+        t.integer('assigned_to').unsigned().nullable(); t.integer('created_by').unsigned().nullable();
+        t.string('link_kind', 20).nullable(); t.integer('link_id').unsigned().nullable(); t.string('created_at', 32);
+        t.index(['company_id', 'assigned_to', 'done_at']); t.index(['company_id', 'client_id']);
+      });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

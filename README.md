@@ -6,7 +6,7 @@ One centralised web application for running a testing laboratory end to end:
 
 It is built as a **generic core + industry pack**: clients, documents, GST, numbering, templates, ledgers and roles are industry-neutral; the civil-lab pack adds observation sheets (CBR, Proctor, gradation, Atterberg limits, free swell, concrete cubes) defined as data, not code.
 
-## What is included (v0.2)
+## What is included (v0.3)
 
 | Area | Features |
 | --- | --- |
@@ -23,6 +23,9 @@ It is built as a **generic core + industry pack**: clients, documents, GST, numb
 | Editable documents | Every automatic value (number, date, client name, address, GSTIN, site, contact, job code, ULR, dates…) has a lock – unlock to type your own; quotes can be rate-only or show quantity, amount and GST |
 | List views | Search, per-column filters, sorting, column chooser, saved personal/shared views and export on every list |
 | Analytics & AI | KPIs (revenue, forecast, pipeline, conversion, outstanding, unbilled work, turnaround), default dashboard, report builder with forecast, saved reports; “Ask about your business” in plain English – built-in assistant works offline, any AI model (free Gemini/Groq/OpenRouter/Ollama or paid) can be connected in Settings |
+| IS test pack (v0.3) | 53 observation sheets with IS procedures, worked examples and requirements: **soil** (IS 2720 – moisture, specific gravity, sieve analysis with D10/D30/D60 and IS 1498 group, Atterberg limits with flow curve and classification, shrinkage limit, light/heavy compaction with ZAV and fitted peak, CBR, FSI, UCS, direct shear, core cutter, sand replacement), **coarse aggregate** (IS 2386 / IS 383 – sieve analysis with grading limits, flakiness & elongation, impact, crushing, LA abrasion, specific gravity & absorption, bulk density, soundness, 10% fines, deleterious), **fine aggregate** (sieve analysis with zone and FM, specific gravity, bulk density, bulking, silt / finer than 75 µm, soundness), **cement** (IS 4031 with IS 269 / 1489 / 455 limits by type), **steel** (IS 1786 by grade and diameter), **concrete** (IS 516 cubes, flexure, split tensile) and **NDT** (rebound hammer with the Aimil chart for positions A/B/C rounded to 0.5 N/mm², UPV grading, cores to IS 456 acceptance, cover meter) |
+| Observation sheets | Procedure, sample calculation and IS references beside every sheet; constants from the equipment calibration certificate or entered manually (highlighted, logged); drop-downs and text cells; log-scale/limit/best-fit charts; reports get a “Requirement as per IS” column, detail tables (sieves, cubes, bars, locations) and graphs |
+| CRM | Follow-ups (call, visit, email, WhatsApp, meeting, task, note) per client with due dates, outcome and next follow-up; automatic follow-up call when a quotation is sent; due follow-ups in the bell; QR code on issued reports opens a public page that confirms the report is genuine (and flags amended/withdrawn reports) |
 | Setup (no code) | Custom fields on any object, page layouts (order/hide), picklists, roles with tab access, record CRUD, actions and field-level access; System Administrator role with full control that skips workflow validations (all audited) |
 
 ## Run locally
@@ -41,10 +44,11 @@ A private company profile for local testing can be placed at `private/seed.json`
 ## Tests
 
 ```bash
-npm test                                   # formula engine, GST, words, numbering, CBR acceptance values
+npm test                                   # formula engine, GST, words, numbering, CBR values, every template's worked example
 npm run build && PORT=4000 node server/dist/server.cjs &
 node scripts/api-flow.mjs http://localhost:4000      # whole workflow through the API
 node scripts/ui-check.mjs http://localhost:4000      # every screen + observation→report flow in a browser
+node scripts/pack-check.mjs http://localhost:4000    # enters every template's worked example, screenshots sheets and reports
 ```
 
 The CBR template reproduces the lab’s Excel sheet: proving-ring factor 0.04995 kN/div → 5.0935 kgf/div; 43.2 div at 2.5 mm → 11.21 kg/cm² → **CBR 16.0 %**.
@@ -74,21 +78,25 @@ scripts/  end-to-end API and browser tests
 ```
 
 ## Adding a new test (observation sheet)
-Templates are JSON (Settings → Templates → Observation sheets, or `shared/src/packs/civil-lab.ts`):
-- `headerFields` – values entered once (test condition, mould volume…)
-- `constants` – fixed values or `fromEquipment` (e.g. proving-ring factor)
+Templates are data (Settings → Templates → Observation sheets, or `shared/src/packs/*.ts`, one file per material):
+- `headerFields` – values entered once (grade, nominal size, test condition…), with optional `default`
+- `constants` – fixed values or `fromEquipment` (e.g. `ring.factor` from the proving-ring certificate); testers can override unless `locked`
+- `tables` – lookup tables such as IS 383 limits or the rebound-hammer chart, used as `name.column` lists
 - `derived` – scalar formulas, e.g. `mf*1000/g`
-- `grids` – reading tables; columns are inputs or formulas using other columns of the same row
+- `grids` – reading tables; columns are inputs (number, text or drop-down) or formulas. Columns are evaluated in order, so a formula can use earlier columns of every row: `SUMTO(sv.ret, ROW())` gives a cumulative sum
 - `results` – formulas over everything, grid columns are arrays: `LOOKUPX(2.5, readings.pen, readings.load_kgcm2)`
 - `checks` – `when` formula + warning/error message
-- `chart`, `reportRows` – graph and the rows printed on the report
+- `chart` (with extra `series`, `xLog`, `fit`), `reportRows` (with `spec` / `specFormula` for the IS requirement), `reportTables`
+- `procedure`, `sampleCalc` (text with `{result}` or `{grid.column#row:decimals}` placeholders), `references`, `example` (inputs and expected results – checked by `npm test`)
 
-Formula syntax is Excel’s: `IF`, `IFERROR`, `AND`, `OR`, `ROUND`, `SUM`, `AVERAGE`, `MIN`, `MAX`, `INDEX`, `MATCH`, `PI`, `SQRT`, `ABS`, plus `LOOKUPX` and `INTERP` (linear interpolation).
+Formula syntax is Excel’s: `IF`, `IFERROR`, `AND`, `OR`, `NOT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `MROUND`, `SUM`, `COUNT`, `COUNTA`, `COUNTIF`, `AVERAGE`, `MEDIAN`, `STDEV`, `MIN`, `MAX`, `LARGE`, `SMALL`, `INDEX`, `MATCH`, `SLOPE`, `INTERCEPT`, `FORECAST`, `LOG10`, `LN`, `EXP`, `SQRT`, `POWER`, `PI`, `ATAN`, `DEGREES`, `LEFT`, `RIGHT`, `LEN`, `FIXED`, `CONCAT`, plus `LOOKUPX`, `INTERP` (linear interpolation), `SUMTO`, `PEAKX`/`PEAKY` (compaction peak) and `MINUTES` (clock time → minutes).
 
-Templates marked *simplified* (Proctor, gradation, Atterberg) capture results with basic calculations and should be replaced by the lab’s own sheets.
+Earlier versions of a template stay in the database, so tests already recorded keep the sheet they were tested on; new tests use the latest version. On start-up the server adds any new template versions, catalog items and equipment categories from the pack without changing what the lab has edited.
 
 ## Before go-live – items to confirm
 - ULR number format (Settings → Numbering) against the current NABL requirement.
 - GST: place of supply wording and SAC code with the CA.
 - Decision rules / statement of conformity wording on reports.
+- Check the IS limits in the templates against the editions in the lab’s NABL scope (they are editable constants/tables) and the rebound-hammer chart values against the lab’s own hammer chart.
+- Catalog rates and NABL flags for the new tests are indicative – set them in Settings → Rate card.
 - Upload logo, NABL symbol, seal and each signatory’s signature in the app (never commit them to the repository).

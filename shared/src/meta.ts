@@ -75,7 +75,7 @@ export interface Layout { object: string; fields: string[]; hidden: string[]; li
 
 // ---------- roles & permissions ----------
 export const TABS: { key: string; label: string }[] = [
-  { key: 'home', label: 'Home' }, { key: 'clients', label: 'Clients' }, { key: 'quotes', label: 'Quotations' }, { key: 'workorders', label: 'Work orders' },
+  { key: 'home', label: 'Home' }, { key: 'clients', label: 'Clients' }, { key: 'followups', label: 'Follow-ups' }, { key: 'quotes', label: 'Quotations' }, { key: 'workorders', label: 'Work orders' },
   { key: 'samples', label: 'Sample register' }, { key: 'tests', label: 'Tests & observations' }, { key: 'prepare', label: 'Prepare report' }, { key: 'reports', label: 'Reports' },
   { key: 'invoices', label: 'Invoices' }, { key: 'payments', label: 'Payments' }, { key: 'ledger', label: 'Ledgers' }, { key: 'registers', label: 'Registers' },
   { key: 'analytics', label: 'Analytics & AI' }, { key: 'company', label: 'Company & branding' }, { key: 'catalog', label: 'Rate card' }, { key: 'equipment', label: 'Equipment' },
@@ -112,7 +112,7 @@ const acts = (keys: string[]) => Object.fromEntries(ACTIONS.map((a) => [a.key, k
 export const BUILTIN_ROLES: RoleDef[] = [
   { key: 'admin', label: 'System Administrator', system: true, admin: true, tabs: TABS.map((t) => t.key), objects: objs({}, all), actions: acts(ACTIONS.map((a) => a.key)), fields: {} },
   { key: 'owner', label: 'Owner / Director', system: true, tabs: TABS.map((t) => t.key), objects: objs({}, all), actions: acts(ACTIONS.map((a) => a.key)), fields: {} },
-  { key: 'frontdesk', label: 'Front desk / Sales', system: true, tabs: ['home', 'clients', 'quotes', 'workorders', 'samples', 'tests', 'reports', 'invoices', 'payments'],
+  { key: 'frontdesk', label: 'Front desk / Sales', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'workorders', 'samples', 'tests', 'reports', 'invoices', 'payments'],
     objects: objs({ client: ce, quote: ce, workorder: ce, sample: ce, test: ro, report: ro, invoice: ce, payment: ro, catalog: ro, equipment: none }), actions: acts(['useAI']), fields: {} },
   { key: 'technician', label: 'Technician', system: true, tabs: ['home', 'samples', 'tests'],
     objects: objs({ sample: ro, test: { read: true, create: false, edit: true, delete: false }, catalog: ro, equipment: ro }), actions: acts(['enterObservations']), fields: { 'catalog.rate': 'hidden' } },
@@ -120,7 +120,7 @@ export const BUILTIN_ROLES: RoleDef[] = [
     objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'manageTemplates', 'useAI']), fields: {} },
   { key: 'signatory', label: 'Authorised signatory', system: true, tabs: ['home', 'samples', 'tests', 'prepare', 'reports', 'equipment', 'templates', 'analytics'],
     objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'signReports', 'manageTemplates', 'viewAnalytics', 'useAI']), fields: {} },
-  { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'quotes', 'invoices', 'payments', 'ledger', 'registers', 'analytics'],
+  { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'invoices', 'payments', 'ledger', 'registers', 'analytics'],
     objects: objs({ client: ce, quote: ro, workorder: ro, invoice: ce, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'viewAnalytics', 'useAI']), fields: {} },
 ];
 

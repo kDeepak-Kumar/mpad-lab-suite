@@ -6,6 +6,7 @@ import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
 import { audit, clientSnapshot, getCompany, getDocTemplate, ledger, nextNumber, paidAgainst, refreshInvoiceStatus, sha256 } from '../services';
+import { followUpsDue, scheduleQuoteFollowUp, verifyToken } from './crm';
 import { createWorkOrder } from './lab';
 
 export const finance = Router();
@@ -57,7 +58,8 @@ finance.get('/documents/:id', h(async (req) => {
   const history = await db('audit_log').where({ company_id: cid, entity: 'document', entity_id: d.id }).orderBy('id', 'desc');
   const users = new Map((await db('users').where({ company_id: cid }).select('id', 'name')).map((u) => [u.id, u.name]));
   const revisions = await db('documents').where({ company_id: cid }).andWhere((w) => w.where('parent_id', d.id).orWhere('id', d.parent_id ?? -1)).select('id', 'number', 'status', 'revision');
-  return { ...d, company, template: tpl, issuer, paid, revisions, history: history.map((x) => ({ ...row(x, ['detail']), user: users.get(x.user_id) })) };
+  const verify = d.kind === 'report' && d.hash && ['issued', 'cancelled'].includes(d.status as string) ? verifyToken(d.id as number, d.hash as string) : null;
+  return { ...d, company, template: tpl, issuer, paid, revisions, verify, history: history.map((x) => ({ ...row(x, ['detail']), user: users.get(x.user_id) })) };
 }));
 
 // ---------- create / update ----------
@@ -168,6 +170,7 @@ finance.post('/documents/:id/status', allow('quotes'), h(async (req) => {
   const { status } = z.object({ status: z.enum(['sent', 'accepted', 'rejected', 'expired']) }).parse(req.body);
   if (d.kind !== 'quote') throw new HttpError(400, 'Only quotations have this status');
   await db('documents').where({ id: d.id }).update({ status, ...(status === 'sent' && !d.hash ? { hash: sha256(d.data), issued_at: now(), issued_by: req.user.id } : {}) });
+  if (status === 'sent' && d.kind === 'quote') await scheduleQuoteFollowUp(req.user.company_id, req.user.id, { id: d.id as number, number: d.number as string | null, client_id: d.client_id as number });
   await audit(db, req.user, 'document', d.id, `quotation marked ${status}`);
   return { ok: true };
 }));
@@ -420,6 +423,7 @@ finance.get('/dashboard', h(async (req) => {
     const days = Math.floor((Date.now() - new Date(q.date + 'T00:00:00').getTime()) / 86400000);
     if (days >= 7) reminders.push({ kind: 'Quote follow-up', text: `${q.number} to ${q.client_name} sent ${days} days ago`, link: `/documents/${q.id}`, level: 'info' });
   }
+  for (const f of await followUpsDue(cid, req.user.id)) reminders.push({ kind: `${f.type} due`, text: `${f.subject}${f.client_name ? ` – ${f.client_name}` : ''} (${formatDate(f.due_date)})`, link: '/followups', level: f.due_date < td ? 'danger' : 'warning' });
   for (const e of eq.filter((e) => e.due_date <= in30)) reminders.push({ kind: 'Calibration', text: `${e.name} calibration ${e.due_date < td ? 'expired' : 'due'} ${formatDate(e.due_date)}`, link: '/equipment', level: e.due_date < td ? 'danger' : 'warning' });
   for (const o of due) {
     const days = Math.floor((Date.now() - new Date(o.date + 'T00:00:00').getTime()) / 86400000);

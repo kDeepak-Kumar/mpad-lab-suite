@@ -33,7 +33,7 @@ const rep = docs.find((d) => d.kind === 'report'); const inv = docs.find((d) => 
 const pages = [['dashboard', '/'], ['clients', '/clients'], ['client-detail', '/clients/2'], ['quotes', '/quotes'], ['quote', `/documents/${quote.id}`], ['workorders', '/workorders'], ['workorder', '/workorders/1'],
   ['samples', '/samples'], ['tests', '/tests?tab=all'], ['test-cbr', `/tests/${tests.find((t) => t.template_code === 'CBR-LAB').id}`], ['reports', '/reports'], ['report', `/documents/${rep.id}`],
   ['invoices', '/invoices'], ['invoice', `/documents/${inv.id}`], ['payments', '/payments'], ['ledger', '/ledger'], ['statement', '/ledger/2'], ['registers', '/registers'],
-  ['settings-company', '/settings/company'], ['rate-card', '/settings/catalog'], ['equipment', '/equipment'], ['templates', '/settings/templates'], ['template-designer', '/settings/templates/1'], ['users', '/settings/users'], ['prepare-report', '/reports/prepare'], ['new-quote', '/quotes/new?client=1'], ['analytics', '/analytics'], ['setup', '/setup'], ['setup-roles', '/setup?tab=roles'], ['setup-picklists', '/setup?tab=picklists']];
+  ['settings-company', '/settings/company'], ['rate-card', '/settings/catalog'], ['equipment', '/equipment'], ['templates', '/settings/templates'], ['template-designer', '/settings/templates/1'], ['users', '/settings/users'], ['prepare-report', '/reports/prepare'], ['new-quote', '/quotes/new?client=1'], ['analytics', '/analytics'], ['setup', '/setup'], ['setup-roles', '/setup?tab=roles'], ['setup-picklists', '/setup?tab=picklists'], ['followups', '/followups'], ['client-followups', '/clients/2?tab=activity'], ['template-library', '/settings/templates']];
 for (const [name, path] of pages) { await owner.goto(base + path); await owner.waitForLoadState('networkidle'); await shot(owner, name); }
 console.log(`visited ${pages.length} screens`);
 
@@ -163,6 +163,17 @@ await ad.goto(`${base}/analytics?ask=${encodeURIComponent('revenue by client thi
 await ad.waitForTimeout(2500);
 if (!(await ad.getByText('Built-in').count()) && !(await ad.getByText('AI', { exact: true }).count())) problems.push('analytics: no AI answer card');
 await ad.screenshot({ path: `${out}/analytics-ai.png`, fullPage: true });
+
+// issued report carries a verification QR; the public page opens without signing in
+const issuedRep = (await api(ad, '/documents')).find((d) => d.kind === 'report' && d.status === 'issued');
+const repFull = await api(ad, `/documents/${issuedRep.id}`);
+await ad.goto(`${base}/documents/${issuedRep.id}`); await ad.waitForLoadState('networkidle');
+if (!(await ad.locator('.doc-page svg').count())) problems.push('report: verification QR missing');
+const anon = await browser.newContext({ viewport: { width: 420, height: 800 } });
+const pubPage = await anon.newPage();
+await pubPage.goto(`${base}/verify/${repFull.verify}`); await pubPage.waitForTimeout(1200);
+if (!(await pubPage.getByText('Genuine report').count())) problems.push('verify page: report not shown as genuine');
+await pubPage.screenshot({ path: `${out}/verify-public.png`, fullPage: true });
 
 // technician cannot see accounts tabs
 const tk = await session('tech');

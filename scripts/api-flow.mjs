@@ -110,4 +110,15 @@ for (const r of ['quotations', 'samples', 'tests', 'reports', 'invoices', 'recei
 }
 const dash = await api('owner', 'GET', '/dashboard');
 expect(typeof dash.counts.revenueMonth === 'number', `dashboard revenue this month ₹${dash.counts.revenueMonth}`);
+console.log('8. CRM follow-ups and report verification');
+const fu = await api('frontdesk', 'GET', `/activities?client_id=${client.id}`);
+expect(fu.some((a) => a.link_kind === 'quote' && a.link_id === q.id && !a.done_at), 'sending the quotation scheduled a follow-up call');
+const act = await api('frontdesk', 'POST', '/activities', { type: 'Visit', subject: 'Site visit for NDT scope', client_id: client.id, due_date: today });
+await api('frontdesk', 'PUT', `/activities/${act.id}`, { done: true, outcome: 'Scope agreed' });
+expect((await api('frontdesk', 'GET', '/activities?open=1')).every((a) => a.id !== act.id), 'completed follow-up leaves the open list');
+const repDoc = await api('owner', 'GET', `/documents/${rep.id}`);
+const pub = await fetch(`${base}/api/public/verify/${repDoc.verify}`).then((r) => r.json());
+expect(pub.status === 'Valid' && pub.number === issued.number, `QR verification shows report ${pub.number} as ${pub.status} without signing in`);
+const bad = await fetch(`${base}/api/public/verify/${rep.id}-AAAAAAAAAAAAAAAA`);
+expect(bad.status === 404, 'a forged verification code is rejected');
 console.log('\nALL CHECKS PASSED');

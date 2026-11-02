@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { amountInWords, fillPlaceholders, formatDate, inr, type Block, type Column, type DocTemplate } from '@suite/shared';
+import qrcode from 'qrcode-generator';
 import { LineChart } from './Chart';
 
 export interface RenderInput {
@@ -13,6 +14,8 @@ export interface RenderInput {
   issuer?: { name: string; designation?: string; qualifications?: string; signature?: string } | null;
   selected?: string | null;
   onSelect?: (id: string) => void;
+  /** Public verification link of an issued report (printed as a QR code beside the signature). */
+  verifyUrl?: string | null;
 }
 
 const rateOnly = (kind: string, d: any) => kind === 'quote' && !(d.showQty ?? d.mode !== 'rate');
@@ -215,6 +218,14 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     case 'text':
       return <div style={{ textAlign: pr.align ?? 'left', fontSize: pr.size ? `${pr.size}pt` : undefined, fontWeight: pr.bold ? 700 : undefined, margin: '4px 0' }}>{nl(fill(pr.text))}</div>;
     case 'signature':
+      if (p.kind === 'report' && p.verifyUrl && pr.showQr !== false) {
+        return (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16 }}>
+            <div style={{ flex: 1 }}><Signature pr={pr} p={p} fill={fill} /></div>
+            <VerifyQr url={p.verifyUrl} />
+          </div>
+        );
+      }
       return <Signature pr={pr} p={p} fill={fill} />;
     case 'bankSignature': {
       const bk = c.bank ?? {};
@@ -344,6 +355,17 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     default:
       return null;
   }
+}
+
+function VerifyQr({ url }: { url: string }) {
+  const qr = qrcode(0, 'M');
+  qr.addData(url); qr.make();
+  return (
+    <div style={{ textAlign: 'center', fontSize: '7.5pt', lineHeight: 1.2 }}>
+      <div style={{ width: 84, height: 84, margin: '0 auto' }} dangerouslySetInnerHTML={{ __html: qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true }) }} />
+      <div style={{ marginTop: 2 }}>Scan to verify</div>
+    </div>
+  );
 }
 
 function Signature({ pr, p, fill }: { pr: Record<string, any>; p: RenderInput; fill: (s?: string) => string }) {
