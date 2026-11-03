@@ -10,12 +10,12 @@ DIR="${BACKUP_DIR:-/var/backups/mpad-suite}"
 KEEP_DAYS="${KEEP_DAYS:-14}"
 DRIVE_KEEP_DAYS="${DRIVE_KEEP_DAYS:-90}"
 mkdir -p "$DIR"
-STAMP=$(date +%Y-%m-%d_%H%M)
+STAMP=$(date +%Y-%m-%d_%H%M%S)
 OUT="$DIR/suite-$STAMP.sqlite"
 
 sqlite3 "$DB" ".backup '$OUT'"
 sqlite3 "$OUT" "PRAGMA integrity_check;" | grep -q '^ok$' || { echo "$(date) backup integrity check FAILED"; rm -f "$OUT"; exit 1; }
-gzip -9 "$OUT"
+gzip -9f "$OUT"
 echo "$(date) backup ok: $OUT.gz ($(du -h "$OUT.gz" | cut -f1))"
 
 # keep the server's disk in check
