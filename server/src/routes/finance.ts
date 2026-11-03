@@ -7,7 +7,7 @@ import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
 import { audit, clientSnapshot, getCompany, getDocTemplate, ledger, nextNumber, paidAgainst, refreshInvoiceStatus, sha256 } from '../services';
-import { followUpsDue, scheduleQuoteFollowUp, verifyToken } from './crm';
+import { followUpsDue, scheduleQuoteFollowUp, shareable, shareToken, verifyToken } from './crm';
 import { createWorkOrder } from './lab';
 import { isIsoDate } from '@suite/shared';
 const isoDate = z.string().refine(isIsoDate, 'Enter a valid date (YYYY-MM-DD)');
@@ -98,7 +98,8 @@ finance.get('/documents/:id', h(async (req) => {
   const users = new Map((await db('users').where({ company_id: cid }).select('id', 'name')).map((u) => [u.id, u.name]));
   const revisions = await db('documents').where({ company_id: cid }).andWhere((w) => w.where('parent_id', d.id).orWhere('id', d.parent_id ?? -1)).select('id', 'number', 'status', 'revision');
   const verify = d.kind === 'report' && d.hash && ['issued', 'cancelled'].includes(d.status as string) ? verifyToken(d.id as number, d.hash as string) : null;
-  return { ...d, company, template: tpl, issuer, paid, revisions, verify, history: history.map((x) => ({ ...row(x, ['detail']), user: users.get(x.user_id) })) };
+  const share = shareable(d as never) ? shareToken(d.id, String(d.created_at)) : null;
+  return { ...d, company, template: tpl, issuer, paid, revisions, verify, share, history: history.map((x) => ({ ...row(x, ['detail']), user: users.get(x.user_id) })) };
 }));
 
 // ---------- create / update ----------

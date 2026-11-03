@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
-import { IconTrash, IconUpload, IconDownload } from '@tabler/icons-react';
-import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList } from '@suite/shared';
+import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp } from '@tabler/icons-react';
+import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList, WA_TEMPLATES, WA_PLACEHOLDERS, fillWa } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
 
@@ -33,7 +33,7 @@ export function CompanySettings() {
     <>
       <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={<Button onClick={save}>Save settings</Button>} />
       <Tabs defaultValue="profile">
-        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="signatories">Signatories</Tabs.Tab><Tabs.Tab value="email">Email & alerts</Tabs.Tab><Tabs.Tab value="security">Security</Tabs.Tab><Tabs.Tab value="docs">Brochure & documents</Tabs.Tab></Tabs.List>
+        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="signatories">Signatories</Tabs.Tab><Tabs.Tab value="email">Email & alerts</Tabs.Tab><Tabs.Tab value="security">Security</Tabs.Tab><Tabs.Tab value="docs">Brochure & documents</Tabs.Tab><Tabs.Tab value="whatsapp" leftSection={<IconBrandWhatsapp size={15} color="#25D366" />}>WhatsApp</Tabs.Tab></Tabs.List>
         <Tabs.Panel value="profile">
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('Short name (printed under the logo, e.g. MPAD)', 'shortName')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
@@ -114,6 +114,7 @@ export function CompanySettings() {
         <Tabs.Panel value="signatories"><SignatoriesSettings v={v} set={set} /></Tabs.Panel>
         <Tabs.Panel value="security"><SecuritySettings /></Tabs.Panel>
         <Tabs.Panel value="docs"><CompanyDocuments /></Tabs.Panel>
+        <Tabs.Panel value="whatsapp"><WhatsAppSettings v={v} set={set} /></Tabs.Panel>
         <Tabs.Panel value="email">
           <Alert variant="light" mb="sm">Documents are emailed from your own mailbox. For Gmail use host smtp.gmail.com, port 465 and an App Password. For cPanel mail use mail.yourdomain.com. The password itself is set as SMTP_PASSWORD in the hosting environment, never stored here.</Alert>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
@@ -324,6 +325,49 @@ function CompanyDocuments() {
         </Paper>
       ))}
       {!(data ?? []).length && <Text size="sm" c="dimmed">No documents yet.</Text>}
+    </Stack>
+  );
+}
+
+/** WhatsApp message templates used by the “WhatsApp” buttons on quotations, invoices, reports, samples, clients and ledgers. */
+function WhatsAppSettings({ v, set }: { v: any; set: (path: string, value: unknown) => void }) {
+  const w = v.whatsapp ?? {};
+  const [key, setKey] = useState(WA_TEMPLATES[0].key);
+  const t = WA_TEMPLATES.find((x) => x.key === key)!;
+  const text = w.templates?.[key] ?? t.text;
+  const sample = fillWa(text, { contact: 'Mr. Rao', client: 'ABC Constructions', site: 'Tower B foundation', number: key === 'report' ? 'TR/26/0142' : key === 'sample' ? '' : 'QT/26/0087', date: '04-11-2026', amount: '23,600.00', balance: '23,600.00', due_date: '04-12-2026', link: `${window.location.origin}/d/…`, tests: 'Compressive strength, Slump', sample_code: 'S-26-0311', upi: v.bank?.upi, bank: [v.bank?.name && `A/c name: ${v.bank.name}`, v.bank?.account && `A/c no: ${v.bank.account}`, v.bank?.ifsc && `IFSC: ${v.bank.ifsc}`].filter(Boolean).join('\n'), sender: 'Your name', company: v.name, phone: v.phone, website: v.website });
+  return (
+    <Stack maw={1100}>
+      <Alert variant="light" color="green" icon={<IconBrandWhatsapp />} title="How WhatsApp works here">
+        The green <b>WhatsApp</b> buttons open WhatsApp (phone app, WhatsApp Web or Desktop) with the message and a secure link already filled in – you only press Send.
+        The client opens the link to view and download the PDF. On phones you can also share the PDF file itself. No WhatsApp Business API account or per-message charges are needed.
+        Every message sent is saved as a WhatsApp activity under the client’s Follow-ups.
+      </Alert>
+      <SimpleGrid cols={{ base: 1, md: 3 }}>
+        <TextInput label="Default country code" description="Added to 10-digit numbers" value={w.countryCode ?? '91'} onChange={(e) => set('whatsapp.countryCode', e.currentTarget.value.replace(/\D/g, '').slice(0, 4))} />
+      </SimpleGrid>
+      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+        <Stack gap="xs">
+          <Select label="Template" data={WA_TEMPLATES.map((x) => ({ value: x.key, label: `${x.label}${w.templates?.[x.key] ? ' (customised)' : ''}` }))} value={key} onChange={(x) => x && setKey(x)} allowDeselect={false} />
+          <Textarea label="Message" autosize minRows={14} maxRows={24} value={text} onChange={(e) => set(`whatsapp.templates.${key}`, e.currentTarget.value)}
+            description="Use *bold* and _italic_ like in WhatsApp. Lines whose placeholders are empty (e.g. UPI when none is set) are left out automatically." />
+          <Group gap="xs">
+            {w.templates?.[key] && <Button size="xs" variant="subtle" onClick={() => { const n = { ...(w.templates ?? {}) }; delete n[key]; set('whatsapp.templates', n); }}>Reset to default</Button>}
+            <Text size="xs" c="dimmed">Remember to Save settings.</Text>
+          </Group>
+          <Text size="xs" fw={600} mt={4}>Placeholders</Text>
+          <Group gap={6}>{WA_PLACEHOLDERS.map((p) => <Badge key={p.key} variant="light" color="gray" style={{ textTransform: 'none', cursor: 'pointer' }} title={p.label}
+            onClick={() => set(`whatsapp.templates.${key}`, `${text}{{${p.key}}}`)}>{`{{${p.key}}}`}</Badge>)}</Group>
+        </Stack>
+        <Stack gap="xs">
+          <Text size="sm" fw={500}>Preview with sample values</Text>
+          <Paper radius="md" p="md" style={{ background: '#efeae2', minHeight: 300 }}>
+            <div style={{ background: '#d9fdd3', borderRadius: '10px 0 10px 10px', padding: '8px 10px', marginLeft: 'auto', maxWidth: '92%', whiteSpace: 'pre-wrap', fontSize: 13.5, lineHeight: 1.4, color: '#111b21', boxShadow: '0 1px 1px rgba(0,0,0,.12)' }}
+              dangerouslySetInnerHTML={{ __html: sample.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>') }} />
+          </Paper>
+          <Text size="xs" c="dimmed">Used on: {t.for.map((f) => ({ quote: 'quotations', invoice: 'invoices', report: 'test reports', reminder: 'ledger reminders', sample: 'sample register', client: 'client page' } as Record<string, string>)[f]).join(', ')}</Text>
+        </Stack>
+      </SimpleGrid>
     </Stack>
   );
 }

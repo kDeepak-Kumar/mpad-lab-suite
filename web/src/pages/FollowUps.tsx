@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Badge, Button, Group, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
-import { IconCheck, IconPhone, IconPlus, IconRotate } from '@tabler/icons-react';
+import { IconCheck, IconPhone, IconPlus, IconRotate, IconBrandWhatsapp } from '@tabler/icons-react';
 import { api, dmy, localToday, ok, useApi } from '../api';
 import { useMe } from '../App';
 import { PageHeader } from '../components/ui';
 import { ListView } from '../components/ListView';
 
+/** Activity type label; WhatsApp messages get the green WhatsApp mark. */
+function TypeTag({ type, size = 'md' }: { type: string; size?: 'sm' | 'md' }) {
+  return type === 'WhatsApp' ? <Badge size={size} variant="light" color="#25D366" styles={{ label: { color: '#128C7E' } }} leftSection={<IconBrandWhatsapp size={12} />}>WhatsApp</Badge> : <Badge size={size} variant="light">{type}</Badge>;
+}
 const TYPES = ['Call', 'Visit', 'Email', 'WhatsApp', 'Meeting', 'Task', 'Note'];
 const LINKS: Record<string, string> = { quote: '/documents/', invoice: '/documents/', report: '/documents/', sample: '/samples' };
 
@@ -28,7 +32,7 @@ export function FollowUpsPage() {
       </Tabs>
       <ListView id={`followups-${tab}`} rows={rows} onRow={(a) => a.client_id && nav(`/clients/${a.client_id}?tab=activity`)} columns={[
         { key: 'due_date', label: 'Due', type: 'date', render: (a) => <Text size="sm" c={!a.done_at && a.due_date && a.due_date < td ? 'red' : !a.done_at && a.due_date === td ? 'orange' : undefined} fw={!a.done_at && a.due_date && a.due_date <= td ? 600 : undefined}>{dmy(a.due_date) || '—'}</Text> },
-        { key: 'type', label: 'Type', filter: 'select', render: (a) => <Badge variant="light">{a.type}</Badge> },
+        { key: 'type', label: 'Type', filter: 'select', render: (a) => <TypeTag type={a.type} /> },
         { key: 'subject', label: 'Subject', render: (a) => <><Text size="sm" fw={550}>{a.subject}</Text>{a.notes && <Text size="xs" c="dimmed" lineClamp={1}>{a.notes}</Text>}</> },
         { key: 'client_name', label: 'Client', filter: 'select' },
         { key: 'assignee', label: 'Assigned to', filter: 'select' },
@@ -106,8 +110,8 @@ export function ClientActivity({ clientId }: { clientId: number }) {
         {(data ?? []).map((a) => (
           <Group key={a.id} justify="space-between" align="flex-start" wrap="nowrap" style={{ borderBottom: '1px solid #eef0f3', paddingBottom: 6 }}>
             <div>
-              <Group gap={6}><Badge size="sm" variant="light">{a.type}</Badge><Text size="sm" fw={550}>{a.subject}</Text></Group>
-              {a.notes && <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line' }}>{a.notes}</Text>}
+              <Group gap={6}><TypeTag type={a.type} size="sm" /><Text size="sm" fw={550}>{a.subject}</Text></Group>
+              {a.notes && <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line' }} lineClamp={a.type === 'WhatsApp' ? 3 : undefined} title={a.notes}>{a.notes}</Text>}
               {a.outcome && <Text size="xs">Outcome: {a.outcome}</Text>}
               <Text size="xs" c="dimmed">{a.created_by_name} · {new Date(a.created_at).toLocaleDateString('en-IN')}{a.assignee && a.assignee !== a.created_by_name ? ` · for ${a.assignee}` : ''}</Text>
             </div>

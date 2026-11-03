@@ -7,6 +7,7 @@ import { useCan, useFields, useMe, isAdmin } from '../ctx';
 import { PageHeader, StatusBadge, TypeBadge } from '../components/ui';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
 import { RecordForm, missingRequired } from '../components/RecordForm';
+import { WhatsAppButton, WhatsAppModal } from '../components/WhatsApp';
 
 export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?: number; client_id?: number; site_id?: number | null; customer_ref?: string; quoteCatalogIds?: number[]; accreditation?: string }; onClose: (saved: boolean) => void }) {
   const me = useMe();
@@ -69,6 +70,7 @@ export function SamplesPage() {
   const openId = sp.get('open');
   const { data: sample, reload: reloadSample } = useApi<any>(openId ? `/samples/${openId}` : null, [openId]);
   const [edit, setEdit] = useState<any>(null);
+  const [waSample, setWaSample] = useState<any>(null);
   const cols: Col[] = [
     { key: 'code', label: 'Job code', render: (s) => <Text size="sm" fw={550}>{s.code}</Text> },
     { key: 'accreditation', label: 'Type', type: 'badge' },
@@ -109,10 +111,14 @@ export function SamplesPage() {
             <Group justify="flex-end">
               {can('sample.edit') && !edit && <Button variant="default" onClick={() => setEdit({ ...sample })}>Edit details</Button>}
               <Button variant="default" onClick={() => printLabel(sample)}>Print sample label</Button>
+              <WhatsAppButton label="Acknowledge on WhatsApp" variant="light" onClick={() => setWaSample(sample)} />
             </Group>
           </Stack>
         )}
       </Modal>
+      {waSample && <WhatsAppModal context="sample" clientId={waSample.client_id} title={`Sample ${waSample.code} received`} link={{ kind: 'sample', id: waSample.id }}
+        vars={{ client: waSample.client?.name, sample_code: waSample.code, date: dmy(waSample.received_date), tests: [...new Set((waSample.tests ?? []).map((t: any) => t.report_name || t.billing_name))].join(', ') }}
+        onClose={() => setWaSample(null)} />}
     </>
   );
 }

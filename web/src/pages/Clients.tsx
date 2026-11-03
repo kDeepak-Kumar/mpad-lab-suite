@@ -8,6 +8,7 @@ import { INDIAN_STATES, validateGstin } from '@suite/shared';
 import { api, money, ok, useApi } from '../api';
 import { useCan, useFields } from '../ctx';
 import { PageHeader, Loading, Kpi } from '../components/ui';
+import { WhatsAppButton, WhatsAppIcon, WhatsAppModal } from '../components/WhatsApp';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
 import { RecordForm, missingRequired } from '../components/RecordForm';
 
@@ -118,7 +119,9 @@ export function ClientDetail() {
   const [edit, setEdit] = useState(false);
   const [site, setSite] = useState<any>(null);
   const [contact, setContact] = useState<any>(null);
+  const [wa, setWa] = useState<null | { phone?: string; name?: string }>(null);
   if (!c) return <Loading />;
+  const openInv = c.documents.filter((d: any) => d.kind === 'invoice' && ['issued', 'partly_paid'].includes(d.status));
   const docs = (k: string) => c.documents.filter((d: any) => d.kind === k && d.status !== 'cancelled');
   const highlight = fields.filter((f) => !['name', 'address', 'notes'].includes(f.key)).slice(0, 8);
   const show = (f: any) => { const v = f.custom ? c.custom?.[f.key] : c[f.key]; if (f.type === 'state') return INDIAN_STATES.find((s) => s.code === v)?.name; if (f.type === 'currency') return v !== null && v !== undefined ? `₹${money(v)}` : ''; if (f.type === 'checkbox') return v ? 'Yes' : 'No'; return v; };
@@ -127,6 +130,7 @@ export function ClientDetail() {
       <PageHeader eyebrow="Client" title={c.name} subtitle={c.address}
         actions={<>
           {can('client.edit') && <Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>Edit</Button>}
+          <WhatsAppButton variant="light" onClick={() => setWa({})} />
           {can('sample.create') && <Button variant="default" onClick={() => nav(`/samples?new=1&client=${c.id}`)}>Register sample</Button>}
           {can('quote.create') && <Button onClick={() => nav(`/quotes/new?client=${c.id}`)}>New quotation</Button>}
           {can('client.delete') && <Menu position="bottom-end"><Menu.Target><ActionIcon variant="default" size="lg"><IconDots size={16} /></ActionIcon></Menu.Target><Menu.Dropdown>
@@ -144,6 +148,8 @@ export function ClientDetail() {
         <Kpi label="Samples" value={c.samples.length} />
         <Kpi label="Invoiced (all time)" value={`₹${money(docs('invoice').filter((d: any) => d.status !== 'draft').reduce((a: number, d: any) => a + d.total, 0))}`} />
       </SimpleGrid>
+      {wa && <WhatsAppModal context={c.ledger.balance > 0 ? 'reminder' : 'client'} clientId={c.id} preferred={wa} title={`WhatsApp ${c.name}`}
+        vars={{ client: c.name, balance: money(c.ledger.balance, 2), number: openInv.map((d: any) => d.number).slice(0, 5).join(', ') }} onClose={(sent) => { setWa(null); if (sent) reload(); }} />}
       <Tabs defaultValue={new URLSearchParams(window.location.search).get('tab') ?? 'sites'} keepMounted={false}>
         <Tabs.List mb="sm">
           <Tabs.Tab value="sites">Sites & contacts</Tabs.Tab>
@@ -158,7 +164,7 @@ export function ClientDetail() {
           <Group justify="space-between" mb="xs"><Text fw={600}>Sites / projects</Text>{can('client.edit') && <Button size="xs" variant="light" onClick={() => setSite({})}>Add site</Button>}</Group>
           <ListView id={`client-sites`} rows={c.sites} onRow={(r) => setSite(r)} columns={[{ key: 'name', label: 'Site' }, { key: 'project', label: 'Project' }, { key: 'po_number', label: 'PO / WO no.' }, { key: 'address', label: 'Address' }]} />
           <Group justify="space-between" mt="lg" mb="xs"><Text fw={600}>Contacts</Text>{can('client.edit') && <Button size="xs" variant="light" onClick={() => setContact({ receives: [] })}>Add contact</Button>}</Group>
-          <ListView id={`client-contacts`} rows={c.contacts} onRow={(r) => setContact(r)} columns={[{ key: 'name', label: 'Name' }, { key: 'role', label: 'Role' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' },
+          <ListView id={`client-contacts`} rows={c.contacts} onRow={(r) => setContact(r)} columns={[{ key: 'name', label: 'Name' }, { key: 'role', label: 'Role' }, { key: 'phone', label: 'Phone', render: (p: any) => p.phone ? <Group gap={6} wrap="nowrap"><Text size="sm">{p.phone}</Text><WhatsAppIcon title={`WhatsApp ${p.name}`} onClick={() => setWa({ phone: p.phone, name: p.name })} /></Group> : '' }, { key: 'email', label: 'Email' },
             { key: 'site', label: 'Site', value: (p) => c.sites.find((s: any) => s.id === p.site_id)?.name ?? 'All sites' }, { key: 'receives', label: 'Receives', value: (p) => (p.receives ?? []).join(', ') }]} />
         </Tabs.Panel>
         <Tabs.Panel value="quotes">

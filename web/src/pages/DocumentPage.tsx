@@ -9,6 +9,7 @@ import { useCan, useMe, isAdmin, useFields } from '../ctx';
 import { PageHeader, StatusBadge, TypeBadge, Loading, Path } from '../components/ui';
 import { RecordForm } from '../components/RecordForm';
 import { DocRenderer } from '../doc/DocRenderer';
+import { WhatsAppButton, WhatsAppModal, docWaVars } from '../components/WhatsApp';
 import { DesignPanel } from '../doc/DesignPanel';
 import { DocDetailsForm } from '../doc/LinesEditor';
 import { HeaderFields } from '../doc/HeaderFields';
@@ -86,6 +87,7 @@ function DocumentView({ id }: { id: number }) {
   const [saving, setSaving] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
+  const [waOpen, setWaOpen] = useState(false);
   const [noteModal, setNoteModal] = useState<null | { title: string; action: (note: string) => Promise<void> }>(null);
   const [tab, setTab] = useState<string | null>('details');
   const phone = useMediaQuery('(max-width: 767px)');
@@ -172,6 +174,7 @@ function DocumentView({ id }: { id: number }) {
             <Menu.Item onClick={() => exp('downloadDoc')}>Download Word (.doc)</Menu.Item>
           </Menu.Dropdown></Menu>
           <Button variant="default" leftSection={<IconMail size={16} />} onClick={() => setEmailOpen(true)}>Email</Button>
+          {doc.kind !== 'report' || issued ? <WhatsAppButton onClick={async () => { await save(true); setSelected(null); setWaOpen(true); }} /> : null}
           {['quote', 'invoice'].includes(doc.kind) && can(`${doc.kind}.create`) && <Button variant="subtle" leftSection={<IconCopy size={16} />} onClick={() => setDupOpen(true)}>Duplicate</Button>}
           {saving && <Text size="xs" c="dimmed">Saving…</Text>}
         </>} />
@@ -218,6 +221,10 @@ function DocumentView({ id }: { id: number }) {
         </Grid.Col>
       </Grid>
       {emailOpen && <EmailModal doc={doc} getRoot={() => printRef.current!} fileName={fileName} onClose={(sent) => { setEmailOpen(false); if (sent) reload(); }} />}
+      {waOpen && <WhatsAppModal context={doc.kind} vars={docWaVars(doc, data)} clientId={doc.client_id} preferred={{ name: data.contact?.name, phone: data.contact?.phone }} link={{ kind: doc.kind, id: doc.id }}
+        title={`Send ${KIND_LABEL[doc.kind].toLowerCase()} on WhatsApp`}
+        getFile={async () => { const { makePdf } = await exportLib(); const pdf = await makePdf(printRef.current!); return new File([pdf.output('blob')], `${fileName}.pdf`, { type: 'application/pdf' }); }}
+        onClose={(sent) => { setWaOpen(false); if (sent) reload(); }} />}
       {dupOpen && <DuplicateModal doc={doc} onClose={() => setDupOpen(false)} onDone={(id) => { setDupOpen(false); nav(`/documents/${id}`); }} />}
       {noteModal && <NoteModal title={noteModal.title} onClose={() => setNoteModal(null)} onSubmit={async (n) => { await noteModal.action(n); setNoteModal(null); }} />}
     </>

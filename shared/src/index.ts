@@ -12,3 +12,4 @@ export * from './analytics';
 export * from './packs/soil-legend';
 export * from './packs/soil-field';
 export * from './validate';
+export * from './whatsapp';

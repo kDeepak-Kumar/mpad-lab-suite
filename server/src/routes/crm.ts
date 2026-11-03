@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { formatDate } from '@suite/shared';
-import { db, insert, now, parseJson, today } from '../db';
+import { db, insert, now, parseJson, row, today } from '../db';
 import { h, HttpError, requireAuth } from '../auth';
-import { audit, getCompany } from '../services';
+import { audit, getCompany, getDocTemplate, sha256 } from '../services';
 
 /**
  * CRM follow-ups (calls, visits, emails, tasks) linked to clients and documents,
@@ -15,8 +15,37 @@ const SECRET = process.env.JWT_SECRET || 'dev-only-secret-change-me';
 /** Verification token for an issued report: id + HMAC over id and content hash, so it cannot be guessed or reused after an amendment. */
 export const verifyToken = (id: number, hash: string) => `${id}-${crypto.createHmac('sha256', SECRET).update(`report:${id}:${hash}`).digest('base64url').slice(0, 16)}`;
 
+/** Share link for a document sent on WhatsApp: id + HMAC, so links cannot be guessed. */
+export const shareToken = (id: number, createdAt: string) => `${id}-${crypto.createHmac('sha256', SECRET).update(`share:${id}:${createdAt}`).digest('base64url').slice(0, 18)}`;
+/** Documents that may be opened by link: quotations (not drafts once cancelled), issued invoices and issued reports. */
+export const shareable = (d: { kind: string; status: string; number?: string | null }) =>
+  Boolean(d.number) && (d.kind === 'quote' ? d.status !== 'cancelled' : d.kind === 'invoice' ? ['issued', 'partly_paid', 'paid'].includes(d.status) : d.kind === 'report' ? ['issued', 'cancelled'].includes(d.status) : false);
+/** Settings that never leave the server on a public page. */
+const PRIVATE_KEYS = ['ai', 'smtp', 'alerts', 'security', 'numbering', 'whatsapp', 'emailFooter', 'signatories', 'loginHighlights'];
+
 // ---------- public (no sign-in) ----------
 export const publicApi = Router();
+publicApi.get('/public/doc/:token', h(async (req) => {
+  const id = Number(String(req.params.token).split('-')[0]);
+  const raw = Number.isFinite(id) ? await db('documents').where({ id }).first() : null;
+  if (!raw || shareToken(raw.id, String(raw.created_at)) !== req.params.token || !shareable(raw)) throw new HttpError(404, 'This link is not valid any more. Please ask the laboratory for a fresh link.');
+  const d = row(raw, ['data', 'overrides', 'totals']) as Record<string, any>;
+  const full = await getCompany(d.company_id);
+  const company: Record<string, unknown> = { ...full };
+  for (const k of PRIVATE_KEYS) delete company[k];
+  const tpl = await getDocTemplate(d.company_id, d.kind, d.template_id);
+  const snap = d.data.signatory;
+  const issuer = snap?.name ? snap : d.issued_by ? await db('users').where({ id: d.issued_by }).first('name', 'designation', 'qualifications', 'signature') : null;
+  // Note the first opening per day, so the team sees in History and Follow-ups that the client looked at it.
+  const day = today();
+  const seen = await db('audit_log').where({ company_id: d.company_id, entity: 'document', entity_id: d.id, action: 'opened from shared link' }).andWhere('at', '>=', day).first('id');
+  if (!seen) await db('audit_log').insert({ company_id: d.company_id, user_id: null, entity: 'document', entity_id: d.id, action: 'opened from shared link', detail: JSON.stringify({ ip: req.ip }), at: now() });
+  const replaced = d.status === 'cancelled' ? await db('documents').where({ parent_id: d.id }).whereNot('status', 'cancelled').first('number') : null;
+  return {
+    kind: d.kind, number: d.number, status: d.status, date: d.date, data: d.data, overrides: d.overrides ?? {}, totals: d.totals, company, issuer,
+    template: tpl?.definition ?? null, verify: d.kind === 'report' && d.hash ? verifyToken(d.id, d.hash) : null, replacedBy: replaced?.number ?? null,
+  };
+}));
 publicApi.get('/public/verify/:token', h(async (req) => {
   const [idPart] = String(req.params.token).split('-');
   const id = Number(idPart);
@@ -78,6 +107,36 @@ crm.delete('/activities/:id', h(async (req) => {
   const n = await db('activities').where({ id: Number(req.params.id), company_id: req.user.company_id, created_by: req.user.id }).delete();
   if (!n) throw new HttpError(403, 'Only the person who created a follow-up can delete it');
   return { ok: true };
+}));
+
+// ---------- WhatsApp ----------
+/** Records a WhatsApp message as a completed CRM activity (and marks a draft quotation as sent). */
+crm.post('/whatsapp/log', h(async (req) => {
+  const cid = req.user.company_id;
+  const b = z.object({
+    client_id: z.number().nullable().optional(), phone: z.string().max(40).optional().nullable(), contact: z.string().max(120).optional().nullable(),
+    template: z.string().max(40), message: z.string().max(4000), link_kind: z.string().max(20).nullable().optional(), link_id: z.number().nullable().optional(),
+    subject: z.string().max(300).optional(),
+  }).parse(req.body);
+  if (b.client_id && !(await db('clients').where({ id: b.client_id, company_id: cid }).first())) throw new HttpError(400, 'Client not found');
+  let doc: Record<string, any> | undefined;
+  if (b.link_kind && b.link_id && ['quote', 'invoice', 'report'].includes(b.link_kind)) {
+    doc = await db('documents').where({ id: b.link_id, company_id: cid }).first();
+    if (!doc) throw new HttpError(404, 'Document not found');
+  }
+  const subject = b.subject || `WhatsApp: ${b.template}${doc?.number ? ` – ${doc.number}` : ''}${b.contact ? ` to ${b.contact}` : ''}`;
+  const id = await insert(db, 'activities', {
+    company_id: cid, client_id: b.client_id ?? doc?.client_id ?? null, type: 'WhatsApp', subject: subject.slice(0, 300), notes: `${b.phone ? `To +${b.phone}\n\n` : ''}${b.message}`.slice(0, 5000),
+    assigned_to: req.user.id, created_by: req.user.id, link_kind: b.link_kind ?? null, link_id: b.link_id ?? null, done_at: now(), created_at: now(), outcome: 'Sent',
+  });
+  if (doc) {
+    if (doc.kind === 'quote' && doc.status === 'draft') {
+      await db('documents').where({ id: doc.id }).update({ status: 'sent', issued_at: now(), issued_by: req.user.id, hash: sha256(parseJson(doc.data, {})) });
+      await scheduleQuoteFollowUp(cid, req.user.id, { id: doc.id, number: doc.number, client_id: doc.client_id });
+    }
+    await audit(db, req.user, 'document', doc.id, 'shared on WhatsApp', { to: b.phone ? `+${b.phone}` : 'chosen in WhatsApp', template: b.template });
+  }
+  return { id };
 }));
 
 /** Automatic follow-up when a quotation is sent: call the client after the given days. */

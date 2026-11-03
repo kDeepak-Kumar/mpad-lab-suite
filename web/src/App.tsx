@@ -16,6 +16,7 @@ import { Loading } from './components/ui';
 
 // Pages load on demand, so the app opens fast and only fetches what a screen needs.
 const page = <K extends string>(loader: () => Promise<Record<K, ComponentType<any>>>, name: K) => lazy(() => loader().then((m) => ({ default: m[name] })));
+const SharedDocPage = page(() => import('./pages/SharedDoc'), 'SharedDocPage');
 const Dashboard = page(() => import('./pages/Dashboard'), 'Dashboard');
 const ClientsPage = page(() => import('./pages/Clients'), 'ClientsPage');
 const ClientDetail = page(() => import('./pages/Clients'), 'ClientDetail');
@@ -77,9 +78,10 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const loc = useLocation();
   useEffect(() => {
-    if (loc.pathname === '/login') { setMe(null); return; }
+    if (loc.pathname === '/login' || loc.pathname.startsWith('/d/')) { setMe(null); return; }
     api<Me>('/auth/me', { quiet: true }).then(setMe).catch(() => setMe(null));
   }, [loc.pathname === '/login']);
+  if (loc.pathname.startsWith('/d/')) return <Suspense fallback={<Center h="100vh"><Loader /></Center>}><Routes><Route path="/d/:token" element={<SharedDocPage />} /></Routes></Suspense>;
   if (me === undefined && !loc.pathname.startsWith('/verify/')) return <Center h="100vh"><Loader /></Center>;
   if (loc.pathname.startsWith('/verify/')) return <Routes><Route path="/verify/:token" element={<VerifyPage />} /></Routes>;
   if (!me) return <Routes><Route path="/login" element={<Login onLogin={() => api<Me>('/auth/me').then(setMe)} />} /><Route path="*" element={<Navigate to="/login" />} /></Routes>;
