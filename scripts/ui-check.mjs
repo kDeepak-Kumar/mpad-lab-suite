@@ -177,7 +177,7 @@ await pubPage.screenshot({ path: `${out}/verify-public.png`, fullPage: true });
 
 // technician cannot see accounts tabs
 const tk = await session('tech');
-const navText = await tk.locator('nav').innerText();
+const navText = await tk.locator('nav.mantine-AppShell-navbar').innerText();
 if (navText.includes('Invoices') || navText.includes('Ledgers')) problems.push('roles: technician sees accounts tabs');
 
 await browser.close();

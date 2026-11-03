@@ -206,4 +206,8 @@ const foot = await api('frontdesk', 'GET', '/email/footer?kind=report&body=Hello
 expect(/Rate us on Google/.test(foot.html) && /Google review/.test(foot.text) && /wa\.me\/919000000000/.test(foot.html), 'email footer carries contacts, website, map, WhatsApp and review link');
 const fq = await api('frontdesk', 'GET', '/email/footer?kind=quote&body=Hello');
 expect(!/Rate us/.test(fq.html), 'review link is left out of quotation emails (after-service only)');
+const sigUser = (await api('owner', 'GET', '/users')).find((u) => u.email === 'signatory@demo.lab');
+await api('owner', 'POST', `/account/admin/reset-2fa/${sigUser.id}`);
+expect(!(await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS })).j.twoFactor, 'admin can reset a user\'s two-step verification (lost phone)');
+await api('owner', 'PUT', '/company', { signatories: [], seal: null });
 console.log('\nALL CHECKS PASSED');
