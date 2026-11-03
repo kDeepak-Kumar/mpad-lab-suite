@@ -9,6 +9,9 @@ import '@mantine/notifications/styles.css';
 import '@mantine/spotlight/styles.css';
 import './styles.css';
 import { App } from './App';
+import { watchVersion } from './version';
+
+watchVersion();
 
 // Dropdowns float clearly above the form: shadow, border, tinted hover and a check on the chosen value.
 const combobox = {

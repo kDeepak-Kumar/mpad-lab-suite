@@ -64,7 +64,7 @@ else
 fi
 (cd "$APP_DIR" && npm install --omit=dev --no-audit --no-fund)
 git config --system --add safe.directory "$APP_DIR"
-for f in update backup restore; do install -m 755 "$APP_DIR/vps/$f.sh" "/usr/local/sbin/mpad-$f"; done
+for f in update backup restore autoupdate; do install -m 755 "$APP_DIR/vps/$f.sh" "/usr/local/sbin/mpad-$f"; done
 chown -R mpad:mpad /opt/mpad-suite "$DATA_DIR"
 
 echo "== 6/8 Settings file ($ENV_FILE, root only)"
@@ -144,6 +144,32 @@ systemctl daemon-reload
 systemctl enable --now mpad-suite
 systemctl reload caddy || systemctl restart caddy
 
+install_autoupdate() {
+  install -m 755 "$APP_DIR/vps/autoupdate.sh" /usr/local/sbin/mpad-autoupdate
+  cat > /etc/systemd/system/mpad-autoupdate.service <<UNIT
+[Unit]
+Description=MPAD Lab Suite – install new tested version from GitHub
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mpad-autoupdate
+StandardOutput=append:/var/log/mpad-update.log
+StandardError=append:/var/log/mpad-update.log
+UNIT
+  cat > /etc/systemd/system/mpad-autoupdate.timer <<UNIT
+[Unit]
+Description=Check GitHub for a new MPAD Lab Suite version every 2 minutes
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now mpad-autoupdate.timer >/dev/null 2>&1
+}
+install_autoupdate
+
 echo "== 8/8 Checking the app"
 for i in $(seq 1 30); do curl -fs http://127.0.0.1:4000/api/health >/dev/null && break; sleep 2; done
 if curl -fs http://127.0.0.1:4000/api/health >/dev/null; then
@@ -163,7 +189,8 @@ cat <<DONE
     (HTTPS certificate is issued automatically on first visit)
  3. Sign in as $ADMIN_EMAIL and change the password.
  Useful commands:
-   mpad-update      install the latest version (backs up first)
+   New versions install automatically within ~5 minutes of a push (log: /var/log/mpad-update.log)
+   mpad-update      install the latest version now (backs up first)
    mpad-backup      take a backup now
    mpad-restore     restore from a backup
    journalctl -u mpad-suite -n 100   app log

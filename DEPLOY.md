@@ -9,7 +9,11 @@ bash setup.sh
 ```
 
 Then add a DNS **A record** for the app subdomain (e.g. `app` → the VPS IP) at your domain registrar.
-Afterwards on the server: `mpad-update` (new version, backs up first), `mpad-backup`, `mpad-restore <file>`.
+**Automatic updates:** every push to `main` is tested by GitHub Actions; if the tests pass it is published to the `deploy`
+branch, and the server checks that branch every 2 minutes and installs it (backup first, automatic rollback if the app
+does not start). Users get the new version on their next refresh; open tabs show a "new version available" notice.
+Log: `/var/log/mpad-update.log`. Pause: `systemctl disable --now mpad-autoupdate.timer`.
+Manual commands on the server: `mpad-update` (install now), `mpad-backup`, `mpad-restore <file>`.
 Secrets live in `/etc/mpad-suite.env` (root only); `SMTP_PASSWORD` goes there too, then `systemctl restart mpad-suite`.
 
 The cPanel route below still works for hosts that offer "Setup Node.js App".
