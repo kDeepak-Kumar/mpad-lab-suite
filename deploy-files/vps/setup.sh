@@ -149,6 +149,7 @@ for i in $(seq 1 30); do curl -fs http://127.0.0.1:4000/api/health >/dev/null &&
 if curl -fs http://127.0.0.1:4000/api/health >/dev/null; then
   echo "   App is running."
   sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=/" "$ENV_FILE"   # owner exists now; don't keep the password on disk
+else
   echo "   App did not start. See: journalctl -u mpad-suite -n 50"; exit 1
 fi
 IP=$(curl -fs4 https://api.ipify.org || hostname -I | awk '{print $1}')
