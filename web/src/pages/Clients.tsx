@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ClientActivity } from './FollowUps';
 import { Button, Group, Modal, Paper, Stack, Tabs, Text, Badge, Timeline, MultiSelect, Select, Anchor, SimpleGrid, ActionIcon, Menu } from '@mantine/core';
-import { IconPlus, IconPencil, IconDots } from '@tabler/icons-react';
+import { IconPlus, IconPencil, IconDots, IconUpload } from '@tabler/icons-react';
+import { ClientImport } from './ClientImport';
 import { INDIAN_STATES, validateGstin } from '@suite/shared';
 import { api, money, ok, useApi } from '../api';
 import { useCan, useFields } from '../ctx';
@@ -43,7 +44,7 @@ export function ClientForm({ initial, onSaved, onCancel }: { initial?: any; onSa
 
 export function ClientsPage() {
   const [sp, setSp] = useSearchParams();
-  const { data } = useApi<any[]>('/clients');
+  const { data, reload } = useApi<any[]>('/clients');
   const nav = useNavigate();
   const can = useCan();
   const custom = useCustomCols('client');
@@ -61,8 +62,11 @@ export function ClientsPage() {
   ];
   return (
     <>
-      <PageHeader title="Clients" subtitle="Companies, their sites and contacts" actions={can('client.create') && <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>New client</Button>} />
-      <ListView id="clients" rows={data} columns={cols} onRow={(r) => nav(`/clients/${r.id}`)} empty="No clients yet – add your first client." />
+      <PageHeader title="Clients" subtitle="Companies, their sites and contacts" actions={can('client.create') && <>
+        <Button variant="default" leftSection={<IconUpload size={16} />} onClick={() => setSp({ import: '1' })}>Import</Button>
+        <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>New client</Button></>} />
+      {sp.get('import') === '1' && <ClientImport onClose={(done) => { setSp({}); if (done) reload(); }} />}
+      <ListView id="clients" rows={data} columns={cols} onRow={(r) => nav(`/clients/${r.id}`)} empty="No clients yet – add your first client, or use Import to bring in your list from Excel." />
       <Modal opened={sp.get('new') === '1'} onClose={() => setSp({})} title="New client" size="xl">
         <ClientForm onCancel={() => setSp({})} onSaved={(id) => { setSp({}); nav(`/clients/${id}`); }} />
       </Modal>

@@ -2,7 +2,7 @@ import { storageInfo } from '../storage';
 import { collectAlerts, runAlerts, type AlertSettings } from '../alerts';
 import { Router } from 'express';
 import { z } from 'zod';
-import { DEFAULT_TEMPLATES, isIsoDate, type DocKind } from '@suite/shared';
+import { DEFAULT_TEMPLATES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
 import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession } from '../auth';
 import { audit, getCompany, ledger } from '../services';
@@ -151,6 +151,91 @@ core.post('/clients', allow('client.create'), h(async (req) => {
   const id = await insert(db, 'clients', { ...rest, data: toJson(mergeCustom(null, cu)), company_id: req.user.company_id, created_at: now() });
   await audit(db, req.user, 'client', id, 'created', { name: c.name });
   return { id };
+}));
+/**
+ * Bulk import from the Excel/CSV template. One row = a client, optionally with one site and one contact;
+ * repeat the client name on more rows to add more sites/contacts. Existing clients (same name or GSTIN)
+ * are not changed – only their new sites/contacts are added. dryRun=true checks everything and writes nothing.
+ */
+const IMPORT_COLS: Record<string, string> = {
+  'client name': 'name', 'name': 'name', 'short code': 'short_code', 'type': 'type', 'gstin': 'gstin', 'pan': 'pan', 'state': 'state', 'state code': 'state',
+  'billing address': 'address', 'address': 'address', 'email': 'email', 'phone': 'phone', 'payment terms (days)': 'payment_terms_days', 'payment terms': 'payment_terms_days',
+  'discount %': 'discount_pct', 'discount': 'discount_pct', 'opening balance': 'opening_balance', 'notes': 'notes',
+  'site name': 'site_name', 'site address': 'site_address', 'site project': 'site_project', 'project': 'site_project', 'site po / wo no.': 'site_po', 'site po': 'site_po',
+  'contact name': 'contact_name', 'contact role': 'contact_role', 'contact phone': 'contact_phone', 'contact email': 'contact_email',
+};
+core.post('/clients/import', allow('client.create'), h(async (req) => {
+  const { rows, dryRun } = z.object({ rows: z.array(z.record(z.any())).max(5000, 'Import at most 5,000 rows at a time'), dryRun: z.boolean().default(true) }).parse(req.body);
+  const cid = req.user.company_id, role = req.user.roleDef;
+  const states = INDIAN_STATES;
+  const stateOf = (v: string) => { const t = v.trim().toLowerCase(); if (!t) return null; const s = states.find((x) => x.code === t.padStart(2, '0') || x.name.toLowerCase() === t); return s?.code ?? undefined; };
+  const types = ['company', 'government', 'individual', 'walkin'];
+  const existing = await db('clients').where({ company_id: cid }).select('id', 'name', 'gstin');
+  const byName = new Map(existing.map((c) => [String(c.name).trim().toLowerCase(), c.id as number]));
+  const byGstin = new Map(existing.filter((c) => c.gstin).map((c) => [String(c.gstin).toUpperCase(), c.id as number]));
+  const created = new Map<string, number | 'new'>();
+  const seen = new Set<string>(); // sites/contacts already counted in this import
+  const exists = async (table: 'sites' | 'contacts', clientId: number | 'new', key: string, nm: string) => {
+    const k = `${table}|${key}|${nm.toLowerCase()}`;
+    if (seen.has(k)) return true;
+    seen.add(k);
+    return typeof clientId === 'number' && Boolean(await db(table).where({ client_id: clientId, company_id: cid }).whereRaw('LOWER(name) = ?', [nm.toLowerCase()]).first());
+  };
+  const results: { row: number; client: string; status: 'new client' | 'existing client' | 'error' | 'skipped'; added: string[]; message?: string }[] = [];
+  let newClients = 0, sites = 0, contacts = 0, errors = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const raw: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rows[i])) { const key = IMPORT_COLS[k.replace(/\*/g, '').trim().toLowerCase()]; if (key) raw[key] = String(v ?? '').trim(); }
+    const rowNo = i + 2; // header is row 1 in Excel
+    const name = raw.name ?? '';
+    if (!name && !raw.site_name && !raw.contact_name) { results.push({ row: rowNo, client: '', status: 'skipped', added: [], message: 'Empty row' }); continue; }
+    if (/^example\b/i.test(name)) { results.push({ row: rowNo, client: name, status: 'skipped', added: [], message: 'Example row' }); continue; }
+    try {
+      if (!name) throw new Error('Client name is required');
+      const key = name.toLowerCase();
+      const gst = raw.gstin ? raw.gstin.replace(/\s/g, '').toUpperCase() : '';
+      let clientId: number | 'new' | undefined = created.get(key) ?? byName.get(key) ?? (gst ? byGstin.get(gst) : undefined);
+      const added: string[] = [];
+      let status: 'new client' | 'existing client' = 'existing client';
+      if (clientId === undefined) {
+        const st = raw.state ? stateOf(raw.state) : null;
+        if (st === undefined) throw new Error(`State "${raw.state}" not recognised – use the 2-digit GST state code (e.g. 36) or the state name`);
+        const type = (raw.type || 'company').toLowerCase().replace(/[^a-z]/g, '');
+        if (!types.includes(type)) throw new Error(`Type must be one of: ${types.join(', ')}`);
+        const body = clientSchema.parse({
+          name, short_code: raw.short_code || null, type, gstin: gst || null, pan: raw.pan ? raw.pan.toUpperCase() : null, state_code: st, address: raw.address || null,
+          email: raw.email || null, phone: raw.phone || null, notes: raw.notes || null,
+          payment_terms_days: raw.payment_terms_days || undefined, discount_pct: raw.discount_pct ? raw.discount_pct.replace('%', '') : undefined, opening_balance: raw.opening_balance ? raw.opening_balance.replace(/[₹,\s]/g, '') : undefined,
+        });
+        const c = normaliseClient(await cleanWrite(cid, role, 'client', body, { creating: true }));
+        if (!c.state_code) throw new Error('Give a GSTIN or a State so GST can be worked out');
+        if (dryRun) clientId = 'new';
+        else { const { rest } = split(c); clientId = await insert(db, 'clients', { ...rest, data: toJson({}), company_id: cid, created_at: now() }); await audit(db, req.user, 'client', clientId, 'created (import)', { name }); }
+        created.set(key, clientId); if (gst) byGstin.set(gst, clientId as number);
+        status = 'new client'; newClients++;
+      } else if (created.has(key) && !byName.has(key)) status = 'new client';
+      if (raw.site_name) {
+        const site = await cleanWrite(cid, role, 'site', siteSchema.parse({ name: raw.site_name, address: raw.site_address || null, project: raw.site_project || null, po_number: raw.site_po || null }), { creating: true });
+        if (!(await exists('sites', clientId, key, raw.site_name))) {
+          if (!dryRun && typeof clientId === 'number') { const { rest } = split(site); await insert(db, 'sites', { ...rest, data: toJson({}), client_id: clientId, company_id: cid, created_at: now() }); }
+          added.push(`site “${raw.site_name}”`); sites++;
+        }
+      }
+      if (raw.contact_name) {
+        const ct = await cleanWrite(cid, role, 'contact', contactSchema.parse({ name: raw.contact_name, role: raw.contact_role || null, phone: raw.contact_phone || null, email: raw.contact_email || null }), { creating: true });
+        if (!(await exists('contacts', clientId, key, raw.contact_name))) {
+          if (!dryRun && typeof clientId === 'number') { const { rest } = split(ct); await insert(db, 'contacts', { ...rest, site_id: null, receives: toJson(['quote', 'report', 'invoice']), data: toJson({}), client_id: clientId, company_id: cid, created_at: now() }); }
+          added.push(`contact ${raw.contact_name}`); contacts++;
+        }
+      }
+      results.push({ row: rowNo, client: name, status, added });
+    } catch (e) {
+      errors++;
+      const msg = (e as { name?: string }).name === 'ZodError' ? ((e as any).issues ?? []).map((x: any) => `${x.path.join(' ')}: ${x.message}`).join('; ') : (e as Error).message;
+      results.push({ row: rowNo, client: name, status: 'error', added: [], message: msg });
+    }
+  }
+  return { dryRun, summary: { rows: rows.length, newClients, sites, contacts, errors }, results };
 }));
 core.get('/clients/:id', allow('client.read'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id), role = req.user.roleDef;

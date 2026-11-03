@@ -206,6 +206,23 @@ const foot = await api('frontdesk', 'GET', '/email/footer?kind=report&body=Hello
 expect(/Rate us on Google/.test(foot.html) && /Google review/.test(foot.text) && /wa\.me\/919000000000/.test(foot.html), 'email footer carries contacts, website, map, WhatsApp and review link');
 const fq = await api('frontdesk', 'GET', '/email/footer?kind=quote&body=Hello');
 expect(!/Rate us/.test(fq.html), 'review link is left out of quotation emails (after-service only)');
+console.log('11. Bulk client import');
+const impRows = [
+  { 'Client name*': 'Example Infra Projects Pvt Ltd' },
+  { 'Client name*': 'Import Test Co', GSTIN: '36AABCK1234A1ZA', 'Site name': 'Site A', 'Contact name': 'Ravi', 'Contact email': 'ravi@import.test' },
+  { 'Client name*': 'import test co', 'Site name': 'Site B', 'Contact name': 'Ravi' },
+  { 'Client name*': 'No State Co' },
+  { 'Client name*': 'Bad Mail Co', State: 'Telangana', Email: 'nope' },
+];
+const dryI = await api('frontdesk', 'POST', '/clients/import', { rows: impRows, dryRun: true });
+expect(dryI.summary.newClients === 1 && dryI.summary.sites === 2 && dryI.summary.contacts === 1 && dryI.summary.errors === 2, `import check: ${JSON.stringify(dryI.summary)} (example row skipped, duplicates counted once)`);
+expect(!(await api('frontdesk', 'GET', '/clients')).some((c) => c.name === 'Import Test Co'), 'the check writes nothing');
+const realI = await api('frontdesk', 'POST', '/clients/import', { rows: impRows, dryRun: false });
+const ic = (await api('frontdesk', 'GET', '/clients')).find((c) => c.name === 'Import Test Co');
+const icd = await api('frontdesk', 'GET', `/clients/${ic.id}`);
+expect(realI.summary.newClients === 1 && ic.state_code === '36' && icd.sites.length === 2 && icd.contacts.length === 1, 'import creates the client with state from GSTIN, 2 sites and 1 contact');
+const again = await api('frontdesk', 'POST', '/clients/import', { rows: impRows, dryRun: false });
+expect(again.summary.newClients === 0 && again.summary.sites === 0, 'importing the same file again changes nothing');
 const sigUser = (await api('owner', 'GET', '/users')).find((u) => u.email === 'signatory@demo.lab');
 await api('owner', 'POST', `/account/admin/reset-2fa/${sigUser.id}`);
 expect(!(await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS })).j.twoFactor, 'admin can reset a user\'s two-step verification (lost phone)');
