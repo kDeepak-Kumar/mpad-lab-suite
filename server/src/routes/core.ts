@@ -1,3 +1,4 @@
+import { storageInfo } from '../storage';
 import { collectAlerts, runAlerts, type AlertSettings } from '../alerts';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -32,6 +33,7 @@ core.get('/alerts/preview', allow('settings'), h(async (req) => {
   const company = await getCompany(req.user.company_id);
   return collectAlerts(req.user.company_id, (company.alerts ?? {}) as AlertSettings);
 }));
+core.get('/system/storage', allow('settings'), h(async () => storageInfo()));
 core.post('/alerts/run', allow('settings'), h(async (req) => {
   try { return await runAlerts(req.user.company_id, { force: true }); } catch (e) { throw new HttpError(400, (e as Error).message); }
 }));

@@ -39,6 +39,7 @@ jobs:
           cp -r web/dist deploy/web
           cp deploy-files/package.json deploy-files/README-DEPLOY.txt deploy/
           cp -r deploy-files/tmp deploy/tmp
+          cp -r deploy-files/vps deploy/vps
       - name: Publish to the deploy branch
         run: |
           cd deploy

@@ -1,3 +1,21 @@
+# Deploying
+
+**Recommended for go-live: a VPS (e.g. Hostinger KVM 1/KVM 2, India data centre, Ubuntu 24.04).**
+One command sets up everything (Node.js, HTTPS via Caddy, firewall, auto-restart, nightly backups):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kDeepak-Kumar/mpad-lab-suite/main/deploy-files/vps/setup.sh -o setup.sh
+bash setup.sh
+```
+
+Then add a DNS **A record** for the app subdomain (e.g. `app` → the VPS IP) at your domain registrar.
+Afterwards on the server: `mpad-update` (new version, backs up first), `mpad-backup`, `mpad-restore <file>`.
+Secrets live in `/etc/mpad-suite.env` (root only); `SMTP_PASSWORD` goes there too, then `systemctl restart mpad-suite`.
+
+The cPanel route below still works for hosts that offer "Setup Node.js App".
+
+---
+
 # Deploying to cPanel (test site on mpadqclab.com hosting)
 
 The app runs as one Node.js application with a MySQL database: the same server serves the web screens and the API. GitHub Actions builds it on every push to `main` and publishes a ready-to-run copy to the **`deploy`** branch, so the hosting account never has to build anything.

@@ -175,6 +175,7 @@ function AlertSettings({ v, set }: { v: any; set: (path: string, value: unknown)
         <Button size="xs" variant="light" loading={busy} disabled={!a.to || Boolean(toBad)} onClick={async () => { setBusy(true); try { const r = await api('/alerts/run', { method: 'POST' }); ok(r.sent ? `Alert email sent (${r.items} items)` : 'Nothing to alert right now'); } finally { setBusy(false); } }}>Send now</Button>
         <Text size="xs" c="dimmed">Save settings first. “Send now” uses the SMTP details above.</Text>
       </Group>
+      <StoragePanel />
       {preview && (
         <Stack gap={2} mt="sm">
           {!preview.length && <Text size="sm" c="dimmed">Nothing overdue and no calibration due. No email would be sent.</Text>}
@@ -182,5 +183,19 @@ function AlertSettings({ v, set }: { v: any; set: (path: string, value: unknown)
         </Stack>
       )}
     </Paper>
+  );
+}
+
+/** Server disk and database size, so storage never runs out unnoticed. */
+function StoragePanel() {
+  const { data } = useApi<any>('/system/storage', []);
+  if (!data) return null;
+  const h = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  return (
+    <Alert mt="sm" variant="light" color={data.warn ? 'red' : 'gray'} title="Server storage">
+      Database {h(data.dbBytes)} · {data.filesCount} attached file{data.filesCount === 1 ? '' : 's'} ({h(data.filesBytes)})
+      {data.disk && <> · Disk {data.disk.usedPct}% used, {h(data.disk.freeBytes)} free of {h(data.disk.totalBytes)}</>}
+      {data.warn && <div>The disk is over 80% full. Remove old backups or move to a bigger plan; the daily alert email will also warn about this.</div>}
+    </Alert>
   );
 }

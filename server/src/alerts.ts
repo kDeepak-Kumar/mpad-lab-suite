@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { formatDate, isEmailList } from '@suite/shared';
 import { db, now } from './db';
 import { getCompany, type CompanyProfile } from './services';
+import { human, storageInfo, WARN_PCT } from './storage';
 
 /**
  * Email alerts for SLA breaches (tests past their due date and not yet reported)
@@ -12,7 +13,7 @@ import { getCompany, type CompanyProfile } from './services';
 export interface AlertSettings {
   enabled?: boolean; to?: string; sla?: boolean; calibration?: boolean; leadDays?: number; hour?: number; weeklyRepeat?: boolean;
 }
-export interface AlertItem { kind: 'sla' | 'cal'; ref: string; text: string; isNew?: boolean }
+export interface AlertItem { kind: 'sla' | 'cal' | 'disk'; ref: string; text: string; isNew?: boolean }
 
 const istNow = () => new Date(Date.now() + 5.5 * 3600 * 1000);
 const istToday = () => istNow().toISOString().slice(0, 10);
@@ -37,6 +38,10 @@ export async function collectAlerts(cid: number, s: AlertSettings, td = istToday
       items.push({ kind: 'cal', ref: `eq:${e.id}:${e.due_date}:${expired ? 'expired' : 'due'}`, text: `${e.name}${e.id_no ? ` (${e.id_no})` : ''} calibration ${expired ? 'EXPIRED on' : 'due on'} ${formatDate(e.due_date)}${e.cert_no ? ` · cert ${e.cert_no}` : ''}` });
     }
   }
+  try {
+    const st = await storageInfo();
+    if (st.warn && st.disk) items.push({ kind: 'disk', ref: `disk:${Math.floor(st.disk.usedPct / 5) * 5}`, text: `Server disk is ${st.disk.usedPct}% full (${human(st.disk.freeBytes)} free; database ${human(st.dbBytes)}). Above ${WARN_PCT}%: remove old backups or upgrade the plan before it fills up.` });
+  } catch { /* storage check is best-effort */ }
   if (items.length) {
     const seen = new Set((await db('alert_log').where({ company_id: cid }).whereIn('ref', items.map((i) => i.ref)).select('ref')).map((r: { ref: string }) => r.ref));
     for (const i of items) i.isNew = !seen.has(i.ref);
@@ -50,8 +55,10 @@ export function alertEmail(company: CompanyProfile, items: AlertItem[], td = ist
   const parts = [`Daily alerts for ${company.name} – ${formatDate(td)}`, ''];
   if (sla.length) parts.push(`TESTS PAST DUE DATE (${sla.length})`, ...sla.map(line), '');
   if (cal.length) parts.push(`CALIBRATION DUE / EXPIRED (${cal.length})`, ...cal.map(line), '');
+  const disk = items.filter((i) => i.kind === 'disk');
+  if (disk.length) parts.push('SERVER STORAGE', ...disk.map(line), '');
   parts.push('Open the Suite to act on these. You can change who gets this email in Settings → Company → Email & alerts.');
-  const subject = `${company.name}: ${[sla.length && `${sla.length} test${sla.length > 1 ? 's' : ''} overdue`, cal.length && `${cal.length} calibration${cal.length > 1 ? 's' : ''} due/expired`].filter(Boolean).join(', ')}`;
+  const subject = `${company.name}: ${[sla.length && `${sla.length} test${sla.length > 1 ? 's' : ''} overdue`, cal.length && `${cal.length} calibration${cal.length > 1 ? 's' : ''} due/expired`, items.some((i) => i.kind === 'disk') && 'server disk almost full'].filter(Boolean).join(', ')}`;
   return { subject, text: parts.join('\n') };
 }
 
