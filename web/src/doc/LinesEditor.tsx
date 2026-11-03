@@ -1,3 +1,4 @@
+import { moveItem, useDragReorder } from '../components/useDragReorder';
 import { useState } from 'react';
 import { ActionIcon, Button, Group, Modal, NumberInput, Paper, Select, Stack, Switch, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
 import { IconTrash, IconPlus, IconSparkles, IconGripVertical } from '@tabler/icons-react';
@@ -22,7 +23,7 @@ export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kin
     if (c.conditions && !notes.includes(c.conditions)) notes = notes ? `${notes}\n${c.conditions}` : c.conditions;
     set({ lines: [...lines, lineFrom(c)], notes });
   };
-  const move = (i: number, d: number) => { const l = [...lines]; const j = i + d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; set({ lines: l }); };
+  const dnd = useDragReorder('doc-lines', (from, to) => set({ lines: moveItem(lines, from, to) }), disabled);
   return (
     <Stack gap="sm">
       {kind === 'quote' && (
@@ -46,11 +47,11 @@ export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kin
       )}
       <Stack gap={6}>
         {lines.map((l, i) => (
-          <Paper key={i} withBorder p="xs" radius="md">
+          <Paper key={i} withBorder p="xs" radius="md" {...dnd.rowProps(i)}>
             <Group gap="xs" align="flex-start" wrap="nowrap">
               <Stack gap={0} mt={4} align="center">
                 <Text size="sm" fw={650} c="dimmed" w={18} ta="center">{i + 1}</Text>
-                {!disabled && <Tooltip label="Move up"><ActionIcon size="xs" variant="subtle" color="gray" onClick={() => move(i, -1)}><IconGripVertical size={12} /></ActionIcon></Tooltip>}
+                {!disabled && lines.length > 1 && <span className="drag-handle" {...dnd.handleProps(i)}><IconGripVertical size={14} /></span>}
               </Stack>
               <Stack gap={6} style={{ flex: 1 }}>
                 <Textarea disabled={disabled} size="xs" autosize minRows={1} placeholder="Description" value={l.description} onChange={(e) => setLine(i, { description: e.currentTarget.value })} />

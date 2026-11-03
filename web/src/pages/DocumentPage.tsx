@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMediaQuery } from '@mantine/hooks';
 import { Alert, Button, Checkbox, Grid, Group, Menu, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
-import { IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck } from '@tabler/icons-react';
+import { IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck, IconCopy } from '@tabler/icons-react';
 import { applyOverrides, computeTotals, DEFAULT_TEMPLATES, type DocOverrides, type DocTemplate, type LineInput } from '@suite/shared';
 import { api, ok, useApi, dmy, money } from '../api';
 import { useCan, useMe, isAdmin, useFields } from '../ctx';
@@ -85,6 +85,7 @@ function DocumentView({ id }: { id: number }) {
   const dirtyRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
   const [noteModal, setNoteModal] = useState<null | { title: string; action: (note: string) => Promise<void> }>(null);
   const [tab, setTab] = useState<string | null>('details');
   const phone = useMediaQuery('(max-width: 767px)');
@@ -171,6 +172,7 @@ function DocumentView({ id }: { id: number }) {
             <Menu.Item onClick={() => exp('downloadDoc')}>Download Word (.doc)</Menu.Item>
           </Menu.Dropdown></Menu>
           <Button variant="default" leftSection={<IconMail size={16} />} onClick={() => setEmailOpen(true)}>Email</Button>
+          {['quote', 'invoice'].includes(doc.kind) && can(`${doc.kind}.create`) && <Button variant="subtle" leftSection={<IconCopy size={16} />} onClick={() => setDupOpen(true)}>Duplicate</Button>}
           {saving && <Text size="xs" c="dimmed">Saving…</Text>}
         </>} />
       <div style={{ marginBottom: 14 }}><Path steps={PATHS[doc.kind]} current={doc.status === 'sent' && doc.kind === 'quote' ? 'sent' : doc.status} /></div>
@@ -216,6 +218,7 @@ function DocumentView({ id }: { id: number }) {
         </Grid.Col>
       </Grid>
       {emailOpen && <EmailModal doc={doc} getRoot={() => printRef.current!} fileName={fileName} onClose={(sent) => { setEmailOpen(false); if (sent) reload(); }} />}
+      {dupOpen && <DuplicateModal doc={doc} onClose={() => setDupOpen(false)} onDone={(id) => { setDupOpen(false); nav(`/documents/${id}`); }} />}
       {noteModal && <NoteModal title={noteModal.title} onClose={() => setNoteModal(null)} onSubmit={async (n) => { await noteModal.action(n); setNoteModal(null); }} />}
     </>
   );
@@ -399,5 +402,28 @@ function SignPanel({ doc, data, onLocal }: { doc: any; data: Record<string, any>
         </Stack>
       ) : <Text size="xs" c="dimmed" mt="sm">Upload the company seal in Settings → Company → Branding to stamp it on documents.</Text>}
     </Paper>
+  );
+}
+
+/** New draft from this quotation / invoice – for the same client or another one. */
+function DuplicateModal({ doc, onClose, onDone }: { doc: any; onClose: () => void; onDone: (id: number) => void }) {
+  const { data: clients } = useApi<any[]>('/clients');
+  const [clientId, setClientId] = useState<string | null>(String(doc.client_id));
+  const [busy, setBusy] = useState(false);
+  const same = clientId === String(doc.client_id);
+  const go = async () => {
+    setBusy(true);
+    try { const r = await api<any>(`/documents/${doc.id}/duplicate`, { body: { client_id: Number(clientId) } }); ok(`New draft ${r.number ?? ''} created`); onDone(r.id); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal opened onClose={onClose} title={`Duplicate ${doc.kind === 'quote' ? 'quotation' : 'invoice'} ${doc.number ?? ''}`}>
+      <Stack>
+        <Text size="sm">Creates a new draft with the same lines, rates, discounts and notes. Dates and numbers are new; the original is not changed.</Text>
+        <Select label="For client" searchable data={(clients ?? []).map((c) => ({ value: String(c.id), label: c.name }))} value={clientId} onChange={setClientId} allowDeselect={false} />
+        {!same && <Text size="xs" c="dimmed">GST state, address and the client's own discount are taken from the new client.</Text>}
+        <Group justify="flex-end"><Button variant="default" onClick={onClose}>Cancel</Button><Button loading={busy} disabled={!clientId} onClick={go}>Create draft</Button></Group>
+      </Stack>
+    </Modal>
   );
 }

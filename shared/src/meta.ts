@@ -79,7 +79,7 @@ export interface Layout { object: string; fields: string[]; hidden: string[]; li
 export const TABS: { key: string; label: string }[] = [
   { key: 'home', label: 'Home' }, { key: 'clients', label: 'Clients' }, { key: 'followups', label: 'Follow-ups' }, { key: 'quotes', label: 'Quotations' }, { key: 'workorders', label: 'Work orders' },
   { key: 'samples', label: 'Sample register' }, { key: 'tests', label: 'Tests & observations' }, { key: 'prepare', label: 'Prepare report' }, { key: 'reports', label: 'Reports' },
-  { key: 'invoices', label: 'Invoices' }, { key: 'payments', label: 'Payments' }, { key: 'ledger', label: 'Ledgers' }, { key: 'registers', label: 'Registers' },
+  { key: 'invoices', label: 'Invoices' }, { key: 'payments', label: 'Payments' }, { key: 'ledger', label: 'Ledgers' }, { key: 'gst', label: 'GST returns' }, { key: 'registers', label: 'Registers' },
   { key: 'analytics', label: 'Analytics & AI' }, { key: 'company', label: 'Company & branding' }, { key: 'catalog', label: 'Rate card' }, { key: 'equipment', label: 'Equipment' },
   { key: 'templates', label: 'Templates' }, { key: 'users', label: 'Users' }, { key: 'setup', label: 'Setup (customise)' },
 ];
@@ -88,7 +88,7 @@ export type Crud = { read: boolean; create: boolean; edit: boolean; delete: bool
 export const ACTIONS: { key: string; label: string }[] = [
   { key: 'enterObservations', label: 'Enter observation sheets' }, { key: 'reviewTests', label: 'Review (accept/return) observations' },
   { key: 'prepareReports', label: 'Prepare test reports' }, { key: 'signReports', label: 'Verify, sign and issue reports' },
-  { key: 'issueInvoices', label: 'Issue invoices' }, { key: 'recordPayments', label: 'Record payments' },
+  { key: 'issueInvoices', label: 'Issue invoices' }, { key: 'recordPayments', label: 'Record payments' }, { key: 'manageGst', label: 'Prepare GST returns' },
   { key: 'viewAnalytics', label: 'View analytics & dashboards' }, { key: 'useAI', label: 'Use the AI assistant' },
   { key: 'manageTemplates', label: 'Edit templates' }, { key: 'manageSettings', label: 'Company settings' },
   { key: 'manageUsers', label: 'Manage users' }, { key: 'manageCustomization', label: 'Customise fields, picklists, layouts, roles' },
@@ -122,8 +122,8 @@ export const BUILTIN_ROLES: RoleDef[] = [
     objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'manageTemplates', 'useAI']), fields: {} },
   { key: 'signatory', label: 'Authorised signatory', system: true, tabs: ['home', 'samples', 'tests', 'prepare', 'reports', 'equipment', 'templates', 'analytics'],
     objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'signReports', 'manageTemplates', 'viewAnalytics', 'useAI']), fields: {} },
-  { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'invoices', 'payments', 'ledger', 'registers', 'analytics'],
-    objects: objs({ client: ce, quote: ro, workorder: ro, invoice: ce, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'viewAnalytics', 'useAI']), fields: {} },
+  { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'invoices', 'payments', 'ledger', 'gst', 'registers', 'analytics'],
+    objects: objs({ client: ce, quote: ro, workorder: ro, invoice: ce, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'manageGst', 'viewAnalytics', 'useAI']), fields: {} },
 ];
 
 /** Does a role allow an action or object operation, e.g. "reviewTests" or "invoice.edit"? */

@@ -268,6 +268,21 @@ finance.post('/workorders/:id/invoice', allow('invoices'), h(async (req) => {
   const accs = [...new Set((await db('samples').where({ work_order_id: wo.id })).map((x) => x.accreditation).filter(Boolean))];
   return createDocument(req.user, { kind: 'invoice', client_id: wo.client_id, site_id: wo.site_id, work_order_id: wo.id, data: { lines, customerRef: wo.customer_ref ?? '', accreditation: accs.length === 1 ? accs[0] : null } });
 }));
+/** Copy a quotation or invoice into a new draft (same client, lines, discounts and notes; fresh dates and numbers). */
+finance.post('/documents/:id/duplicate', h(async (req) => {
+  const d = await loadDoc(req.user.company_id, Number(req.params.id));
+  if (!['quote', 'invoice'].includes(d.kind)) throw new HttpError(400, 'Only quotations and invoices can be duplicated');
+  if (!can(req.user, `${d.kind}.create`)) throw new HttpError(403, 'Your role cannot create this document');
+  const b = z.object({ client_id: z.number().optional(), site_id: z.number().nullable().optional() }).parse(req.body ?? {});
+  const keep = ['lines', 'mode', 'showQty', 'includeGst', 'notes', 'accreditation', 'overallDiscount', 'discountPct', 'customerRef', 'validityDays'];
+  const data = Object.fromEntries(Object.entries(d.data).filter(([k]) => keep.includes(k)));
+  const sameClient = !b.client_id || b.client_id === d.client_id;
+  if (!sameClient) { delete data.discountPct; delete data.customerRef; }
+  const contact = sameClient ? ((d.data.contact as { id?: number })?.id ?? null) : null;
+  const r = await createDocument(req.user, { kind: d.kind as 'quote', client_id: b.client_id ?? d.client_id, site_id: sameClient ? (b.site_id !== undefined ? b.site_id : (d.site_id as number | null)) : b.site_id ?? null, contact_id: contact, data } as never);
+  await audit(db, req.user, 'document', r.id, `${d.kind} duplicated`, { from: d.number ?? d.id });
+  return r;
+}));
 finance.post('/documents/:id/to-invoice', allow('invoices'), h(async (req) => {
   const d = await loadDoc(req.user.company_id, Number(req.params.id));
   if (d.kind !== 'quote') throw new HttpError(400, 'Only quotations can be converted');
@@ -488,6 +503,18 @@ finance.get('/registers/:name', h(async (req) => {
 }));
 
 // ---------- dashboard ----------
+/** Notifications: mark one or more as read. A notification comes back if its situation changes (e.g. a new due date). */
+finance.post('/notifications/read', h(async (req) => {
+  const { refs } = z.object({ refs: z.array(z.string().max(120)).max(500) }).parse(req.body);
+  for (const ref of refs) await db('notification_reads').insert({ user_id: req.user.id, ref, read_at: now() }).onConflict(['user_id', 'ref']).ignore();
+  return { ok: true };
+}));
+finance.post('/notifications/unread', h(async (req) => {
+  const { refs } = z.object({ refs: z.array(z.string().max(120)).max(500) }).parse(req.body);
+  await db('notification_reads').where({ user_id: req.user.id }).whereIn('ref', refs).delete();
+  return { ok: true };
+}));
+
 finance.get('/dashboard', h(async (req) => {
   const cid = req.user.company_id, td = today();
   const monthStart = td.slice(0, 8) + '01';
@@ -504,25 +531,27 @@ finance.get('/dashboard', h(async (req) => {
   const paid = await paidAgainst(cid);
   const due = outstanding.map((o) => ({ ...o, balance: Number(o.total) - (paid.get(o.id) ?? 0) }));
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-  const reminders: { kind: string; text: string; link: string; level: 'info' | 'warning' | 'danger' }[] = [];
+  const reminders: { kind: string; text: string; link: string; level: 'info' | 'warning' | 'danger'; ref?: string }[] = [];
   for (const t of tests.filter((t) => ['pending', 'in_progress', 'returned'].includes(t.status) && t.due_date && t.due_date <= td))
-    reminders.push({ kind: 'Test due', text: `${t.report_name || t.billing_name} – ${t.code} (${t.client_name}) due ${formatDate(t.due_date)}`, link: `/tests/${t.id}`, level: t.due_date < td ? 'danger' : 'warning' });
-  for (const t of tests.filter((t) => t.status === 'returned')) reminders.push({ kind: 'Returned', text: `${t.report_name || t.billing_name} – ${t.code} needs correction`, link: `/tests/${t.id}`, level: 'warning' });
+    reminders.push({ kind: 'Test due', text: `${t.report_name || t.billing_name} – ${t.code} (${t.client_name}) due ${formatDate(t.due_date)}`, link: `/tests/${t.id}`, level: t.due_date < td ? 'danger' : 'warning', ref: `due:test:${t.id}:${t.due_date}:${t.due_date < td ? 'late' : 'today'}` });
+  for (const t of tests.filter((t) => t.status === 'returned')) reminders.push({ kind: 'Returned', text: `${t.report_name || t.billing_name} – ${t.code} needs correction`, link: `/tests/${t.id}`, level: 'warning', ref: `returned:test:${t.id}` });
   for (const q of quotes) {
     const days = Math.floor((Date.now() - new Date(q.date + 'T00:00:00').getTime()) / 86400000);
-    if (days >= 7) reminders.push({ kind: 'Quote follow-up', text: `${q.number} to ${q.client_name} sent ${days} days ago`, link: `/documents/${q.id}`, level: 'info' });
+    if (days >= 7) reminders.push({ kind: 'Quote follow-up', text: `${q.number} to ${q.client_name} sent ${days} days ago`, link: `/documents/${q.id}`, level: 'info', ref: `quote:${q.id}:${Math.floor(days / 7)}` });
   }
   const since = new Date(Date.now() - 3 * 86400000).toISOString();
   for (const a of await db('audit_log').where({ company_id: cid, entity: 'user', entity_id: req.user.id, action: 'new device sign-in' }).andWhere('at', '>=', since).orderBy('id', 'desc').limit(3)) {
     const det = parseJson<Record<string, string>>(a.detail, {});
-    reminders.push({ kind: 'New sign-in', text: `Your account signed in on ${det.device ?? 'a new device'} (${det.ip ?? ''}) ${new Date(a.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}. Not you? Change your password.`, link: '/account', level: 'warning' });
+    reminders.push({ kind: 'New sign-in', text: `Your account signed in on ${det.device ?? 'a new device'} (${det.ip ?? ''}) ${new Date(a.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}. Not you? Change your password.`, link: '/account', level: 'warning', ref: `signin:${a.id}` });
   }
-  for (const f of await followUpsDue(cid, req.user.id)) reminders.push({ kind: `${f.type} due`, text: `${f.subject}${f.client_name ? ` – ${f.client_name}` : ''} (${formatDate(f.due_date)})`, link: '/followups', level: f.due_date < td ? 'danger' : 'warning' });
-  for (const e of eq.filter((e) => e.due_date <= in30)) reminders.push({ kind: 'Calibration', text: `${e.name} calibration ${e.due_date < td ? 'expired' : 'due'} ${formatDate(e.due_date)}`, link: '/equipment', level: e.due_date < td ? 'danger' : 'warning' });
+  for (const f of await followUpsDue(cid, req.user.id)) reminders.push({ kind: `${f.type} due`, text: `${f.subject}${f.client_name ? ` – ${f.client_name}` : ''} (${formatDate(f.due_date)})`, link: '/followups', level: f.due_date < td ? 'danger' : 'warning', ref: `followup:${f.id}:${f.due_date}` });
+  for (const e of eq.filter((e) => e.due_date <= in30)) reminders.push({ kind: 'Calibration', text: `${e.name} calibration ${e.due_date < td ? 'expired' : 'due'} ${formatDate(e.due_date)}`, link: '/equipment', level: e.due_date < td ? 'danger' : 'warning', ref: `cal:${e.id}:${e.due_date}:${e.due_date < td ? 'expired' : 'due'}` });
   for (const o of due) {
     const days = Math.floor((Date.now() - new Date(o.date + 'T00:00:00').getTime()) / 86400000);
-    if (days > 30 && o.balance > 0.5) reminders.push({ kind: 'Payment overdue', text: `Invoice ${o.number}: ₹${Math.round(o.balance).toLocaleString('en-IN')} outstanding for ${days} days`, link: `/documents/${o.id}`, level: 'danger' });
+    if (days > 30 && o.balance > 0.5) reminders.push({ kind: 'Payment overdue', text: `Invoice ${o.number}: ₹${Math.round(o.balance).toLocaleString('en-IN')} outstanding for ${days} days`, link: `/documents/${o.id}`, level: 'danger', ref: `overdue:${o.id}:${Math.floor(days / 15)}` });
   }
+  const reads = new Set((await db('notification_reads').where({ user_id: req.user.id }).whereIn('ref', reminders.map((r) => r.ref ?? '')).select('ref')).map((r: { ref: string }) => r.ref));
+  const marked = reminders.map((r) => ({ ...r, read: reads.has(r.ref ?? '') }));
   return {
     counts: {
       testsToDo: tests.filter((t) => ['pending', 'in_progress', 'returned'].includes(t.status)).length,
@@ -536,6 +565,7 @@ finance.get('/dashboard', h(async (req) => {
       revenueMonth: invoices.reduce((s, i) => s + Number(i.total), 0),
       outstanding: Math.round(due.reduce((s, o) => s + o.balance, 0)),
     },
-    reminders,
+    reminders: marked,
+    unread: marked.filter((r) => !r.read).length,
   };
 }));

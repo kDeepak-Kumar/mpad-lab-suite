@@ -151,3 +151,15 @@ table.grid-input th { white-space: normal; min-width: 64px; }
 .lv-card.row-click:active { background: #f2f5fa; }
 @media screen { .offscreen { position: absolute !important; left: -10000px !important; top: 0; width: 900px; } }
 @media print { .offscreen { position: static !important; } }
+.nav-group { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: #98a2b3; padding: 14px 12px 5px; border-radius: 6px; }
+.nav-group:hover { color: #475467; }
+.nav-group span:first-child { flex: 1; text-align: left; }
+.nav-group.here { color: #1d5598; }
+.nav-group-count { font-size: 10px; background: #eef1f5; color: #667085; border-radius: 10px; padding: 0 6px; letter-spacing: 0; }
+/* drag & drop reordering */
+.drag-src { opacity: .45; }
+.drag-over-above { box-shadow: inset 0 3px 0 #2a78d6; }
+.drag-over-below { box-shadow: inset 0 -3px 0 #2a78d6; }
+body.dragging-rows, body.dragging-rows * { cursor: grabbing !important; user-select: none !important; }
+.drag-handle { color: #98a2b3; display: inline-flex; padding: 2px; border-radius: 4px; }
+.drag-handle:hover { color: #475467; background: #eef1f5; }

@@ -1,12 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from 'react';
 import { Navigate, NavLink as RLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { ActionIcon, AppShell, Avatar, Burger, Center, Group, Indicator, Loader, Menu, NavLink, ScrollArea, Text, Badge, Tooltip, Kbd, UnstyledButton } from '@mantine/core';
+import { ActionIcon, AppShell, Avatar, Burger, Button, Center, Group, Indicator, Loader, Menu, NavLink, ScrollArea, Text, Badge, Tooltip, Kbd, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconLayoutDashboard, IconUsers, IconFileDollar, IconClipboardList, IconFlask, IconFileCertificate, IconReceipt, IconCash,
   IconBook, IconListDetails, IconSettings, IconLogout, IconPlus, IconBox, IconTool, IconTemplate, IconUserCog, IconChecklist,
-  IconSearch, IconChartBar, IconAdjustments, IconPhoneCall, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2,
+  IconSearch, IconChartBar, IconAdjustments, IconPhoneCall, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
@@ -42,6 +42,7 @@ const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
+const GstPage = page(() => import('./pages/Gst'), 'GstPage');
 const Required2fa = page(() => import('./pages/Account'), 'Required2fa');
 
 export { useMe };
@@ -52,23 +53,24 @@ const NAV: NavItem[] = [
   { label: 'Home', to: '/', tab: 'home', icon: IconLayoutDashboard },
   { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartBar },
   { label: 'Clients', to: '/clients', tab: 'clients', icon: IconUsers, section: 'Sales' },
-  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconPhoneCall },
-  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar },
-  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardList },
+  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar, section: 'Sales' },
+  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardList, section: 'Sales' },
+  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconPhoneCall, section: 'Sales' },
   { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconBox, section: 'Laboratory' },
-  { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask },
-  { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconChecklist },
-  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconFileCertificate },
+  { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask, section: 'Laboratory' },
+  { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconChecklist, section: 'Laboratory' },
+  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconFileCertificate, section: 'Laboratory' },
+  { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconTool, section: 'Laboratory' },
   { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconReceipt, section: 'Accounts' },
-  { label: 'Payments', to: '/payments', tab: 'payments', icon: IconCash },
-  { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook },
-  { label: 'Registers', to: '/registers', tab: 'registers', icon: IconListDetails },
+  { label: 'Payments', to: '/payments', tab: 'payments', icon: IconCash, section: 'Accounts' },
+  { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook, section: 'Accounts' },
+  { label: 'GST returns', to: '/gst', tab: 'gst', icon: IconReceiptTax, section: 'Accounts' },
+  { label: 'Registers', to: '/registers', tab: 'registers', icon: IconListDetails, section: 'Accounts' },
   { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconSettings, section: 'Settings' },
-  { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconFileDollar },
-  { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconTool },
-  { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate },
-  { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog },
-  { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustments },
+  { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconFileDollar, section: 'Settings' },
+  { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate, section: 'Settings' },
+  { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog, section: 'Settings' },
+  { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustments, section: 'Settings' },
 ];
 
 export function App() {
@@ -101,7 +103,7 @@ function Shell() {
   const { data: dash } = useApi<any>('/dashboard');
   const items = NAV.filter((n) => hasTab(me, n.tab));
   const logout = async () => { await api('/auth/logout', { method: 'POST' }); window.location.href = '/login'; };
-  const reminders = dash?.reminders ?? [];
+  const reminders: any[] = dash?.reminders ?? [];
 
   // command palette: navigate, create and search records
   const [query, setQuery] = useState('');
@@ -147,18 +149,7 @@ function Shell() {
           </UnstyledButton>
           <Group gap="sm" wrap="nowrap">
             <ActionIcon variant="subtle" color="gray" hiddenFrom="sm" onClick={() => spotlight.open()}><IconSearch size={20} /></ActionIcon>
-            <Menu position="bottom-end" width={380} shadow="lg">
-              <Menu.Target>
-                <Indicator disabled={!reminders.length} label={reminders.length} size={16} color="red" offset={4}>
-                  <ActionIcon variant="subtle" color="gray" size="lg"><IconBell size={20} /></ActionIcon>
-                </Indicator>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Label>Reminders</Menu.Label>
-                {!reminders.length && <Text size="sm" c="dimmed" p="sm">All clear.</Text>}
-                {reminders.slice(0, 12).map((r: any, i: number) => <Menu.Item key={i} onClick={() => nav(r.link)}><Text size="xs" c={r.level === 'danger' ? 'red' : r.level === 'warning' ? 'orange' : 'blue'} fw={600}>{r.kind}</Text><Text size="sm">{r.text}</Text></Menu.Item>)}
-              </Menu.Dropdown>
-            </Menu>
+            <NotificationBell reminders={reminders} />
             <Menu position="bottom-end" shadow="lg">
               <Menu.Target><Avatar color="brand" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
               <Menu.Dropdown>
@@ -172,20 +163,7 @@ function Shell() {
         </Group>
       </AppShell.Header>
       <AppShell.Navbar className="no-print" p={6}>
-        <ScrollArea>
-          {items.map((n) => {
-            const active = n.to === '/' ? loc.pathname === '/' : loc.pathname === n.to || (loc.pathname.startsWith(n.to + '/') && !NAV.some((o) => o.to !== n.to && o.to.startsWith(n.to) && loc.pathname.startsWith(o.to)));
-            return (
-              <div key={n.to}>
-                {n.section && !mini && <div className="nav-section">{n.section}</div>}
-                {n.section && mini && <div style={{ height: 10 }} />}
-                <Tooltip label={n.label} position="right" disabled={!mini}>
-                  <NavLink component={RLink} to={n.to} className="nav-link" label={mini ? null : n.label} leftSection={<n.icon size={19} stroke={1.7} />} active={active} py={7} />
-                </Tooltip>
-              </div>
-            );
-          })}
-        </ScrollArea>
+        <ScrollArea><SideNav items={items} mini={mini} /></ScrollArea>
       </AppShell.Navbar>
       <AppShell.Main>
         <Suspense fallback={<Loading />}>
@@ -220,6 +198,7 @@ function Shell() {
             <Route path="/settings/templates/:id" element={<TemplateDesigner />} />
             <Route path="/setup" element={<SetupPage />} />
             <Route path="/account" element={<AccountPage />} />
+            <Route path="/gst" element={<GstPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>
@@ -245,5 +224,90 @@ function BottomNav({ items, onMore }: { items: NavItem[]; onMore: () => void }) 
       })}
       <button type="button" onClick={onMore}><IconMenu2 size={22} stroke={1.7} /><span>More</span></button>
     </nav>
+  );
+}
+
+/**
+ * Sidebar: Home and Analytics always visible; Sales, Laboratory, Accounts and Settings fold open/closed.
+ * The group of the screen you are on opens automatically; your choices are remembered on this device.
+ */
+function SideNav({ items, mini }: { items: NavItem[]; mini: boolean }) {
+  const loc = useLocation();
+  const [open, setOpen] = useLocalStorage<Record<string, boolean>>({ key: 'nav-groups', defaultValue: { Sales: true, Laboratory: true, Accounts: true, Settings: false } });
+  const isActive = (n: NavItem) => (n.to === '/' ? loc.pathname === '/' : loc.pathname === n.to || (loc.pathname.startsWith(n.to + '/') && !NAV.some((o) => o.to !== n.to && o.to.startsWith(n.to) && loc.pathname.startsWith(o.to))));
+  const top = items.filter((n) => !n.section);
+  const groups = [...new Set(items.filter((n) => n.section).map((n) => n.section!))];
+  const link = (n: NavItem) => (
+    <Tooltip key={n.to} label={n.label} position="right" disabled={!mini}>
+      <NavLink component={RLink} to={n.to} className="nav-link" label={mini ? null : n.label} leftSection={<n.icon size={19} stroke={1.7} />} active={isActive(n)} py={7} />
+    </Tooltip>
+  );
+  return (
+    <>
+      {top.map(link)}
+      {groups.map((g) => {
+        const list = items.filter((n) => n.section === g);
+        const here = list.some(isActive);
+        const shown = mini || here || open[g] !== false;
+        return (
+          <div key={g}>
+            {mini ? <div style={{ height: 10, borderTop: '1px solid var(--line)', margin: '8px 10px 0' }} /> : (
+              <UnstyledButton className={`nav-group${here ? ' here' : ''}`} onClick={() => setOpen({ ...open, [g]: !shown })} aria-expanded={shown}>
+                <span>{g}</span>
+                {!shown && <span className="nav-group-count">{list.length}</span>}
+                <IconChevronRight size={14} style={{ transform: shown ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+              </UnstyledButton>
+            )}
+            {shown && list.map(link)}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** Bell: unread notifications first; click one to open it (marks it read); "Mark all as read" clears the count. */
+function NotificationBell({ reminders }: { reminders: any[] }) {
+  const nav = useNavigate();
+  const [local, setLocal] = useState<Record<string, boolean>>({});
+  const isRead = (r: any) => local[r.ref] ?? r.read;
+  const unread = reminders.filter((r) => !isRead(r));
+  const read = reminders.filter((r) => isRead(r));
+  const mark = async (refs: string[], value = true) => {
+    setLocal((x) => ({ ...x, ...Object.fromEntries(refs.map((k) => [k, value])) }));
+    await api(value ? '/notifications/read' : '/notifications/unread', { body: { refs }, quiet: true }).catch(() => undefined);
+  };
+  const color = (l: string) => (l === 'danger' ? 'red' : l === 'warning' ? 'orange' : 'blue');
+  const item = (r: any, i: number, done: boolean) => (
+    <Menu.Item key={r.ref ?? i} onClick={() => { if (r.ref && !done) mark([r.ref]); nav(r.link); }} style={{ opacity: done ? 0.6 : 1 }}
+      rightSection={r.ref && (
+        <Tooltip label={done ? 'Mark as unread' : 'Mark as read'}>
+          <ActionIcon size="sm" variant="subtle" color="gray" onClick={(e) => { e.stopPropagation(); mark([r.ref], !done); }}>{done ? <IconMailOpened size={15} /> : <IconCheck size={15} />}</ActionIcon>
+        </Tooltip>
+      )}>
+      <Group gap={6} wrap="nowrap">{!done && <span style={{ width: 7, height: 7, borderRadius: 4, background: `var(--mantine-color-${color(r.level)}-6)`, flex: 'none' }} />}<Text size="xs" c={color(r.level)} fw={600}>{r.kind}</Text></Group>
+      <Text size="sm">{r.text}</Text>
+    </Menu.Item>
+  );
+  return (
+    <Menu position="bottom-end" width={400} shadow="lg" closeOnItemClick>
+      <Menu.Target>
+        <Indicator disabled={!unread.length} label={unread.length} size={16} color="red" offset={4}>
+          <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Notifications"><IconBell size={20} /></ActionIcon>
+        </Indicator>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Group justify="space-between" px="sm" py={6}>
+          <Text size="sm" fw={650}>Notifications</Text>
+          {unread.length > 0 && <Button size="compact-xs" variant="subtle" onClick={() => mark(unread.map((r) => r.ref).filter(Boolean))}>Mark all as read</Button>}
+        </Group>
+        <ScrollArea.Autosize mah={460}>
+          {!reminders.length && <Text size="sm" c="dimmed" p="sm">All clear.</Text>}
+          {reminders.length > 0 && !unread.length && <Text size="sm" c="dimmed" px="sm" pb="xs">You're all caught up.</Text>}
+          {unread.slice(0, 20).map((r, i) => item(r, i, false))}
+          {read.length > 0 && <><Menu.Divider /><Menu.Label>Earlier</Menu.Label>{read.slice(0, 15).map((r, i) => item(r, i, true))}</>}
+        </ScrollArea.Autosize>
+      </Menu.Dropdown>
+    </Menu>
   );
 }

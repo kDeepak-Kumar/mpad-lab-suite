@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, useId } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Accordion, ActionIcon, Alert, Badge, Button, Checkbox, Code, Drawer, Grid, Group, Modal, NumberInput, Paper, ScrollArea, Select, SimpleGrid,
   Stack, Table, Tabs, Text, TextInput, Textarea, Tooltip,
 } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconHelp, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconGripVertical, IconHelp, IconPlus, IconTrash } from '@tabler/icons-react';
+import { moveItem, useDragReorder } from '../../components/useDragReorder';
 import {
   EQUIPMENT_CATEGORIES, TEMPLATE_CATEGORIES, evaluateObservation, exampleInput, formatValue, formulaIssue, renderSampleCalc, templateNames, validateTemplate,
   type ChartDef, type Grid as ObsGrid, type GridColumn, type ObservationTemplate,
@@ -22,15 +23,16 @@ function RowsEditor<T extends Record<string, any>>({ rows, cols, onChange, names
   rows: T[]; cols: Col<T>[]; onChange: (rows: T[]) => void; names?: Set<string>; blank: T; addLabel?: string; preview?: (row: T) => string;
 }) {
   const set = (i: number, k: string, v: unknown) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-  const move = (i: number, d: number) => { const n = [...rows]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); onChange(n); };
+  const group = useId();
+  const dnd = useDragReorder(group, (from, to) => onChange(moveItem(rows, from, to)));
   return (
     <Stack gap={4}>
       <ScrollArea type="auto">
         <Table withTableBorder withColumnBorders verticalSpacing={2} horizontalSpacing={4} style={{ minWidth: 640 }}>
-          <Table.Thead><Table.Tr>{cols.map((c) => <Table.Th key={c.key} style={{ width: c.width, fontSize: 12 }}>{c.help ? <Tooltip label={c.help} multiline w={260}><span style={{ borderBottom: '1px dotted' }}>{c.label}</span></Tooltip> : c.label}</Table.Th>)}{preview && <Table.Th style={{ fontSize: 12, width: 110 }}>Example value</Table.Th>}<Table.Th style={{ width: 84 }} /></Table.Tr></Table.Thead>
+          <Table.Thead><Table.Tr>{cols.map((c) => <Table.Th key={c.key} style={{ width: c.width, fontSize: 12 }}>{c.help ? <Tooltip label={c.help} multiline w={260}><span style={{ borderBottom: '1px dotted' }}>{c.label}</span></Tooltip> : c.label}</Table.Th>)}{preview && <Table.Th style={{ fontSize: 12, width: 110 }}>Example value</Table.Th>}<Table.Th style={{ width: 60 }} /></Table.Tr></Table.Thead>
           <Table.Tbody>
             {rows.map((r, i) => (
-              <Table.Tr key={i}>
+              <Table.Tr key={i} {...dnd.rowProps(i)}>
                 {cols.map((c) => {
                   const v = r[c.key];
                   const issue = c.type === 'formula' && names ? formulaIssue(String(v ?? ''), names) : null;
@@ -48,8 +50,7 @@ function RowsEditor<T extends Record<string, any>>({ rows, cols, onChange, names
                 {preview && <Table.Td style={{ fontSize: 12, color: '#1d5598', fontVariantNumeric: 'tabular-nums' }}>{preview(r)}</Table.Td>}
                 <Table.Td>
                   <Group gap={0} wrap="nowrap">
-                    <ActionIcon size="sm" variant="subtle" disabled={i === 0} onClick={() => move(i, -1)}><IconArrowUp size={14} /></ActionIcon>
-                    <ActionIcon size="sm" variant="subtle" disabled={i === rows.length - 1} onClick={() => move(i, 1)}><IconArrowDown size={14} /></ActionIcon>
+                    <span className="drag-handle" {...dnd.handleProps(i)}><IconGripVertical size={15} /></span>
                     <ActionIcon size="sm" variant="subtle" color="red" onClick={() => onChange(rows.filter((_, j) => j !== i))}><IconTrash size={14} /></ActionIcon>
                   </Group>
                 </Table.Td>

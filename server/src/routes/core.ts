@@ -26,6 +26,23 @@ core.get('/alerts/preview', allow('settings'), h(async (req) => {
   return collectAlerts(req.user.company_id, (company.alerts ?? {}) as AlertSettings);
 }));
 core.get('/system/storage', allow('settings'), h(async () => storageInfo()));
+/** Full backup of everything (all records, settings, attachments) as one compressed file. Admins / owner only. */
+core.get('/system/backup', allow('settings'), async (req, res) => {
+  try {
+    if (!isAdmin(req.user) && req.user.role !== 'owner') { res.status(403).json({ error: 'Only the System Administrator or Owner can download a full backup' }); return; }
+    if ((process.env.DB_CLIENT || 'sqlite') !== 'sqlite') { res.status(400).json({ error: 'This server uses MySQL – download the backup from the hosting control panel (phpMyAdmin / Backup).' }); return; }
+    const os = await import('node:os'); const fsP = await import('node:fs'); const zlib = await import('node:zlib'); const pathM = await import('node:path'); const crypto = await import('node:crypto');
+    const tmp = pathM.join(os.tmpdir(), `suite-backup-${crypto.randomBytes(6).toString('hex')}.sqlite`);
+    await db.raw(`VACUUM INTO '${tmp}'`);
+    const stamp = new Date().toLocaleString('sv-SE', { timeZone: process.env.APP_TIMEZONE || 'Asia/Kolkata' }).replace(/[: ]/g, '-').slice(0, 16);
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="lab-suite-backup-${stamp}.sqlite.gz"`);
+    await audit(db, req.user, 'company', req.user.company_id, 'full backup downloaded');
+    const src = fsP.createReadStream(tmp);
+    src.pipe(zlib.createGzip({ level: 6 })).pipe(res).on('finish', () => fsP.unlink(tmp, () => undefined));
+    src.on('error', () => fsP.unlink(tmp, () => undefined));
+  } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+});
 core.post('/alerts/run', allow('settings'), h(async (req) => {
   try { return await runAlerts(req.user.company_id, { force: true }); } catch (e) { throw new HttpError(400, (e as Error).message); }
 }));

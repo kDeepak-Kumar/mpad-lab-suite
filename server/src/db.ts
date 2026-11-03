@@ -226,6 +226,30 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '006_gst_notifications',
+    up: async (k) => {
+      await k.schema.createTable('gst_entries', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('period', 7).notNullable(); t.string('kind', 10).notNullable();
+        t.string('source', 10).notNullable(); t.integer('document_id').unsigned().nullable();
+        t.string('doc_no', 60); t.string('doc_date', 10); t.string('party', 200); t.string('gstin', 20); t.string('pos', 2); t.string('sac', 12);
+        t.decimal('rate', 6, 2).defaultTo(0); t.decimal('taxable', 14, 2).defaultTo(0); t.decimal('cgst', 14, 2).defaultTo(0); t.decimal('sgst', 14, 2).defaultTo(0);
+        t.decimal('igst', 14, 2).defaultTo(0); t.decimal('cess', 14, 2).defaultTo(0); t.decimal('total', 14, 2).defaultTo(0);
+        t.boolean('itc_eligible').defaultTo(true); t.boolean('edited').defaultTo(false); t.boolean('excluded').defaultTo(false); t.string('note', 300);
+        t.integer('created_by').unsigned().nullable(); t.string('created_at', 32); t.string('updated_at', 32);
+        t.index(['company_id', 'period', 'kind']); t.index(['company_id', 'document_id']);
+      });
+      await k.schema.createTable('gst_periods', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('period', 7).notNullable(); t.string('status', 12).defaultTo('open');
+        t.string('note', 500); t.integer('updated_by').unsigned().nullable(); t.string('updated_at', 32);
+        t.unique(['company_id', 'period']);
+      });
+      await k.schema.createTable('notification_reads', (t) => {
+        t.increments('id'); t.integer('user_id').unsigned().notNullable(); t.string('ref', 120).notNullable(); t.string('read_at', 32);
+        t.unique(['user_id', 'ref']);
+      });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

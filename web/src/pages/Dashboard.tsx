@@ -43,7 +43,7 @@ export function Dashboard() {
         <Grid.Col span={{ base: 12, lg: can('viewAnalytics') ? 7 : 12 }}>
           {can('viewAnalytics') && <AskAI onOpen={() => nav('/analytics?tab=builder')} />}
           <Paper withBorder p="md">
-            <Group mb="sm"><ThemeIcon variant="light" radius="md"><IconBell size={16} /></ThemeIcon><Text fw={600}>Reminders</Text><Badge variant="light">{data.reminders.length}</Badge></Group>
+            <Group mb="sm"><ThemeIcon variant="light" radius="md"><IconBell size={16} /></ThemeIcon><Text fw={600}>Reminders</Text><Badge variant="light">{data.unread ?? data.reminders.length} new</Badge></Group>
             <Stack gap={4}>
               {data.reminders.length === 0 && <Text size="sm" c="dimmed">All clear. No overdue tests, follow-ups, calibrations or payments.</Text>}
               {data.reminders.map((r: any, i: number) => (

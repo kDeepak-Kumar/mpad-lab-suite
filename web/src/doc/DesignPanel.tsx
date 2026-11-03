@@ -1,5 +1,6 @@
 import { ActionIcon, Button, Group, NumberInput, Paper, ScrollArea, Select, Stack, Switch, Text, TextInput, Textarea, ColorInput, Divider, SegmentedControl } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconEye, IconEyeOff } from '@tabler/icons-react';
+import { IconEye, IconEyeOff, IconGripVertical } from '@tabler/icons-react';
+import { moveItem, useDragReorder } from '../components/useDragReorder';
 import { BLOCK_LABELS, type DocOverrides, type DocTemplate } from '@suite/shared';
 
 /**
@@ -17,10 +18,7 @@ export function DesignPanel({ base, overrides, onChange, selected, onSelect, onS
     const cur = overrides.blocks?.[id] ?? {};
     onChange({ ...overrides, blocks: { ...(overrides.blocks ?? {}), [id]: { ...cur, ...(patch.visible !== undefined ? { visible: patch.visible } : {}), ...(patch.props ? { props: { ...(cur.props ?? {}), ...patch.props } } : {}) } } });
   };
-  const move = (id: string, dir: -1 | 1) => {
-    const o = [...order]; const i = o.indexOf(id); const j = i + dir;
-    if (j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; onChange({ ...overrides, order: o });
-  };
+  const dnd = useDragReorder('doc-blocks', (from, to) => onChange({ ...overrides, order: moveItem(blocks.map((b) => b.id), from, to) }), readOnly);
   const pageS = { ...base.page, ...(overrides.page ?? {}) };
   const setPage = (k: string, v: unknown) => onChange({ ...overrides, page: { ...(overrides.page ?? {}), [k]: v } });
   const sel = selected ? eff(selected) : null;
@@ -43,15 +41,14 @@ export function DesignPanel({ base, overrides, onChange, selected, onSelect, onS
             <ColorInput size="xs" disabled={readOnly} value={pageS.accent} onChange={(v) => setPage('accent', v)} />
           </Group>
           <Switch size="xs" disabled={readOnly} label="Letterhead mode (print on pre-printed letterhead)" checked={pageS.letterheadMode} onChange={(e) => setPage('letterheadMode', e.currentTarget.checked)} />
-          <Divider label="Blocks – click one to edit" labelPosition="left" />
+          <Divider label="Blocks – drag ⋮⋮ to reorder, click to edit" labelPosition="left" />
           {blocks.map((b, i) => {
             const e = eff(b.id);
             return (
-              <Group key={b.id} gap={4} wrap="nowrap" p={4} style={{ borderRadius: 6, background: selected === b.id ? '#eef2f9' : undefined, cursor: 'pointer' }} onClick={() => onSelect(b.id)}>
+              <Group key={b.id} gap={4} wrap="nowrap" p={4} {...dnd.rowProps(i)} style={{ borderRadius: 6, background: selected === b.id ? '#eef2f9' : undefined, cursor: 'pointer' }} onClick={() => onSelect(b.id)}>
+                {!readOnly && <span className="drag-handle" {...dnd.handleProps(i)}><IconGripVertical size={15} /></span>}
                 <ActionIcon size="sm" variant="subtle" disabled={readOnly} onClick={(ev) => { ev.stopPropagation(); setBlock(b.id, { visible: !e.visible }); }}>{e.visible ? <IconEye size={15} /> : <IconEyeOff size={15} />}</ActionIcon>
                 <Text size="sm" style={{ flex: 1 }} c={e.visible ? undefined : 'dimmed'}>{BLOCK_LABELS[b.type] ?? b.type}{b.type === 'text' ? `: ${String(e.props.text ?? '').slice(0, 18)}…` : ''}</Text>
-                <ActionIcon size="sm" variant="subtle" disabled={readOnly || i === 0} onClick={(ev) => { ev.stopPropagation(); move(b.id, -1); }}><IconArrowUp size={14} /></ActionIcon>
-                <ActionIcon size="sm" variant="subtle" disabled={readOnly || i === blocks.length - 1} onClick={(ev) => { ev.stopPropagation(); move(b.id, 1); }}><IconArrowDown size={14} /></ActionIcon>
               </Group>
             );
           })}

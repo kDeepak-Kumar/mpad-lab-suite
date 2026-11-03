@@ -282,6 +282,11 @@ function SecuritySettings() {
           onChange={async (e) => { setBusy(true); try { await api('/account/admin/policy', { body: { require2fa: e.currentTarget.checked } }); ok('Security policy updated'); window.location.reload(); } finally { setBusy(false); } }} />
       </Paper>
       <Paper withBorder p="md">
+        <Text fw={600}>Full backup</Text>
+        <Text size="xs" c="dimmed" mb="sm">Download everything – clients, documents, observation sheets, settings and attachments – as one file. Keep a copy every month outside the server (e.g. on your Google Drive). The server also makes its own nightly backups.</Text>
+        <Button variant="light" component="a" href="/api/system/backup" leftSection={<IconDownload size={16} />}>Download full backup</Button>
+      </Paper>
+      <Paper withBorder p="md">
         <Text fw={600}>Sign-in alerts</Text>
         <Text size="sm">Users get an email (and a notification in the app) when their account signs in on a new device or browser. Lost phone? An administrator can reset a user's two-step verification under Users & roles.</Text>
       </Paper>
