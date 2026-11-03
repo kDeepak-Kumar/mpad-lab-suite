@@ -11,21 +11,13 @@ import { cleanWrite, deleteMeta, getMeta, mergeCustom, saveMeta, stripHidden, ty
 export const core = Router();
 
 // ---------- auth ----------
-core.post('/auth/login', h(async (req, res) => {
-  const { email, password } = z.object({ email: z.string().email(), password: z.string().min(1) }).parse(req.body);
-  const u = await db('users').where({ email: email.toLowerCase(), active: true }).first();
-  if (!u || !(await checkPassword(password, u.password_hash))) throw new HttpError(401, 'Email or password is incorrect');
-  setSession(res, u);
-  return { id: u.id, name: u.name, role: u.role };
-}));
-core.post('/auth/logout', h(async (_req, res) => { clearSession(res); return { ok: true }; }));
-
 core.use(requireAuth);
 
 core.get('/auth/me', h(async (req) => {
   const company = await getCompany(req.user.company_id);
   const { roleDef, ...user } = req.user;
-  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo } };
+  const u = await db('users').where({ id: req.user.id }).first('totp_enabled');
+  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo }, security: { totpEnabled: Boolean(u?.totp_enabled), required: Boolean((company as any).security?.require2fa) } };
 }));
 
 // ---------- email alerts (SLA / calibration) ----------
@@ -83,7 +75,7 @@ core.delete('/meta/:kind/:key', h(async (req) => {
 
 // ---------- users ----------
 core.get('/users', h(async (req) => db('users').where({ company_id: req.user.company_id })
-  .select('id', 'name', 'email', 'role', 'designation', 'qualifications', 'phone', 'active', 'signature')));
+  .select('id', 'name', 'email', 'role', 'designation', 'qualifications', 'phone', 'active', 'signature', 'totp_enabled')));
 const userSchema = z.object({
   name: z.string().min(1), email: z.string().email(), role: z.string(), designation: z.string().optional().nullable(),
   qualifications: z.string().optional().nullable(), phone: z.string().optional().nullable(), signature: z.string().optional().nullable(),

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import { ActionIcon, Badge, Button, Checkbox, Group, Menu, MultiSelect, Pagination, Paper, Popover, Select, Stack, Text, TextInput, Tooltip, Modal, Switch } from '@mantine/core';
 import { IconAdjustmentsHorizontal, IconArrowDown, IconArrowUp, IconColumns3, IconDeviceFloppy, IconDownload, IconFilter, IconSearch, IconTrash, IconX } from '@tabler/icons-react';
 import { api, dmy, downloadCsv, money, ok } from '../api';
@@ -37,6 +38,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
   const [visible, setVisible] = useState<string[]>(columns.filter((c) => !c.hidden).map((c) => c.key));
   const [page, setPage] = useState(1);
   const [saveOpen, setSaveOpen] = useState(false);
+  const phone = useMediaQuery('(max-width: 767px)');
 
   useEffect(() => {
     const v = saved.find((x) => x.key === view)?.data as ViewDef | undefined;
@@ -106,9 +108,9 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
     <Paper withBorder radius="lg" style={{ overflow: 'hidden' }}>
       <Group p="sm" gap="xs" justify="space-between" style={{ borderBottom: '1px solid var(--line)' }} wrap="wrap">
         <Group gap="xs" wrap="wrap">
-          <Select size="xs" w={190} value={view} onChange={(v) => setView(v ?? '__all')} allowDeselect={false}
+          <Select className="hide-mobile" size="xs" w={190} value={view} onChange={(v) => setView(v ?? '__all')} allowDeselect={false}
             data={[{ value: '__all', label: 'All records' }, ...saved.map((v) => ({ value: v.key, label: `${v.data.name}${v.owner_id ? '' : ' (shared)'}` }))]} />
-          <TextInput size="xs" w={220} placeholder="Search this list" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
+          <TextInput size="xs" w={phone ? '100%' : 220} style={phone ? { flex: '1 1 100%' } : undefined} placeholder="Search this list" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
             rightSection={search ? <ActionIcon size="xs" variant="subtle" onClick={() => setSearch('')}><IconX size={12} /></ActionIcon> : null} />
           {quickFilters?.map((q) => <Button key={q.label} size="compact-xs" variant={JSON.stringify(filters) === JSON.stringify(q.filters) ? 'filled' : 'light'} onClick={() => setFilters(JSON.stringify(filters) === JSON.stringify(q.filters) ? [] : q.filters)}>{q.label}</Button>)}
           <Popover width={340} position="bottom-start" shadow="lg">
@@ -135,21 +137,22 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
         <Group gap={6}>
           <Text size="xs" c="dimmed">{filtered.length} of {rows?.length ?? 0}</Text>
           <Menu shadow="lg" closeOnItemClick={false}>
-            <Menu.Target><Tooltip label="Columns"><ActionIcon variant="default" size="md"><IconColumns3 size={16} /></ActionIcon></Tooltip></Menu.Target>
+            <Menu.Target><Tooltip label="Columns" className="hide-mobile"><ActionIcon variant="default" size="md"><IconColumns3 size={16} /></ActionIcon></Tooltip></Menu.Target>
             <Menu.Dropdown>{columns.map((c) => <Menu.Item key={c.key}><Checkbox size="xs" label={c.label} checked={visible.includes(c.key)} onChange={(e) => setVisible((v) => (e.currentTarget.checked ? [...v, c.key] : v.filter((x) => x !== c.key)))} /></Menu.Item>)}</Menu.Dropdown>
           </Menu>
           <Menu shadow="lg">
-            <Menu.Target><Tooltip label="List view options"><ActionIcon variant="default" size="md"><IconAdjustmentsHorizontal size={16} /></ActionIcon></Tooltip></Menu.Target>
+            <Menu.Target><Tooltip label="List view options" className="hide-mobile"><ActionIcon variant="default" size="md"><IconAdjustmentsHorizontal size={16} /></ActionIcon></Tooltip></Menu.Target>
             <Menu.Dropdown>
               <Menu.Item leftSection={<IconDeviceFloppy size={14} />} onClick={() => setSaveOpen(true)}>Save as new view…</Menu.Item>
               {view !== '__all' && (saved.find((v) => v.key === view)?.owner_id === me.user.id || can('manageCustomization')) &&
                 <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={async () => { await api(`/meta/listview/${encodeURIComponent(view)}`, { method: 'DELETE' }); reloadMeta(); setView('__all'); }}>Delete this view</Menu.Item>}
             </Menu.Dropdown>
           </Menu>
-          <Button size="compact-sm" variant="default" leftSection={<IconDownload size={14} />} onClick={exportRows}>Export</Button>
+          <Button className="hide-mobile" size="compact-sm" variant="default" leftSection={<IconDownload size={14} />} onClick={exportRows}>Export</Button>
           {actions}
         </Group>
       </Group>
+      {phone ? <CardList shown={shown} rows={pageRows} cell={cell} onRow={onRow} loading={Boolean(loading && !rows)} emptyText={rows && !filtered.length ? (rows.length ? 'No records match these filters.' : empty ?? 'Nothing here yet.') : null} /> :
       <div className="lv-scroll">
         <table className="lv-table">
           <thead><tr>{shown.map((c) => (
@@ -171,7 +174,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
               {c.type === 'money' ? `₹${money(filtered.reduce((a, r) => a + Number(getVal(c, r) ?? 0), 0))}` : i === 0 ? 'Total' : ''}</td>)}</tr></tfoot>
           )}
         </table>
-      </div>
+      </div>}
       {pages > 1 && <Group justify="center" p="xs" style={{ borderTop: '1px solid var(--line)' }}><Pagination size="sm" total={pages} value={page} onChange={setPage} /></Group>}
       <SaveViewModal opened={saveOpen} onClose={() => setSaveOpen(false)} onSave={saveView} canShare={can('manageCustomization')} />
     </Paper>
@@ -199,4 +202,30 @@ export function useCustomCols(object: string): Col[] {
     key: `custom.${f.key}`, label: f.label, hidden: true, value: (r: any) => r.custom?.[f.key] ?? r.data?.custom?.[f.key],
     type: f.type === 'currency' ? 'money' : f.type === 'number' || f.type === 'integer' ? 'number' : f.type === 'date' ? 'date' : f.type === 'picklist' ? 'picklist' : 'text',
   }));
+}
+
+/** Phone layout: one card per record – title, status badges and the next few fields. */
+function CardList<T extends Record<string, any>>({ shown, rows, cell, onRow, loading, emptyText }: {
+  shown: Col<T>[]; rows: T[]; cell: (c: Col<T>, r: T) => ReactNode; onRow?: (r: T) => void; loading: boolean; emptyText: ReactNode | null;
+}) {
+  const badges = shown.filter((c) => ['status', 'badge', 'picklist'].includes(c.type ?? ''));
+  const plain = shown.filter((c) => !badges.includes(c) && c.key !== '_actions');
+  const [title, ...rest] = plain;
+  const actions = shown.find((c) => c.key === '_actions');
+  if (loading) return <Stack p="sm" gap="xs">{[0, 1, 2].map((i) => <div key={i} style={{ height: 64, borderRadius: 10, background: '#eef1f5' }} />)}</Stack>;
+  return (
+    <div className="lv-cards">
+      {rows.map((r, i) => (
+        <div key={(r.id as string) ?? i} className={`lv-card${onRow ? ' row-click' : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
+          <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
+            <Text fw={650} size="sm" style={{ minWidth: 0, wordBreak: 'break-word' }}>{title ? cell(title, r) : ''}</Text>
+            <Group gap={4} wrap="nowrap">{badges.map((c) => <span key={c.key}>{cell(c, r)}</span>)}</Group>
+          </Group>
+          {rest.slice(0, 3).map((c) => { const v = cell(c, r); return v === '' || v === null || v === undefined ? null : <Text key={c.key} size="xs" c="dimmed" lineClamp={2}><span style={{ color: '#98a2b3' }}>{c.label}:</span> <span style={{ color: '#344054' }}>{v}</span></Text>; })}
+          {actions && <div style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>{cell(actions, r)}</div>}
+        </div>
+      ))}
+      {emptyText && <Text c="dimmed" ta="center" size="sm" p="lg">{emptyText}</Text>}
+    </div>
+  );
 }

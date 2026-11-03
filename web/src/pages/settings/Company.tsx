@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor } from '@mantine/core';
+import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
+import { IconTrash, IconUpload, IconDownload } from '@tabler/icons-react';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
@@ -32,10 +33,10 @@ export function CompanySettings() {
     <>
       <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={<Button onClick={save}>Save settings</Button>} />
       <Tabs defaultValue="profile">
-        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="email">Email & alerts</Tabs.Tab></Tabs.List>
+        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="signatories">Signatories</Tabs.Tab><Tabs.Tab value="email">Email & alerts</Tabs.Tab><Tabs.Tab value="security">Security</Tabs.Tab><Tabs.Tab value="docs">Brochure & documents</Tabs.Tab></Tabs.List>
         <Tabs.Panel value="profile">
           <SimpleGrid cols={{ base: 1, md: 2 }}>
-            {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
+            {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('Short name (printed under the logo, e.g. MPAD)', 'shortName')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
             <Select label="State (for GST)" searchable data={INDIAN_STATES.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` }))} value={v.stateCode ?? null} onChange={(x) => set('stateCode', x)} />
             {T('Phone(s)', 'phone')}{T('Email', 'email')}{T('Website', 'website')}{T('Jurisdiction city', 'jurisdiction')}
             {T('Accreditation body', 'accreditation.body')}{T('Accreditation certificate no.', 'accreditation.certNo')}{T('Accreditation valid till', 'accreditation.validTill', { type: 'date' })}
@@ -48,7 +49,16 @@ export function CompanySettings() {
             {img('Accreditation symbol', 'accreditationLogo', 'Printed on reports for accredited tests. Follow the accreditation body’s rules for its use.')}
             {img('Company seal / stamp', 'seal', 'Applied automatically when a document is signed and issued')}
           </SimpleGrid>
-          <Text size="xs" c="dimmed" mt="sm">Personal signatures are uploaded per user under Users & roles, and are only applied by that user when they sign.</Text>
+          <Text size="xs" c="dimmed" mt="sm">Signatures are managed under the Signatories tab (or per user under Users & roles).</Text>
+          <Paper withBorder p="sm" mt="md">
+            <Text size="sm" fw={600}>Sign-in page</Text>
+            <Text size="xs" c="dimmed" mb="xs">The sign-in page shows the logo, name, tagline and accreditation from this page, plus up to four highlights.</Text>
+            <SimpleGrid cols={{ base: 1, md: 2 }}>
+              {[0, 1, 2, 3].map((i) => <TextInput key={i} label={`Highlight ${i + 1}`} placeholder={['NABL accredited testing laboratory', 'Field & lab testing under one roof', 'Traceable, verifiable reports', 'Hyderabad · since 2016'][i]}
+                value={v.login?.highlights?.[i] ?? ''} onChange={(e) => { const h = [...(v.login?.highlights ?? ['', '', '', ''])]; h[i] = e.currentTarget.value; set('login.highlights', h); }} />)}
+              <TextInput label="Brand colour (hex)" placeholder="#1f3a68" value={v.login?.accent ?? ''} onChange={(e) => set('login.accent', e.currentTarget.value)} />
+            </SimpleGrid>
+          </Paper>
         </Tabs.Panel>
         <Tabs.Panel value="bank">
           <SimpleGrid cols={{ base: 1, md: 2 }}>{T('Account name', 'bank.name')}{T('Bank', 'bank.bank')}{T('Branch', 'bank.branch')}{T('IFSC', 'bank.ifsc')}{T('Account number', 'bank.account')}{T('UPI ID (optional)', 'bank.upi')}</SimpleGrid>
@@ -101,6 +111,9 @@ export function CompanySettings() {
           </SimpleGrid>
         </Tabs.Panel>
         <Tabs.Panel value="ai"><AiSettings v={v} set={set} /></Tabs.Panel>
+        <Tabs.Panel value="signatories"><SignatoriesSettings v={v} set={set} /></Tabs.Panel>
+        <Tabs.Panel value="security"><SecuritySettings /></Tabs.Panel>
+        <Tabs.Panel value="docs"><CompanyDocuments /></Tabs.Panel>
         <Tabs.Panel value="email">
           <Alert variant="light" mb="sm">Documents are emailed from your own mailbox. For Gmail use host smtp.gmail.com, port 465 and an App Password. For cPanel mail use mail.yourdomain.com. The password itself is set as SMTP_PASSWORD in the hosting environment, never stored here.</Alert>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
@@ -108,6 +121,7 @@ export function CompanySettings() {
             {T('Username (email address)', 'smtp.user')}{T('From (name <email>)', 'smtp.from', { placeholder: `${v.name} <lab@example.com>` })}
             <Switch label="Use SSL/TLS (port 465)" checked={v.smtp?.secure ?? true} onChange={(e) => set('smtp.secure', e.currentTarget.checked)} />
           </SimpleGrid>
+          <FooterSettings v={v} set={set} />
           <AlertSettings v={v} set={set} />
         </Tabs.Panel>
       </Tabs>
@@ -197,5 +211,114 @@ function StoragePanel() {
       {data.disk && <> · Disk {data.disk.usedPct}% used, {h(data.disk.freeBytes)} free of {h(data.disk.totalBytes)}</>}
       {data.warn && <div>The disk is over 80% full. Remove old backups or move to a bigger plan; the daily alert email will also warn about this.</div>}
     </Alert>
+  );
+}
+
+/** Predefined signatories: chosen from a dropdown on each document; their details and signature fill in automatically. */
+function SignatoriesSettings({ v, set }: { v: any; set: (path: string, value: unknown) => void }) {
+  const { data: users } = useApi<any[]>('/users', []);
+  const list: any[] = v.signatories ?? [];
+  const upd = (i: number, patch: any) => set('signatories', list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const add = () => set('signatories', [...list, { id: `s${Date.now().toString(36)}`, name: '', designation: '', qualifications: '', signature: null, userId: null }]);
+  return (
+    <Stack>
+      <Alert variant="light">These people appear in the <b>Signed by</b> dropdown on quotations, invoices and reports. Link a signatory to their user login so only they (or the System Administrator / Owner) can sign reports with their signature. Remember to <b>Save settings</b>.</Alert>
+      {list.map((x, i) => (
+        <Paper key={x.id} withBorder p="sm">
+          <SimpleGrid cols={{ base: 1, md: 2 }}>
+            <TextInput label="Name" required value={x.name} onChange={(e) => upd(i, { name: e.currentTarget.value })} />
+            <TextInput label="Designation" placeholder="Director (Technical)" value={x.designation ?? ''} onChange={(e) => upd(i, { designation: e.currentTarget.value })} />
+            <Textarea label="Qualifications / credentials (printed under the signature)" autosize value={x.qualifications ?? ''} onChange={(e) => upd(i, { qualifications: e.currentTarget.value })} />
+            <Select label="Linked user login (recommended for reports)" clearable data={(users ?? []).map((u) => ({ value: String(u.id), label: `${u.name} (${u.email})` }))} value={x.userId ? String(x.userId) : null} onChange={(val) => upd(i, { userId: val ? Number(val) : null })} />
+          </SimpleGrid>
+          <Group mt="sm" justify="space-between">
+            <Group gap="xs">
+              {x.signature ? <Image src={x.signature} h={46} w="auto" fit="contain" /> : <Text size="xs" c="dimmed">No signature image</Text>}
+              <FileButton accept="image/png,image/jpeg" onChange={async (f) => f && upd(i, { signature: await fileToDataUrl(f, 400) })}>{(p) => <Button size="xs" variant="light" leftSection={<IconUpload size={14} />} {...p}>Upload signature</Button>}</FileButton>
+              {x.signature && <Button size="xs" variant="subtle" color="red" onClick={() => upd(i, { signature: null })}>Remove</Button>}
+            </Group>
+            <Button size="xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={() => set('signatories', list.filter((_, j) => j !== i))}>Delete signatory</Button>
+          </Group>
+        </Paper>
+      ))}
+      <Group><Button variant="light" onClick={add}>Add signatory</Button><Text size="xs" c="dimmed">Tip: a PNG with a transparent background looks best. Users who upload their own signature also appear automatically.</Text></Group>
+    </Stack>
+  );
+}
+
+/** Footer added under every document email: contact details, map, WhatsApp and a review link. */
+function FooterSettings({ v, set }: { v: any; set: (path: string, value: unknown) => void }) {
+  const f = v.emailFooter ?? {};
+  const [preview, setPreview] = useState<string | null>(null);
+  return (
+    <Paper withBorder p="md" mt="md">
+      <Group justify="space-between"><Text fw={600}>Email footer</Text><Switch label="Add footer to emails" checked={f.enabled !== false} onChange={(e) => set('emailFooter.enabled', e.currentTarget.checked)} /></Group>
+      <Text size="xs" c="dimmed" mb="sm">Company name, accreditation, address, phone, email and website come from the Profile tab. Add the links below.</Text>
+      <SimpleGrid cols={{ base: 1, md: 2 }}>
+        <TextInput label="Google review link" placeholder="https://g.page/r/…/review" value={f.reviewUrl ?? ''} onChange={(e) => set('emailFooter.reviewUrl', e.currentTarget.value)} />
+        <Select label="Show “Rate us on Google” on" data={[{ value: 'after-service', label: 'Reports and invoices (after the work is done)' }, { value: 'all', label: 'All emails' }, { value: 'never', label: 'Never' }]} value={f.reviewOn ?? 'after-service'} onChange={(x) => set('emailFooter.reviewOn', x)} />
+        <TextInput label="Google Maps link (location)" placeholder="https://maps.google.com/…" value={f.mapsUrl ?? ''} onChange={(e) => set('emailFooter.mapsUrl', e.currentTarget.value)} />
+        <TextInput label="WhatsApp number" placeholder="9000219015" value={f.whatsapp ?? ''} onChange={(e) => set('emailFooter.whatsapp', e.currentTarget.value)} />
+        <TextInput label="Extra line (optional)" placeholder="Working hours: Mon–Sat, 9 AM – 6 PM" value={f.extra ?? ''} onChange={(e) => set('emailFooter.extra', e.currentTarget.value)} />
+        <Switch mt={28} label="Show company logo in the footer" checked={f.showLogo !== false} onChange={(e) => set('emailFooter.showLogo', e.currentTarget.checked)} />
+      </SimpleGrid>
+      <Group mt="sm"><Button size="xs" variant="light" onClick={async () => { const r = await api<any>('/email/footer?kind=report&body=' + encodeURIComponent('Dear Sir/Madam,\n\nPlease find the test report attached.\n\nRegards,')); setPreview(r.html); }}>Preview (save settings first)</Button></Group>
+      {preview && <iframe title="Email preview" srcDoc={preview} style={{ width: '100%', height: 380, border: '1px solid var(--line)', borderRadius: 8, marginTop: 8, background: '#fff' }} />}
+    </Paper>
+  );
+}
+
+/** Company policy: require two-step verification for every user. */
+function SecuritySettings() {
+  const { data: me } = useApi<any>('/account/security', []);
+  const [busy, setBusy] = useState(false);
+  if (!me) return null;
+  return (
+    <Stack maw={720}>
+      <Paper withBorder p="md">
+        <Text fw={600}>Two-step verification for everyone</Text>
+        <Text size="xs" c="dimmed" mb="sm">When on, every user must set up an authenticator app (Google or Microsoft Authenticator) the next time they sign in. Turn it on for your own account first under My account → Security.</Text>
+        <Switch disabled={busy} label={me.required ? 'Required for all users' : 'Optional (each user decides)'} checked={me.required}
+          onChange={async (e) => { setBusy(true); try { await api('/account/admin/policy', { body: { require2fa: e.currentTarget.checked } }); ok('Security policy updated'); window.location.reload(); } finally { setBusy(false); } }} />
+      </Paper>
+      <Paper withBorder p="md">
+        <Text fw={600}>Sign-in alerts</Text>
+        <Text size="sm">Users get an email (and a notification in the app) when their account signs in on a new device or browser. Lost phone? An administrator can reset a user's two-step verification under Users & roles.</Text>
+      </Paper>
+    </Stack>
+  );
+}
+
+/** Brochure and other company documents, kept in one place and attachable to any email. */
+function CompanyDocuments() {
+  const { data, reload } = useApi<any[]>('/files?entity=company&entity_id=0', []);
+  const [busy, setBusy] = useState(false);
+  const upload = async (file: File | null) => {
+    if (!file) return;
+    setBusy(true);
+    try { const dataUrl = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(file); });
+      await api('/files', { body: { entity: 'company', entity_id: 0, name: file.name, mime: file.type || 'application/pdf', data: dataUrl } }); ok('Uploaded'); reload(); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Stack maw={820}>
+      <Alert variant="light">Keep the company brochure, accreditation certificate, scope of accreditation and rate cards here. They can be attached to any quotation, invoice or report email with one click.</Alert>
+      <Group><FileButton onChange={upload} accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">{(p) => <Button leftSection={<IconUpload size={16} />} loading={busy} {...p}>Upload document</Button>}</FileButton><Text size="xs" c="dimmed">PDF, image, Word or Excel · up to 10 MB</Text></Group>
+      {(data ?? []).map((f) => (
+        <Paper key={f.id} withBorder p="sm">
+          <Group justify="space-between" wrap="nowrap">
+            <div style={{ minWidth: 0 }}>
+              <Group gap={6}><Anchor href={`/api/files/${f.id}/download?inline=1`} target="_blank" fw={600}>{f.name}</Anchor>{/brochure/i.test(f.name) && <Badge size="xs" variant="light">Brochure</Badge>}</Group>
+              <Text size="xs" c="dimmed">{Math.max(1, Math.round(f.size / 1024))} KB · {f.uploaded_by_name ?? ''} · {new Date(f.created_at).toLocaleDateString('en-IN')}</Text>
+            </div>
+            <Group gap={4} wrap="nowrap">
+              <ActionIcon variant="subtle" component="a" href={`/api/files/${f.id}/download`}><IconDownload size={16} /></ActionIcon>
+              <ActionIcon variant="subtle" color="red" onClick={async () => { if (!window.confirm(`Delete ${f.name}?`)) return; await api(`/files/${f.id}`, { method: 'DELETE' }); reload(); }}><IconTrash size={16} /></ActionIcon>
+            </Group>
+          </Group>
+        </Paper>
+      ))}
+      {!(data ?? []).length && <Text size="sm" c="dimmed">No documents yet.</Text>}
+    </Stack>
   );
 }

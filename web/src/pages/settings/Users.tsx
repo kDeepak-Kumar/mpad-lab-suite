@@ -23,7 +23,7 @@ export function UsersSettings() {
       <ListView id="users" rows={data} onRow={(u) => (can('manageUsers') || u.id === me.user.id) && setEdit(u)} columns={[
         { key: 'name', label: 'Name' }, { key: 'email', label: 'Email' },
         { key: 'role', label: 'Role', value: (u) => roleLabel(u.role), render: (u) => <Badge variant="light" color={u.role === 'admin' ? 'red' : 'brand'} style={{ textTransform: 'none' }}>{roleLabel(u.role)}</Badge>, filter: 'select' },
-        { key: 'designation', label: 'Designation' }, { key: 'signature', label: 'Signature', value: (u) => (u.signature ? 'Uploaded' : '—') }, { key: 'active', label: 'Active', value: (u) => (u.active ? 'Yes' : 'No'), filter: 'select' }]} />
+        { key: 'designation', label: 'Designation' }, { key: 'signature', label: 'Signature', value: (u) => (u.signature ? 'Uploaded' : '—') }, { key: 'active', label: 'Active', value: (u) => (u.active ? 'Yes' : 'No'), filter: 'select' }, { key: 'totp', label: 'Two-step', value: (u) => (u.totp_enabled ? 'On' : 'Off'), filter: 'select' }]} />
       {edit && <UserModal user={edit} canManage={can('manageUsers')} admin={isAdmin(me)} roles={meta.roles} onClose={(s) => { setEdit(null); if (s) reload(); }} />}
     </>
   );
@@ -32,7 +32,7 @@ export function UsersSettings() {
 function UserModal({ user, canManage, admin, roles, onClose }: { user: any; canManage: boolean; admin: boolean; roles: any[]; onClose: (saved: boolean) => void }) {
   const [v, setV] = useState<any>({ ...user, password: '' });
   const save = async () => {
-    const body = { ...v }; if (!body.password) delete body.password; delete body.id;
+    const body = { ...v }; if (!body.password) delete body.password; delete body.id; delete body.totp_enabled;
     if (user.id) await api(`/users/${user.id}`, { method: 'PUT', body }); else await api('/users', { body });
     ok('User saved'); onClose(true);
   };
@@ -40,7 +40,7 @@ function UserModal({ user, canManage, admin, roles, onClose }: { user: any; canM
   return (
     <Modal opened onClose={() => onClose(false)} title={user.id ? `Edit ${user.name}` : 'Add user'} size="lg">
       <Stack>
-        <SimpleGrid cols={2}>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <TextInput label="Name" value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} />
           <TextInput label="Email (login)" value={v.email ?? ''} onChange={(e) => setV({ ...v, email: e.currentTarget.value })} />
           <Select label="Role" disabled={!canManage || (user.role === 'admin' && !admin)} data={roleOptions} value={v.role} onChange={(x) => setV({ ...v, role: x })} />
@@ -60,7 +60,10 @@ function UserModal({ user, canManage, admin, roles, onClose }: { user: any; canM
           {v.signature && <Button size="xs" variant="subtle" color="red" onClick={() => setV({ ...v, signature: null })}>Remove</Button>}
         </Group>
         {canManage && <Switch label="Active (can sign in)" checked={v.active !== false} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} />}
-        <Group justify="flex-end"><Button onClick={save} disabled={!v.name || !v.email || (!user.id && (v.password ?? '').length < 6)}>Save</Button></Group>
+        <Group justify="space-between">
+          {canManage && user.id && user.totp_enabled ? <Button variant="subtle" color="orange" onClick={async () => { if (!window.confirm(`Reset two-step verification for ${user.name}? They will set it up again at next sign-in (if required) and are signed out everywhere.`)) return; await api(`/account/admin/reset-2fa/${user.id}`, { method: 'POST' }); ok('Two-step verification reset'); onClose(true); }}>Reset two-step verification</Button> : <span />}
+          <Button onClick={save} disabled={!v.name || !v.email || (!user.id && (v.password ?? '').length < 8)}>Save</Button>
+        </Group>
       </Stack>
     </Modal>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Grid, Group, Menu, Modal, Paper, Select, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
+import { Alert, Button, Checkbox, Grid, Group, Menu, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
 import { IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck } from '@tabler/icons-react';
 import { applyOverrides, computeTotals, DEFAULT_TEMPLATES, type DocOverrides, type DocTemplate, type LineInput } from '@suite/shared';
 import { api, ok, useApi, dmy, money } from '../api';
@@ -86,6 +87,7 @@ function DocumentView({ id }: { id: number }) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [noteModal, setNoteModal] = useState<null | { title: string; action: (note: string) => Promise<void> }>(null);
   const [tab, setTab] = useState<string | null>('details');
+  const phone = useMediaQuery('(max-width: 767px)');
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (doc && (!dirtyRef.current || doc.id !== (data as any)?.__id)) { setData({ ...doc.data, __id: doc.id }); setOverrides(doc.overrides ?? {}); setDirty(false); dirtyRef.current = false; } }, [doc]);
@@ -152,6 +154,7 @@ function DocumentView({ id }: { id: number }) {
     await api(`/documents/${doc.id}`, { method: 'PUT', body: { template_id: r.id, overrides: {} } });
     ok(`Saved as ${doc.kind} template version ${r.version}. Future documents use it.`); reload();
   };
+  const placeSeal = async (pos: { x: number; y: number; w: number }) => { setData((d) => ({ ...(d ?? {}), sealPos: pos })); await api(`/documents/${doc.id}/placement`, { method: 'PUT', body: { sealPos: pos }, quiet: true } as any); };
   const exp = async (fn: 'downloadPdf' | 'downloadPng' | 'downloadDoc') => { setSelected(null); const m = await exportLib(); await (m[fn] as any)(printRef.current!, fileName); };
 
   return (
@@ -176,7 +179,7 @@ function DocumentView({ id }: { id: number }) {
       <Grid gutter="md">
         <Grid.Col span={{ base: 12, xl: 5 }} className="no-print">
           <Tabs value={tab} onChange={setTab}>
-            <Tabs.List mb="sm"><Tabs.Tab value="details">Details</Tabs.Tab><Tabs.Tab value="design">Layout</Tabs.Tab><Tabs.Tab value="history">History</Tabs.Tab></Tabs.List>
+            <Tabs.List mb="sm"><Tabs.Tab value="details">Details</Tabs.Tab>{phone && <Tabs.Tab value="preview">Preview</Tabs.Tab>}<Tabs.Tab value="design" className="hide-mobile">Layout</Tabs.Tab><Tabs.Tab value="history">History</Tabs.Tab></Tabs.List>
             <Tabs.Panel value="details">
               <Stack gap="md">
                 <HeaderFields kind={doc.kind} doc={doc} data={data} onData={change} disabled={!editable}
@@ -185,6 +188,7 @@ function DocumentView({ id }: { id: number }) {
                 {doc.kind === 'report'
                   ? <ReportDetails doc={doc} data={data} onChange={change} disabled={!editable} />
                   : <DocDetailsForm kind={doc.kind} data={data} onChange={change} totals={totals} disabled={!editable} />}
+                {!issued && <SignPanel doc={doc} data={data} onLocal={(patch) => setData((d) => ({ ...(d ?? {}), ...patch }))} />}
                 <CustomFields kind={doc.kind} data={data} onChange={change} disabled={!editable} />
                 {doc.kind === 'quote' && doc.status !== 'draft' && !admin && <Alert variant="light">This quotation was sent, so it is locked. Use <b>Revise</b> to make changes; the original stays on record.</Alert>}
                 {doc.revisions?.length > 0 && <Group gap="xs"><Text size="sm" c="dimmed">Related versions:</Text>{doc.revisions.map((r: any) => <Anchor key={r.id} size="sm" onClick={() => nav(`/documents/${r.id}`)}>{r.number || `#${r.id}`} ({r.status})</Anchor>)}</Group>}
@@ -202,11 +206,11 @@ function DocumentView({ id }: { id: number }) {
             </Tabs.Panel>
           </Tabs>
         </Grid.Col>
-        <Grid.Col span={{ base: 12, xl: 7 }}>
+        <Grid.Col span={{ base: 12, xl: 7 }} className={phone && tab !== 'preview' ? 'offscreen' : undefined}>
           <div className="print-root" ref={printRef}>
             <div className="doc-stage" onClick={() => setSelected(null)}><FitWidth>
               <DocRenderer template={template} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
-                issuer={doc.issuer} verifyUrl={doc.verify ? `${window.location.origin}/verify/${doc.verify}` : null} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
+                issuer={doc.issuer} onSealMove={!issued && data.sealPos ? (pos) => placeSeal(pos) : undefined} verifyUrl={doc.verify ? `${window.location.origin}/verify/${doc.verify}` : null} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
             </FitWidth></div>
           </div>
         </Grid.Col>
@@ -268,33 +272,132 @@ function NoteModal({ title, onClose, onSubmit }: { title: string; onClose: () =>
 }
 
 function EmailModal({ doc, getRoot, fileName, onClose }: { doc: any; getRoot: () => HTMLElement; fileName: string; onClose: (sent: boolean) => void }) {
+  const me = useMe();
+  const can = useCan();
   const contactEmail = doc.data.contact?.email || doc.data.client?.email || '';
   const label = KIND_LABEL[doc.kind];
-  const [v, setV] = useState({
-    to: contactEmail, cc: '',
-    subject: `${label} ${doc.number ?? ''} – ${doc.company.name}`.replace(/\s+/g, ' '),
-    body: `Dear ${doc.data.contact?.name || 'Sir/Madam'},\n\nPlease find attached our ${label.toLowerCase()} ${doc.number ?? ''}${doc.data.site ? ` for ${doc.data.site.project || doc.data.site.name}` : ''}.\n\nRegards,\n${doc.company.name}\n${doc.company.phone ?? ''}`,
+  const { data: docs } = useApi<any[]>('/files?entity=company&entity_id=0', []);
+  const facts = () => ({
+    documentType: label, number: doc.number ?? '(draft)', status: doc.status, client: doc.data.client?.name, contactPerson: doc.data.contact?.name,
+    site: doc.data.site?.project || doc.data.site?.name, total: doc.kind === 'report' ? undefined : doc.totals?.total ?? doc.total,
+    material: doc.data.material, tests: doc.kind === 'report' ? [...new Set((doc.data.rows ?? []).map((r: any) => r.test ?? r.name).filter(Boolean))].slice(0, 8) : undefined,
+    validityDays: doc.kind === 'quote' ? doc.company.defaults?.validityDays : undefined, sender: me?.user?.name, company: doc.company.name,
   });
-  const [busy, setBusy] = useState(false);
+  const fallback = () => {
+    const greet = `Dear ${doc.data.contact?.name ? `${doc.data.contact.name}` : 'Sir/Madam'},`;
+    const site = doc.data.site ? ` for ${doc.data.site.project || doc.data.site.name}` : '';
+    const lines: Record<string, string> = {
+      quote: `Thank you for your enquiry. Please find attached our quotation ${doc.number ?? ''}${site}.\n\nThe rates are valid for ${doc.company.defaults?.validityDays ?? 30} days. Please confirm by reply or share a work order to schedule the testing, and let us know if you need any clarification.`,
+      invoice: `Please find attached our tax invoice ${doc.number ?? ''}${site}.\n\nWe request you to arrange the payment as per the agreed terms. Bank details are mentioned on the invoice. Kindly share the payment reference once done.`,
+      report: `Please find attached test report ${doc.number ?? ''}${site}.\n\nThe report can be verified by scanning the QR code on it. Please feel free to contact us if you need any clarification on the results.`,
+    };
+    return `${greet}\n\n${lines[doc.kind] ?? `Please find attached ${label.toLowerCase()} ${doc.number ?? ''}.`}\n\nRegards,\n${me?.user?.name ?? ''}\n${doc.company.name}`;
+  };
+  const [v, setV] = useState({ to: contactEmail, cc: '', subject: `${label} ${doc.number ?? ''} – ${doc.company.name}`.replace(/\s+/g, ' '), body: fallback() });
+  const [tone, setTone] = useState('Formal');
+  const [hint, setHint] = useState('');
+  const [issues, setIssues] = useState<string[] | null>(null);
+  const [attach, setAttach] = useState<string[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const ai = can('useAI');
+  const draft = async () => {
+    setBusy('draft'); setIssues(null);
+    try { const r = await api<any>('/ai/assist', { body: { task: 'email_draft', input: { facts: facts(), tone, instructions: hint } } }); setV((x) => ({ ...x, subject: r.subject || x.subject, body: r.body || x.body })); }
+    finally { setBusy(null); }
+  };
+  const review = async () => {
+    setBusy('review');
+    try { const r = await api<any>('/ai/assist', { body: { task: 'email_review', input: { facts: facts(), draft: { subject: v.subject, body: v.body } } } }); setIssues(r.issues ?? []); if (r.body) setPreview(null); setSuggestion(r); }
+    finally { setBusy(null); }
+  };
+  const [suggestion, setSuggestion] = useState<any>(null);
+  const showPreview = async () => { const r = await api<any>(`/email/footer?kind=${doc.kind}&body=${encodeURIComponent(v.body)}`); setPreview(r.html); };
   const send = async () => {
-    setBusy(true);
+    setBusy('send');
     try {
       const { pdfBase64 } = await exportLib();
       const pdf = await pdfBase64(getRoot());
-      await api(`/documents/${doc.id}/email`, { body: { ...v, pdfBase64: pdf, filename: `${fileName}.pdf` } });
+      await api(`/documents/${doc.id}/email`, { body: { ...v, pdfBase64: pdf, filename: `${fileName}.pdf`, attachFileIds: attach.map(Number) } });
       ok('Email sent'); onClose(true);
-    } finally { setBusy(false); }
+    } finally { setBusy(null); }
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title={`Email ${label.toLowerCase()}`} size="lg">
+    <Modal opened onClose={() => onClose(false)} title={`Email ${label.toLowerCase()}`} size="xl" fullScreen={typeof window !== 'undefined' && window.innerWidth < 640}>
       <Stack>
-        <TextInput label="To" value={v.to} onChange={(e) => setV({ ...v, to: e.currentTarget.value })} />
-        <TextInput label="Cc" value={v.cc} onChange={(e) => setV({ ...v, cc: e.currentTarget.value })} />
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          <TextInput label="To" value={v.to} onChange={(e) => setV({ ...v, to: e.currentTarget.value })} />
+          <TextInput label="Cc" value={v.cc} onChange={(e) => setV({ ...v, cc: e.currentTarget.value })} />
+        </SimpleGrid>
+        {ai && (
+          <Paper withBorder p="sm" bg="var(--mantine-color-blue-light)">
+            <Group gap="xs" align="flex-end" wrap="wrap">
+              <Select label="Tone" w={140} data={['Formal', 'Friendly', 'Short', 'Payment reminder', 'Follow-up']} value={tone} onChange={(x) => setTone(x ?? 'Formal')} />
+              <TextInput style={{ flex: 1, minWidth: 200 }} label="Anything to mention? (optional)" placeholder="e.g. mention sample pickup on Monday" value={hint} onChange={(e) => setHint(e.currentTarget.value)} />
+              <Button leftSection={<IconSparkles size={15} />} loading={busy === 'draft'} onClick={draft}>Draft with AI</Button>
+              <Button variant="default" loading={busy === 'review'} onClick={review}>Review</Button>
+            </Group>
+          </Paper>
+        )}
         <TextInput label="Subject" value={v.subject} onChange={(e) => setV({ ...v, subject: e.currentTarget.value })} />
-        <Textarea label="Message" autosize minRows={6} value={v.body} onChange={(e) => setV({ ...v, body: e.currentTarget.value })} />
-        <Text size="xs" c="dimmed">The document is attached as a PDF and sent from the company email set in Settings. Prefer WhatsApp? Download the PDF and share it.</Text>
-        <Group justify="flex-end"><Button loading={busy} onClick={send} disabled={!v.to}>Send email</Button></Group>
+        <Textarea label="Message" autosize minRows={7} maxRows={16} value={v.body} onChange={(e) => { setV({ ...v, body: e.currentTarget.value }); setPreview(null); }} />
+        {issues && (
+          <Alert color={issues.length ? 'orange' : 'teal'} variant="light" title={issues.length ? 'AI review suggestions' : 'Looks good'}>
+            {issues.map((x, i) => <div key={i}>• {x}</div>)}
+            {suggestion?.body && suggestion.body !== v.body && <Button size="xs" mt="xs" variant="light" onClick={() => { setV({ ...v, subject: suggestion.subject || v.subject, body: suggestion.body }); setIssues(null); }}>Use the improved version</Button>}
+          </Alert>
+        )}
+        {(docs ?? []).length > 0 && (
+          <Checkbox.Group label="Also attach" value={attach} onChange={setAttach}>
+            <Group mt={4} gap="md">{(docs ?? []).map((f) => <Checkbox key={f.id} value={String(f.id)} label={f.name} />)}</Group>
+          </Checkbox.Group>
+        )}
+        <Text size="xs" c="dimmed">The {label.toLowerCase()} is attached as a PDF. Your company footer (contact details, website, location and review link) is added under the message.</Text>
+        {preview && <iframe title="Email preview" srcDoc={preview} style={{ width: '100%', height: 420, border: '1px solid var(--line)', borderRadius: 8, background: '#fff' }} />}
+        <Group justify="space-between">
+          <Button variant="subtle" onClick={() => (preview ? setPreview(null) : showPreview())}>{preview ? 'Hide preview' : 'Preview email'}</Button>
+          <Button loading={busy === 'send'} onClick={send} disabled={!v.to || !v.subject}>Send email</Button>
+        </Group>
       </Stack>
     </Modal>
+  );
+}
+
+/** Final stage: choose who signs (details fill in automatically) and place the seal anywhere on the page. */
+function SignPanel({ doc, data, onLocal }: { doc: any; data: Record<string, any>; onLocal: (patch: Record<string, any>) => void }) {
+  const { data: options } = useApi<any[]>('/signatories', []);
+  const can = useCan();
+  const [busy, setBusy] = useState(false);
+  const allowedKey = doc.kind === 'report' ? 'report' : 'other';
+  const mayEdit = doc.kind === 'report' ? can('signReports') || can('prepareReports') : can(`${doc.kind}.edit`);
+  const put = async (body: Record<string, any>) => { setBusy(true); try { await api(`/documents/${doc.id}/placement`, { method: 'PUT', body }); onLocal(body); } finally { setBusy(false); } };
+  const pick = (options ?? []).find((o) => o.id === data.signatoryId);
+  const seal = data.sealPos as { x: number; y: number; w: number } | undefined;
+  const hasSeal = Boolean(doc.company.seal);
+  return (
+    <Paper withBorder p="md">
+      <Text fw={600} size="sm">Signature & seal</Text>
+      <Text size="xs" c="dimmed" mb="xs">Choose who signs; name, designation and qualifications fill in on the preview, and the signature image is applied when the document is issued.</Text>
+      <Select label="Signed by" placeholder="The person who issues it (default)" clearable disabled={!mayEdit || busy}
+        data={(options ?? []).map((o) => ({ value: o.id, label: `${o.name}${o.designation ? ` – ${o.designation}` : ''}${o.hasSignature ? '' : ' (no signature image)'}`, disabled: !o.allowed?.[allowedKey] }))}
+        value={data.signatoryId ?? null} onChange={(v) => put({ signatoryId: v })}
+        nothingFoundMessage="Add signatories in Settings → Company → Signatories" />
+      {pick && <Text size="xs" mt={4}>{pick.name}{pick.designation ? `, ${pick.designation}` : ''}{pick.qualifications ? ` · ${pick.qualifications}` : ''}</Text>}
+      {(options ?? []).some((o) => !o.allowed?.[allowedKey]) && <Text size="xs" c="dimmed" mt={4}>Greyed-out names can only be used by that person or the System Administrator / Owner.</Text>}
+      {hasSeal ? (
+        <Stack gap={6} mt="sm">
+          <Switch disabled={!mayEdit || busy} label="Place the seal anywhere on the page" checked={Boolean(seal)}
+            onChange={(e) => put({ sealPos: e.currentTarget.checked ? { x: 120, y: 236, w: 32 } : null })} />
+          {seal && <>
+            <Text size="xs" c="dimmed">Drag the blue-outlined seal on the preview to where it should be stamped (works with touch too).</Text>
+            <Group gap="xs" align="center"><Text size="xs" w={60}>Size</Text>
+              <input type="range" min={18} max={60} step={1} value={seal.w} disabled={!mayEdit} style={{ flex: 1 }}
+                onChange={(e) => onLocal({ sealPos: { ...seal, w: Number(e.currentTarget.value) } })}
+                onMouseUp={(e) => put({ sealPos: { ...seal, w: Number((e.target as HTMLInputElement).value) } })} onTouchEnd={(e) => put({ sealPos: { ...seal, w: Number((e.target as HTMLInputElement).value) } })} />
+              <Text size="xs" w={44}>{seal.w} mm</Text></Group>
+          </>}
+        </Stack>
+      ) : <Text size="xs" c="dimmed" mt="sm">Upload the company seal in Settings → Company → Branding to stamp it on documents.</Text>}
+    </Paper>
   );
 }

@@ -3,6 +3,7 @@ import { formatDate, isEmailList } from '@suite/shared';
 import { db, now } from './db';
 import { getCompany, type CompanyProfile } from './services';
 import { human, storageInfo, WARN_PCT } from './storage';
+import { emailHtml, logoAttachment } from './email';
 
 /**
  * Email alerts for SLA breaches (tests past their due date and not yet reported)
@@ -66,7 +67,8 @@ export async function mailer(company: CompanyProfile) {
   const smtp = company.smtp ?? {};
   if (!smtp.host || !smtp.user || !process.env.SMTP_PASSWORD) throw new Error('Email is not set up yet. Add SMTP details in Settings and SMTP_PASSWORD in the hosting environment.');
   const transport = nodemailer.createTransport({ host: smtp.host, port: Number(smtp.port ?? 465), secure: smtp.secure ?? true, auth: { user: smtp.user, pass: process.env.SMTP_PASSWORD } });
-  return (msg: { to: string; subject: string; text: string }) => transport.sendMail({ from: smtp.from || `${company.name} <${smtp.user}>`, ...msg });
+  return (msg: { to: string; cc?: string; subject: string; text: string; html?: string; attachments?: { filename: string; content: Buffer; contentType?: string; cid?: string }[] }) =>
+    transport.sendMail({ from: smtp.from || `${company.name} <${smtp.user}>`, ...msg, cc: msg.cc || undefined, attachments: [...(msg.html ? logoAttachment(company) : []), ...(msg.attachments ?? [])].filter((a) => msg.html?.includes('cid:logo') || a.cid !== 'logo') });
 }
 
 /** Send the digest for one company. force = send even if nothing is new (used by "Send now"). */
@@ -81,7 +83,7 @@ export async function runAlerts(cid: number, opts: { force?: boolean } = {}) {
   if (!items.length || (!fresh.length && !weekly && !opts.force)) return { sent: false, items: items.length, fresh: 0 };
   const send = await mailer(company);
   const mail = alertEmail(company, items, td);
-  await send({ to: s.to, ...mail });
+  await send({ to: s.to, ...mail, html: emailHtml(company, mail.text, { footer: false }) });
   for (const i of fresh) await db('alert_log').insert({ company_id: cid, kind: i.kind, ref: i.ref, sent_on: td, created_at: now() }).onConflict(['company_id', 'kind', 'ref', 'sent_on']).ignore();
   await db('alert_log').insert({ company_id: cid, kind: 'digest', ref: 'daily', sent_on: td, created_at: now() }).onConflict(['company_id', 'kind', 'ref', 'sent_on']).ignore();
   return { sent: true, items: items.length, fresh: fresh.length };

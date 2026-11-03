@@ -95,3 +95,59 @@ table.grid-input th { white-space: normal; min-width: 64px; }
   .print-root table.grid-input input, .print-root table.grid-input select { height: 20px; font-size: 8pt; padding: 0 2px; background: transparent; color: #111; }
   .print-root .mantine-Paper-root { border: 0; box-shadow: none; }
 }
+
+/* ---------- sign-in page ---------- */
+.login-wrap { min-height: 100vh; display: grid; grid-template-columns: minmax(380px, 46%) 1fr; background: #f4f6fb; }
+.login-brand { position: relative; overflow: hidden; color: #fff; background: linear-gradient(150deg, var(--brand) 0%, color-mix(in srgb, var(--brand) 70%, #000) 100%); }
+.login-brand::before { content: ''; position: absolute; inset: 0; background:
+  radial-gradient(circle at 85% 15%, rgba(255,255,255,.14) 0, transparent 38%),
+  radial-gradient(circle at 10% 90%, rgba(255,255,255,.10) 0, transparent 40%),
+  repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0 2px, transparent 2px 22px); }
+.login-brand-inner { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 56px 56px 40px; gap: 6px; max-width: 620px; }
+.login-logo-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
+.login-logo { width: 92px; height: 92px; border-radius: 22px; background: #fff; display: grid; place-items: center; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.login-logo img { max-width: 76px; max-height: 76px; object-fit: contain; }
+.login-logo-text { color: var(--brand); font-size: 44px; font-weight: 800; }
+.login-acc { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); border-radius: 12px; padding: 8px 12px; font-size: 12px; line-height: 1.3; backdrop-filter: blur(4px); }
+.login-acc img { height: 40px; background: #fff; border-radius: 6px; padding: 2px; }
+.login-brand h1 { font-size: clamp(28px, 3.1vw, 40px); line-height: 1.15; margin: 0; font-weight: 800; letter-spacing: .3px; }
+.login-tagline { margin: 6px 0 0; font-size: 17px; opacity: .9; font-style: italic; }
+.login-points { list-style: none; padding: 0; margin: 30px 0 0; display: grid; gap: 12px; }
+.login-points li { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; opacity: .95; }
+.login-points svg { flex: none; margin-top: 1px; color: #9ff0c7; }
+.login-contact { margin-top: auto; padding-top: 36px; font-size: 12.5px; opacity: .78; line-height: 1.6; }
+.login-main { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 32px 20px; }
+.login-card { width: 100%; max-width: 410px; background: #fff; border-radius: 18px; padding: 34px 32px; box-shadow: 0 1px 2px rgba(16,24,40,.05), 0 18px 48px rgba(16,24,40,.10); border: 1px solid #e7ebf3; }
+@media (max-width: 860px) {
+  .login-wrap { grid-template-columns: 1fr; }
+  .login-brand-inner { padding: 28px 22px 26px; }
+  .login-logo-row { margin-bottom: 14px; }
+  .login-logo { width: 64px; height: 64px; border-radius: 16px; }
+  .login-logo img { max-width: 52px; max-height: 52px; }
+  .login-points, .login-contact { display: none; }
+  .login-main { justify-content: flex-start; padding: 22px 16px 32px; }
+  .login-card { padding: 26px 20px; }
+}
+
+/* ---------- phone & tablet ---------- */
+.bottom-nav { display: none; }
+@media (max-width: 767px) {
+  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 150; background: #fff; border-top: 1px solid var(--line);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 16px rgba(16,24,40,.06); }
+  .bottom-nav a, .bottom-nav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 0; font-size: 11px; color: #667085;
+    text-decoration: none; background: none; border: 0; border-radius: 10px; font-family: inherit; }
+  .bottom-nav a.active { color: var(--mantine-color-brand-6, #1f5fbf); background: var(--mantine-color-brand-0, #eef4ff); font-weight: 600; }
+  .mantine-AppShell-main { padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important; }
+  .hide-mobile { display: none !important; }
+  .page-header-actions { width: 100%; }
+  .doc-stage { margin: 0 -6px; }
+  /* wide observation grids scroll sideways instead of squeezing */
+  .grid-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  input, select, textarea { font-size: 16px !important; } /* stops iOS zooming into fields */
+}
+@media (min-width: 768px) { .show-mobile { display: none !important; } }
+.lv-cards { display: flex; flex-direction: column; }
+.lv-card { padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; }
+.lv-card.row-click:active { background: #f2f5fa; }
+@media screen { .offscreen { position: absolute !important; left: -10000px !important; top: 0; width: 900px; } }
+@media print { .offscreen { position: static !important; } }

@@ -293,13 +293,24 @@ analytics.post('/ai/test', allow('manageSettings'), h(async (req) => {
 
 /** Small AI helpers used inside forms. Each has a non-AI fallback in the UI. */
 analytics.post('/ai/assist', h(async (req) => {
-  const { task, input } = z.object({ task: z.enum(['remark', 'quote_lines', 'email']), input: z.any() }).parse(req.body);
+  const { task, input } = z.object({ task: z.enum(['remark', 'quote_lines', 'email', 'email_draft', 'email_review']), input: z.any() }).parse(req.body);
   const company = await getCompany(req.user.company_id);
   const ai = company.ai as AiSettings | undefined;
   if (!ai?.enabled) throw new HttpError(400, 'Turn on the AI assistant in Settings → Company & branding → AI assistant');
   if (task === 'remark') {
     const text = await chat(ai, 'You are a senior civil-engineering testing laboratory technical manager. Write a one or two sentence factual remark/conclusion for a test report based only on the results and any specification given. Do not invent limits that are not given; if no specification is given, state results are for information. Reply with the remark text only.', JSON.stringify(input).slice(0, 6000));
     return { text: text.trim() };
+  }
+  if (task === 'email_draft' || task === 'email_review') {
+    const base = `You write emails for ${company.name}${company.accreditation?.certNo ? ` (${company.accreditation.body || 'NABL'} accredited laboratory, ${company.accreditation.certNo})` : ''}, a civil engineering materials testing laboratory in India. Use clear Indian business English, polite and concise (80-160 words in the body), no emojis, no placeholders like [Name]. Never invent figures, dates, test results or promises that are not in the facts given. Do not add a signature block or contact details; a branded footer is added automatically. Sign off with "Regards," followed by the sender name and company name on separate lines.`;
+    if (task === 'email_draft') {
+      const out = await chat(ai, `${base} Reply ONLY with JSON {"subject": string, "body": string}. The subject should include the document type and number.`, JSON.stringify(input).slice(0, 6000));
+      const j = extractJson(out);
+      return { subject: String(j.subject ?? '').trim(), body: String(j.body ?? '').trim() };
+    }
+    const out = await chat(ai, `${base} Review the draft email below for tone, clarity, grammar, missing information (attachment mention, document number, next step) and anything risky (promises, wrong figures vs the facts). Reply ONLY with JSON {"issues": string[] (max 5 short points, empty if fine), "subject": string, "body": string} where subject/body are the improved version.`, JSON.stringify(input).slice(0, 8000));
+    const j = extractJson(out);
+    return { issues: (Array.isArray(j.issues) ? j.issues : []).map(String).slice(0, 5), subject: String(j.subject ?? '').trim(), body: String(j.body ?? '').trim() };
   }
   if (task === 'email') {
     const text = await chat(ai, `Write a short, polite business email body for ${company.name}. Plain text only, no subject line.`, JSON.stringify(input).slice(0, 4000));

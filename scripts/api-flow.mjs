@@ -7,7 +7,7 @@ async function as(user) {
   if (sessions[user]) return sessions[user];
   const r = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: `${user}@demo.lab`, password: PASS }) });
   if (!r.ok) throw new Error(`login ${user}: ${await r.text()}`);
-  sessions[user] = r.headers.get('set-cookie').split(';')[0];
+  sessions[user] = r.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
   return sessions[user];
 }
 async function api(user, method, path, body) {
@@ -153,4 +153,57 @@ expect(prev.some((i) => i.kind === 'cal' && /EXPIRED/.test(i.text) && i.isNew), 
 await api('owner', 'PUT', `/equipment/${eq.id}`, { cal_date: eq.cal_date, due_date: eq.due_date });
 m = await fail(() => api('owner', 'POST', '/alerts/run'));
 expect(m, `“Send now” explains what is missing (${m})`);
+console.log('10. Two-step verification, device alerts, signatories, seal, email footer');
+const { createHmac } = await import('node:crypto');
+const b32 = (s) => { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, v = 0; const out = []; for (const ch of s.replace(/\s/g, '')) { v = (v << 5) | A.indexOf(ch); bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); };
+const totpNow = (secret, off = 0) => { const c = Buffer.alloc(8); c.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + off)); const h = createHmac('sha1', b32(secret)).update(c).digest(); const o = h[19] & 15; return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0'); };
+const raw = async (path, body, cookie) => { const r = await fetch(`${base}/api${path}`, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { r, j: await r.json().catch(() => ({})), cookie: r.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ') }; };
+const brand = await raw('/public/branding');
+expect(brand.r.ok && brand.j.name, `sign-in page branding is public (${brand.j.name})`);
+const setup = await api('signatory', 'POST', '/account/2fa/setup');
+let en = null; for (const off of [0, -1, 1]) { try { en = await api('signatory', 'POST', '/account/2fa/enable', { code: totpNow(setup.secret, off) }); break; } catch { /* clock edge */ } }
+expect(en?.backupCodes?.length === 8, 'two-step verification turns on with an authenticator code and gives 8 backup codes');
+let L = await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS });
+expect(L.j.twoFactor === true && !/suite_sid/.test(L.cookie), 'password alone no longer signs in: a code is asked for');
+L = await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS, code: '000000' });
+expect(L.r.status === 401, 'wrong 6-digit code is rejected');
+L = await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS, code: totpNow(setup.secret) });
+expect(L.r.ok && /suite_sid/.test(L.cookie), 'correct code signs in');
+const L2 = await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS, code: en.backupCodes[0] });
+const L3 = await raw('/auth/login', { email: 'signatory@demo.lab', password: PASS, code: en.backupCodes[0] });
+expect(L2.r.ok && L3.r.status === 401, 'a backup code works once only');
+const sec = await (await fetch(`${base}/api/account/security`, { headers: { cookie: L2.cookie } })).json();
+expect(sec.devices.length >= 2 && sec.backupCodesLeft === 7, `devices are listed (${sec.devices.length}) and backup codes counted`);
+const audits = await api('owner', 'GET', '/audit?entity=user&limit=50').catch(() => []);
+const bell = (await (await fetch(`${base}/api/dashboard`, { headers: { cookie: L2.cookie } })).json()).reminders ?? [];
+expect(bell.some((x) => x.kind === 'New sign-in'), 'sign-in from a new device shows up in the notification bell');
+await fetch(`${base}/api/account/signout-others`, { method: 'POST', headers: { cookie: L2.cookie } });
+const old = await fetch(`${base}/api/auth/me`, { headers: { cookie: L.cookie } });
+expect(old.status === 401, '“Sign out other devices” ends older sessions');
+let blocked = 0; for (let i = 0; i < 9; i++) { const x = await raw('/auth/login', { email: 'nobody@demo.lab', password: 'wrong' }); if (x.r.status === 429) blocked++; }
+expect(blocked > 0, 'repeated wrong passwords are slowed down (rate limit)');
+// signatories and seal
+await api('owner', 'PUT', '/company', { signatories: [{ id: 'sdir', name: 'Test Director', designation: 'Director', qualifications: 'B.E (Civil)', signature: 'data:image/png;base64,iVBORw0KGgo=', userId: null }], seal: 'data:image/png;base64,iVBORw0KGgo=' });
+const opts = await api('frontdesk', 'GET', '/signatories');
+expect(opts.some((o) => o.id === 'sdir' && o.allowed.other && !o.allowed.report), 'signatory list: company profile usable for quotes/invoices, not reports by others');
+const sq = await api('frontdesk', 'POST', '/documents', { kind: 'quote', client_id: client.id, data: { mode: 'estimate', lines: [{ description: 'Test', rate: 500, qty: 1, unit: 'No.' }] } });
+await api('frontdesk', 'PUT', `/documents/${sq.id}/placement`, { signatoryId: 'sdir', sealPos: { x: 140, y: 230, w: 30 } });
+const sqd = await api('frontdesk', 'GET', `/documents/${sq.id}`);
+expect(sqd.issuer?.name === 'Test Director' && sqd.issuer.preview && sqd.data.sealPos?.x === 140, 'chosen signatory fills in on the draft and the seal position is saved');
+const inv2 = await api('accounts', 'POST', '/documents', { kind: 'invoice', client_id: client.id, data: { lines: [{ description: 'Test', rate: 500, qty: 1, unit: 'No.' }] } });
+await api('accounts', 'PUT', `/documents/${inv2.id}/placement`, { signatoryId: 'sdir' });
+await api('accounts', 'POST', `/documents/${inv2.id}/issue`);
+const inv2d = await api('accounts', 'GET', `/documents/${inv2.id}`);
+expect(inv2d.issuer?.name === 'Test Director' && inv2d.issuer.signature && inv2d.data.signatory?.designation === 'Director', 'on issue the signature and details are frozen into the document');
+m = await fail(() => api('accounts', 'PUT', `/documents/${inv2.id}/placement`, { sealPos: { x: 1, y: 1, w: 30 } }));
+expect(m, 'seal cannot be moved after issue');
+const pdfb = Buffer.from('%PDF-1.4 brochure').toString('base64');
+const brochure = await api('owner', 'POST', '/files', { entity: 'company', entity_id: 0, name: 'Company brochure.pdf', mime: 'application/pdf', data: pdfb });
+const cdocs = await api('frontdesk', 'GET', '/files?entity=company&entity_id=0');
+expect(cdocs.some((f) => f.id === brochure.id), 'brochure stored under company documents and visible to staff who send emails');
+await api('owner', 'PUT', '/company', { website: 'https://example-lab.test', emailFooter: { reviewUrl: 'https://g.page/r/example/review', mapsUrl: 'https://maps.example/x', whatsapp: '9000000000' } });
+const foot = await api('frontdesk', 'GET', '/email/footer?kind=report&body=Hello');
+expect(/Rate us on Google/.test(foot.html) && /Google review/.test(foot.text) && /wa\.me\/919000000000/.test(foot.html), 'email footer carries contacts, website, map, WhatsApp and review link');
+const fq = await api('frontdesk', 'GET', '/email/footer?kind=quote&body=Hello');
+expect(!/Rate us/.test(fq.html), 'review link is left out of quotation emails (after-service only)');
 console.log('\nALL CHECKS PASSED');

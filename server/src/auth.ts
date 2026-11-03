@@ -14,8 +14,19 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
 }
 const COOKIE = 'suite_sid';
 
-export function setSession(res: Response, u: { id: number }) {
-  const token = jwt.sign({ uid: u.id }, SECRET, { expiresIn: '12h' });
+const policyCache = new Map<number, { v: boolean; at: number }>();
+export async function companyRequires2fa(cid: number) {
+  const c = policyCache.get(cid);
+  if (c && Date.now() - c.at < 30000) return c.v;
+  const row = await db('companies').where({ id: cid }).first('data');
+  let v = false; try { v = Boolean(JSON.parse(row?.data ?? '{}')?.security?.require2fa); } catch { /* ignore */ }
+  policyCache.set(cid, { v, at: Date.now() });
+  return v;
+}
+export const clearPolicyCache = () => policyCache.clear();
+
+export function setSession(res: Response, u: { id: number; token_version?: number | null }) {
+  const token = jwt.sign({ uid: u.id, tv: Number(u.token_version ?? 0) }, SECRET, { expiresIn: '12h' });
   res.cookie(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true', maxAge: 12 * 3600 * 1000 });
 }
 export const clearSession = (res: Response) => res.clearCookie(COOKIE);
@@ -24,10 +35,17 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   try {
     const token = req.cookies?.[COOKIE];
     if (!token) return res.status(401).json({ error: 'Please sign in' });
-    const { uid } = jwt.verify(token, SECRET) as { uid: number };
-    const u = await db('users').where({ id: uid, active: true }).first('id', 'company_id', 'name', 'email', 'role');
+    const { uid, tv } = jwt.verify(token, SECRET) as { uid: number; tv?: number };
+    const u = await db('users').where({ id: uid, active: true }).first('id', 'company_id', 'name', 'email', 'role', 'token_version', 'totp_enabled');
     if (!u) return res.status(401).json({ error: 'Please sign in' });
-    req.user = { ...u, roleDef: await getRole(u.company_id, u.role) } as AuthUser;
+    // "Sign out of all other devices" bumps token_version, which ends every older session
+    if (Number(tv ?? 0) !== Number(u.token_version ?? 0)) return res.status(401).json({ error: 'You were signed out. Please sign in again.' });
+    const { token_version: _tv, totp_enabled, ...rest } = u;
+    req.user = { ...rest, roleDef: await getRole(u.company_id, u.role) } as AuthUser;
+    // Company policy: two-step verification required → only account/security routes until it is set up
+    if (!totp_enabled && !/^\/(auth|account)\//.test(req.path) && await companyRequires2fa(u.company_id)) {
+      return res.status(403).json({ error: 'Set up two-step verification to continue (company policy).', code: 'SETUP_2FA' });
+    }
     next();
   } catch {
     res.status(401).json({ error: 'Session expired, please sign in again' });

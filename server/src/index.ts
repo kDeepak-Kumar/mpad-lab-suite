@@ -13,16 +13,19 @@ import { analytics } from './analytics';
 import { ensurePlatform } from './meta';
 import { syncTemplatePack } from './packs';
 import { crm, publicApi } from './routes/crm';
+import { account } from './routes/account';
 import { files } from './routes/files';
 import compression from 'compression';
 
 const app = express();
 app.disable('x-powered-by');
 app.use(compression());
+// behind Caddy/nginx/cPanel proxy: use the real client IP (sign-in alerts, rate limit)
+app.set('trust proxy', 'loopback, linklocal, uniquelocal');
 app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-app.use('/api', publicApi, core, lab, finance, analytics, crm, files);
+app.use('/api', publicApi, account, core, lab, finance, analytics, crm, files);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built web app (single deployment for cPanel / any Node host)

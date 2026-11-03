@@ -8,8 +8,10 @@ import { audit } from '../services';
 export const files = Router();
 files.use(requireAuth);
 
-const ENTITIES: Record<string, { table: string; read: string; write: string }> = {
+const ENTITIES: Record<string, { table: string | null; read: string; write: string }> = {
   equipment: { table: 'equipment', read: 'equipment.read', write: 'equipment.edit' },
+  /** Company documents (brochure, accreditation certificate…): entity_id is always 0. Anyone signed in can read and attach them. */
+  company: { table: null, read: '', write: 'manageSettings' },
 };
 const MAX_BYTES = 10 * 1024 * 1024;
 const MIME = /^(application\/pdf|image\/(png|jpe?g|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document))$/;
@@ -17,6 +19,7 @@ const MIME = /^(application\/pdf|image\/(png|jpe?g|webp)|application\/vnd\.openx
 async function owned(cid: number, entity: string, id: number) {
   const e = ENTITIES[entity];
   if (!e) throw new HttpError(400, 'Attachments are not available for this record');
+  if (e.table === null) { if (id !== 0) throw new HttpError(400, 'Company documents use entity_id 0'); return e; }
   if (!(await db(e.table).where({ id, company_id: cid }).first())) throw new HttpError(404, 'Record not found');
   return e;
 }
@@ -24,13 +27,13 @@ async function owned(cid: number, entity: string, id: number) {
 files.get('/files', h(async (req) => {
   const entity = String(req.query.entity ?? ''), id = Number(req.query.entity_id);
   const e = await owned(req.user.company_id, entity, id);
-  if (!can(req.user, e.read)) throw new HttpError(403, 'Your role cannot see these files');
+  if (e.read && !can(req.user, e.read)) throw new HttpError(403, 'Your role cannot see these files');
   return db('files as f').leftJoin('users as u', 'u.id', 'f.uploaded_by').where({ 'f.company_id': req.user.company_id, 'f.entity': entity, 'f.entity_id': id })
     .select('f.id', 'f.name', 'f.mime', 'f.size', 'f.note', 'f.created_at', 'u.name as uploaded_by_name').orderBy('f.id', 'desc');
 }));
 
 files.post('/files', h(async (req) => {
-  const b = z.object({ entity: z.string(), entity_id: z.number().int().positive(), name: z.string().trim().min(1).max(200), mime: z.string(), data: z.string().min(1), note: z.string().max(300).optional().nullable() }).parse(req.body);
+  const b = z.object({ entity: z.string(), entity_id: z.number().int().min(0), name: z.string().trim().min(1).max(200), mime: z.string(), data: z.string().min(1), note: z.string().max(300).optional().nullable() }).parse(req.body);
   const e = await owned(req.user.company_id, b.entity, b.entity_id);
   if (!can(req.user, e.write)) throw new HttpError(403, 'Your role cannot upload files here');
   if (!MIME.test(b.mime)) throw new HttpError(400, 'Upload a PDF, image (PNG/JPG) or Word/Excel file');
@@ -49,7 +52,7 @@ files.get('/files/:id/download', async (req, res) => {
     const f = await db('files').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
     if (!f) { res.status(404).json({ error: 'File not found' }); return; }
     const e = ENTITIES[f.entity];
-    if (!e || !can(req.user, e.read)) { res.status(403).json({ error: 'Not allowed' }); return; }
+    if (!e || (e.read && !can(req.user, e.read))) { res.status(403).json({ error: 'Not allowed' }); return; }
     const buf = Buffer.from(String(f.data), 'base64');
     res.setHeader('Content-Type', f.mime || 'application/octet-stream');
     res.setHeader('Content-Length', String(buf.length));

@@ -108,8 +108,8 @@ export function TestSheetPage() {
       <PageHeader title={<Group gap="sm">{t.catalog?.report_name || tpl.name}<StatusBadge status={t.status} />{tpl.simplified && <Badge color="yellow" variant="light">Simplified sheet</Badge>}</Group>}
         subtitle={<>{s.code} · {t.client?.name}{t.site ? ` · ${t.site.name}` : ''} · {tpl.method}</>}
         actions={<>
-          <Button variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print sheet</Button>
-          {can('manageTemplates') && <Button variant="subtle" onClick={() => nav(`/settings/templates/obs/${encodeURIComponent(tpl.code)}`)}>Edit sheet template</Button>}
+          <Button className="hide-mobile" variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print sheet</Button>
+          {can('manageTemplates') && <Button className="hide-mobile" variant="subtle" onClick={() => nav(`/settings/templates/obs/${encodeURIComponent(tpl.code)}`)}>Edit sheet template</Button>}
           {editable && <Button variant="default" loading={busy} disabled={!dirty} onClick={() => (t.status === 'returned' ? setReasonOpen(true) : save())}>Save</Button>}
           {editable && ['pending', 'in_progress', 'returned'].includes(t.status) && <Button loading={busy} disabled={errors.length > 0 && !admin} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button>}
           {canReview && <Button variant="default" color="red" onClick={() => setReturnOpen(true)}>Return for correction</Button>}

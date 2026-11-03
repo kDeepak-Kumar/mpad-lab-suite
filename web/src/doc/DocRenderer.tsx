@@ -17,6 +17,8 @@ export interface RenderInput {
   onSelect?: (id: string) => void;
   /** Public verification link of an issued report (printed as a QR code beside the signature). */
   verifyUrl?: string | null;
+  /** When given, the seal can be dragged anywhere on the page (final stage, before issue). */
+  onSealMove?: (pos: { x: number; y: number; w: number }) => void;
 }
 
 const rateOnly = (kind: string, d: any) => kind === 'quote' && !(d.showQty ?? d.mode !== 'rate');
@@ -67,8 +69,9 @@ export function DocRenderer(p: RenderInput) {
     padding: `${t.page.marginMm}mm`, fontFamily: t.page.fontFamily, fontSize: `${t.page.fontSize}pt`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
   };
   return (
-    <div className="doc-page" style={page}>
+    <div className="doc-page" style={{ ...page, position: 'relative' }}>
       {isDraft && <div className="doc-watermark">DRAFT</div>}
+      {p.data.sealPos && p.company.seal && <FreeSeal p={p} />}
       {t.blocks.filter((b) => b.visible).map((b) => {
         const el = renderBlock(b, p, ctx);
         if (!el) return null;
@@ -98,7 +101,9 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       return (
         <div style={{ borderBottom: `2px solid ${accent}`, paddingBottom: 6, marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {pr.showLogo && c.logo && <img src={c.logo} alt="" style={{ height: 70, objectFit: 'contain' }} />}
+            {pr.showLogo && (c.logo
+              ? <div style={{ textAlign: 'center', flex: 'none' }}><img src={c.logo} alt="" style={{ height: 70, maxWidth: 110, objectFit: 'contain', display: 'block', margin: '0 auto' }} />{c.shortName && <div style={{ fontWeight: 700, fontSize: '9pt', letterSpacing: 1, marginTop: 2 }}>{c.shortName}</div>}</div>
+              : <div className="no-print" title="Upload the logo in Settings → Company & branding → Branding" style={{ width: 84, height: 70, flex: 'none', border: '1.5px dashed #b8c2d3', borderRadius: 6, display: 'grid', placeItems: 'center', color: '#8a96a8', fontSize: '8pt', textAlign: 'center', lineHeight: 1.2 }}>Company<br />logo</div>)}
             <div style={{ flex: 1, textAlign: 'center' }}>
               <div style={{ fontSize: '22pt', letterSpacing: 0.5, color: '#111' }}>{c.name}</div>
               {c.tagline && <div style={{ fontStyle: 'italic', textAlign: 'right', fontSize: '10pt' }}>{c.tagline}</div>}
@@ -429,12 +434,45 @@ function Signature({ pr, p, fill }: { pr: Record<string, any>; p: RenderInput; f
       {pr.forText && <div style={{ fontWeight: 700 }}>{fill(pr.forText)}</div>}
       <div style={{ height: 64, display: 'flex', gap: 8, alignItems: 'center', justifyContent: pr.align === 'right' ? 'flex-end' : 'flex-start' }}>
         {issued && pr.showSignature && signer?.signature && <img src={signer.signature} alt="" style={{ maxHeight: 56 }} />}
-        {issued && pr.showSeal && p.company.seal && <img src={p.company.seal} alt="" style={{ maxHeight: 64 }} />}
+        {issued && pr.showSeal && p.company.seal && !p.data.sealPos && <img src={p.company.seal} alt="" style={{ maxHeight: 64 }} />}
         {!issued && (pr.showSignature || pr.showSeal) && <span className="no-print" style={{ color: '#999', fontSize: '8pt', border: '1px dashed #bbb', padding: '4px 8px' }}>Signature and seal are applied on issue</span>}
       </div>
       {pr.label && <div>{pr.label}</div>}
-      {pr.showName && signer && issued && <div>{signer.name}</div>}
-      {pr.showQualifications && signer && issued && <div style={{ fontSize: '8.5pt', maxWidth: 360, display: 'inline-block' }}>{signer.designation}{signer.qualifications ? ` ${signer.qualifications}` : ''}</div>}
+      {pr.showName && signer && (issued || (signer as any).preview) && <div>{signer.name}</div>}
+      {pr.showQualifications && signer && (issued || (signer as any).preview) && <div style={{ fontSize: '8.5pt', maxWidth: 360, display: 'inline-block' }}>{signer.designation}{signer.qualifications ? ` ${signer.qualifications}` : ''}</div>}
+    </div>
+  );
+}
+
+/** Seal placed freely on the page. Solid once issued; a dashed, draggable preview before that. */
+function FreeSeal({ p }: { p: RenderInput }) {
+  const pos = p.data.sealPos as { x: number; y: number; w: number };
+  const issued = ['issued', 'paid', 'partly_paid', 'cancelled'].includes(p.status ?? '');
+  const style: CSSProperties = { position: 'absolute', left: `${pos.x}mm`, top: `${pos.y}mm`, width: `${pos.w}mm`, zIndex: 5, userSelect: 'none', touchAction: 'none' };
+  if (issued) return <img src={p.company.seal} alt="" style={style} draggable={false} />;
+  const start = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!p.onSealMove) return;
+    e.preventDefault(); e.stopPropagation();
+    const el = e.currentTarget; const pageEl = el.parentElement as HTMLElement;
+    const rect = pageEl.getBoundingClientRect();
+    const mmPerPx = (p.template.page.orientation === 'landscape' ? 297 : 210) / rect.width;
+    const sx = e.clientX, sy = e.clientY, ox = pos.x, oy = pos.y;
+    let last = pos;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const x = Math.max(0, Math.min((rect.width * mmPerPx) - pos.w, ox + (ev.clientX - sx) * mmPerPx));
+      const y = Math.max(0, Math.min((rect.height * mmPerPx) - pos.w, oy + (ev.clientY - sy) * mmPerPx));
+      last = { ...pos, x: Math.round(x * 2) / 2, y: Math.round(y * 2) / 2 };
+      el.style.left = `${last.x}mm`; el.style.top = `${last.y}mm`;
+    };
+    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); p.onSealMove!(last); };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  };
+  return (
+    <div className="no-print free-seal" style={{ ...style, cursor: p.onSealMove ? 'grab' : 'default', outline: '1.5px dashed #3b82f6', borderRadius: 4, opacity: 0.75 }} onPointerDown={start} onClick={(e) => e.stopPropagation()}
+      title={p.onSealMove ? 'Drag the seal to where it should be stamped' : 'Seal position (applied on issue)'}>
+      <img src={p.company.seal} alt="" style={{ width: '100%', display: 'block', pointerEvents: 'none' }} draggable={false} />
+      {p.onSealMove && <div style={{ position: 'absolute', top: -18, left: 0, fontSize: 10, background: '#3b82f6', color: '#fff', padding: '1px 5px', borderRadius: 3, whiteSpace: 'nowrap' }}>Drag seal</div>}
     </div>
   );
 }

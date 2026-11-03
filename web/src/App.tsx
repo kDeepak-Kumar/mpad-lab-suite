@@ -6,7 +6,7 @@ import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlig
 import {
   IconLayoutDashboard, IconUsers, IconFileDollar, IconClipboardList, IconFlask, IconFileCertificate, IconReceipt, IconCash,
   IconBook, IconListDetails, IconSettings, IconLogout, IconPlus, IconBox, IconTool, IconTemplate, IconUserCog, IconChecklist,
-  IconSearch, IconChartBar, IconAdjustments, IconPhoneCall, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles,
+  IconSearch, IconChartBar, IconAdjustments, IconPhoneCall, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2,
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
@@ -41,6 +41,8 @@ const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'Templ
 const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'), 'ObsTemplateEditor');
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
+const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
+const Required2fa = page(() => import('./pages/Account'), 'Required2fa');
 
 export { useMe };
 export const hasRole = (me: Me, ...roles: string[]) => Boolean(me.role?.admin || me.user.role === 'owner' || roles.includes(me.user.role));
@@ -79,6 +81,7 @@ export function App() {
   if (me === undefined && !loc.pathname.startsWith('/verify/')) return <Center h="100vh"><Loader /></Center>;
   if (loc.pathname.startsWith('/verify/')) return <Routes><Route path="/verify/:token" element={<VerifyPage />} /></Routes>;
   if (!me) return <Routes><Route path="/login" element={<Login onLogin={() => api<Me>('/auth/me').then(setMe)} />} /><Route path="*" element={<Navigate to="/login" />} /></Routes>;
+  if (me.security?.required && !me.security.totpEnabled) return <MeCtx.Provider value={me}><Suspense fallback={<Loading />}><Required2fa /></Suspense></MeCtx.Provider>;
   return <MeCtx.Provider value={me}><MetaLoader /></MeCtx.Provider>;
 }
 
@@ -130,7 +133,7 @@ function Shell() {
 
   const width = mini ? 72 : 244;
   return (
-    <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding="lg" styles={{ main: { background: 'var(--bg)' }, navbar: { borderRight: '1px solid var(--line)' }, header: { borderBottom: '1px solid var(--line)' } }}>
+    <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' }, navbar: { borderRight: '1px solid var(--line)' }, header: { borderBottom: '1px solid var(--line)' } }}>
       <AppShell.Header className="no-print">
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">
@@ -160,6 +163,7 @@ function Shell() {
               <Menu.Target><Avatar color="brand" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
               <Menu.Dropdown>
                 <Menu.Label>{me.user.name}<br /><Badge size="xs" variant="light" color={me.role.admin ? 'red' : 'brand'}>{me.role.label}</Badge></Menu.Label>
+                <Menu.Item onClick={() => nav('/account')}>My account & security</Menu.Item>
                 <Menu.Item onClick={() => nav('/settings/users?me=1')}>My profile & signature</Menu.Item>
                 <Menu.Item leftSection={<IconLogout size={16} />} onClick={logout}>Sign out</Menu.Item>
               </Menu.Dropdown>
@@ -215,12 +219,31 @@ function Shell() {
             <Route path="/settings/templates/obs/:code" element={<ObsTemplateEditor />} />
             <Route path="/settings/templates/:id" element={<TemplateDesigner />} />
             <Route path="/setup" element={<SetupPage />} />
+            <Route path="/account" element={<AccountPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>
       </AppShell.Main>
+      <BottomNav items={items} onMore={toggle} />
       <Spotlight actions={actions} query={query} onQueryChange={setQuery} filter={(q, a) => (!q ? a : (a as SpotlightActionData[]).filter((x) => x.group === 'Records' || x.group === 'AI' || String(x.label).toLowerCase().includes(q.toLowerCase())))} nothingFound="Nothing found" highlightQuery shortcut={['mod + K']}
         searchProps={{ leftSection: <IconSearch size={18} />, placeholder: 'Search clients, documents, samples… or ask a question' }} limit={30} scrollable maxHeight={460} />
     </AppShell>
+  );
+}
+
+/** Phone: the four most-used screens one tap away; everything else under "More" (the side menu). */
+function BottomNav({ items, onMore }: { items: NavItem[]; onMore: () => void }) {
+  const loc = useLocation();
+  const prefer = ['/', '/samples', '/tests', '/reports', '/quotes', '/invoices', '/clients'];
+  const pick = prefer.map((to) => items.find((n) => n.to === to)).filter(Boolean).slice(0, 4) as NavItem[];
+  const short: Record<string, string> = { '/': 'Home', '/samples': 'Samples', '/tests': 'Tests', '/reports': 'Reports', '/quotes': 'Quotes', '/invoices': 'Invoices', '/clients': 'Clients' };
+  return (
+    <nav className="bottom-nav no-print">
+      {pick.map((n) => {
+        const active = n.to === '/' ? loc.pathname === '/' : loc.pathname.startsWith(n.to);
+        return <RLink key={n.to} to={n.to} className={active ? 'active' : ''}><n.icon size={22} stroke={1.7} /><span>{short[n.to] ?? n.label}</span></RLink>;
+      })}
+      <button type="button" onClick={onMore}><IconMenu2 size={22} stroke={1.7} /><span>More</span></button>
+    </nav>
   );
 }

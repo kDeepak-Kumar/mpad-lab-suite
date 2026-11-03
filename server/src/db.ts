@@ -212,6 +212,20 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '005_security',
+    up: async (k) => {
+      await k.schema.alterTable('users', (t) => {
+        t.text('totp_secret'); t.text('totp_pending'); t.boolean('totp_enabled').defaultTo(false); t.text('backup_codes');
+        t.integer('token_version').defaultTo(0);
+      });
+      await k.schema.createTable('user_devices', (t) => {
+        t.increments('id'); t.integer('user_id').unsigned().notNullable(); t.string('device_hash', 64).notNullable();
+        t.string('user_agent', 300); t.string('ip', 64); t.string('first_seen', 32); t.string('last_seen', 32); t.string('trusted_until', 32).nullable();
+        t.unique(['user_id', 'device_hash']);
+      });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

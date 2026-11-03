@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import nodemailer from 'nodemailer';
-import { computeTotals, formatDate, stateName, type LineInput } from '@suite/shared';
+import { mailer } from '../alerts';
+import { emailHtml, footerText } from '../email';
+import { computeTotals, formatDate, isEmailList, stateName, type LineInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
@@ -20,6 +21,21 @@ async function loadDoc(cid: number, id: number) {
   const d = row(await db('documents').where({ id, company_id: cid }).first(), JSON_COLS);
   if (!d) throw new HttpError(404, 'Document not found');
   return d as Record<string, unknown> & { id: number; kind: string; status: string; data: Record<string, unknown>; client_id: number };
+}
+
+/** Who can sign: profiles from Settings → Company → Signatories, plus users who uploaded a signature. */
+export interface Signatory { id: string; name: string; designation?: string; qualifications?: string; signature?: string | null; userId?: number | null; kinds?: string[] }
+async function signatoryOptions(cid: number): Promise<Signatory[]> {
+  const company = await getCompany(cid);
+  const profiles = (((company as any).signatories ?? []) as Signatory[]).filter((x) => x?.id && x.name);
+  const linked = new Set(profiles.map((x) => x.userId).filter(Boolean));
+  const users = await db('users').where({ company_id: cid, active: true }).whereNotNull('signature').select('id', 'name', 'designation', 'qualifications', 'signature');
+  return [...profiles, ...users.filter((u) => u.signature && !linked.has(u.id)).map((u) => ({ id: `u${u.id}`, name: u.name, designation: u.designation, qualifications: u.qualifications, signature: u.signature, userId: u.id }))];
+}
+function mayUseSignatory(u: Parameters<typeof isAdmin>[0], kind: string, s: Signatory) {
+  if (isAdmin(u) || u.role === 'owner') return true;
+  if (s.userId) return s.userId === u.id;
+  return kind !== 'report'; // company signatory profiles without a login: quotes/invoices only
 }
 
 /** Lines and discounts must be sensible numbers before totals are worked out. */
@@ -71,7 +87,12 @@ finance.get('/documents/:id', h(async (req) => {
   const d = await loadDoc(cid, Number(req.params.id));
   if (!can(req.user, `${d.kind}.read`)) throw new HttpError(403, 'Your role cannot open this document');
   const [company, tpl] = await Promise.all([getCompany(cid), getDocTemplate(cid, d.kind, d.template_id as number)]);
-  const issuer = d.issued_by ? await db('users').where({ id: d.issued_by }).first('id', 'name', 'designation', 'qualifications', 'signature') : null;
+  const snap = d.data.signatory as Signatory | undefined;
+  let issuer: Record<string, unknown> | null = snap?.name ? { ...snap } : d.issued_by ? await db('users').where({ id: d.issued_by }).first('id', 'name', 'designation', 'qualifications', 'signature') : null;
+  if (!['issued', 'paid', 'partly_paid', 'cancelled'].includes(d.status) && d.data.signatoryId) {
+    const pick = (await signatoryOptions(cid)).find((x) => x.id === d.data.signatoryId);
+    issuer = pick ? { name: pick.name, designation: pick.designation, qualifications: pick.qualifications, preview: true } : null;
+  }
   const paid = d.kind === 'invoice' ? (await paidAgainst(cid)).get(d.id) ?? 0 : undefined;
   const history = await db('audit_log').where({ company_id: cid, entity: 'document', entity_id: d.id }).orderBy('id', 'desc');
   const users = new Map((await db('users').where({ company_id: cid }).select('id', 'name')).map((u) => [u.id, u.name]));
@@ -254,6 +275,25 @@ finance.post('/documents/:id/to-invoice', allow('invoices'), h(async (req) => {
   return createDocument(req.user, { kind: 'invoice', client_id: d.client_id, site_id: d.site_id as number, work_order_id: d.work_order_id as number, contact_id: (d.data.contact as { id?: number })?.id ?? null, data: { lines, customerRef: d.data.customerRef, accreditation: d.data.accreditation, discountPct: d.data.discountPct, overallDiscount: d.data.overallDiscount } });
 }));
 
+// ---------- signatory choice and seal position (allowed until the document is issued) ----------
+finance.get('/signatories', h(async (req) => (await signatoryOptions(req.user.company_id)).map(({ signature, ...x }) => ({ ...x, hasSignature: Boolean(signature), allowed: { report: mayUseSignatory(req.user, 'report', { ...x, signature }), other: mayUseSignatory(req.user, 'invoice', { ...x, signature }) } }))));
+finance.put('/documents/:id/placement', h(async (req) => {
+  const d = await loadDoc(req.user.company_id, Number(req.params.id));
+  if (['issued', 'paid', 'partly_paid', 'cancelled'].includes(d.status)) throw new HttpError(409, 'This document is issued and locked');
+  const ok = d.kind === 'report' ? can(req.user, 'signReports') || can(req.user, 'prepareReports') : can(req.user, `${d.kind}.edit`);
+  if (!ok) throw new HttpError(403, 'Your role cannot change this document');
+  const b = z.object({
+    sealPos: z.object({ x: z.number().min(0).max(300), y: z.number().min(0).max(3000), w: z.number().min(15).max(80) }).nullable().optional(),
+    signatoryId: z.string().max(40).nullable().optional(),
+  }).parse(req.body);
+  if (b.signatoryId && !(await signatoryOptions(req.user.company_id)).some((x) => x.id === b.signatoryId)) throw new HttpError(400, 'Unknown signatory');
+  const data = { ...d.data } as Record<string, unknown>;
+  if (b.sealPos !== undefined) data.sealPos = b.sealPos;
+  if (b.signatoryId !== undefined) data.signatoryId = b.signatoryId;
+  await db('documents').where({ id: d.id }).update({ data: toJson(data), updated_at: now() });
+  return { ok: true };
+}));
+
 // ---------- issue (invoice, report) ----------
 finance.post('/documents/:id/issue', h(async (req) => {
   const cid = req.user.company_id;
@@ -264,12 +304,22 @@ finance.post('/documents/:id/issue', h(async (req) => {
   if (d.kind === 'invoice' && d.status !== 'draft') throw new HttpError(409, 'Invoice already issued');
   if (d.kind === 'report' && d.status !== 'verified' && !(admin && ['draft', 'review'].includes(d.status))) throw new HttpError(409, 'Verify the report before signing and issuing it');
   if (d.kind === 'invoice' && !((d.data.lines as unknown[]) ?? []).length) throw new HttpError(400, 'Add at least one line');
+  let signatory: Signatory | undefined;
+  if (d.data.signatoryId) {
+    signatory = (await signatoryOptions(cid)).find((x) => x.id === d.data.signatoryId);
+    if (!signatory) throw new HttpError(400, 'The selected signatory no longer exists. Choose who signs, then try again.');
+    if (!mayUseSignatory(req.user, d.kind, signatory)) throw new HttpError(403, `Only ${signatory.name} (or the System Administrator / Owner) can sign with this signature. Choose yourself as the signatory.`);
+  } else {
+    const me = await db('users').where({ id: req.user.id }).first('id', 'name', 'designation', 'qualifications', 'signature');
+    signatory = { id: `u${me.id}`, name: me.name, designation: me.designation, qualifications: me.qualifications, signature: me.signature, userId: me.id };
+  }
   return db.transaction(async (trx) => {
     const unlocked = (d.data.unlocked ?? {}) as Record<string, boolean>;
     const date = unlocked.date ? String(d.date) : today();
     const client = await trx('clients').where({ id: d.client_id }).first();
     const number = d.number ? String(d.number) : (await nextNumber(trx, cid, d.kind, { date, client: client?.short_code, material: String(d.data.material ?? '') })).number;
-    const data = { ...d.data, issueText: unlocked.issueText ? d.data.issueText : formatDate(date), dateText: unlocked.dateText ? d.data.dateText : formatDate(date) };
+    const data = { ...d.data, signatory: { name: signatory!.name, designation: signatory!.designation ?? '', qualifications: signatory!.qualifications ?? '', signature: signatory!.signature ?? null },
+      issueText: unlocked.issueText ? d.data.issueText : formatDate(date), dateText: unlocked.dateText ? d.data.dateText : formatDate(date) };
     const hash = sha256({ data, overrides: d.overrides, template: d.template_id });
     await trx('documents').where({ id: d.id }).update({ number, date, status: 'issued', data: toJson(data), issued_at: now(), issued_by: req.user.id, hash, updated_at: now() });
     if (d.kind === 'report') {
@@ -277,7 +327,7 @@ finance.post('/documents/:id/issue', h(async (req) => {
       await trx('samples').whereIn('id', (d.data.sampleIds as number[]) ?? []).update({ status: 'reported' });
       if (d.parent_id) await trx('documents').where({ id: d.parent_id }).update({ status: 'cancelled' });
     }
-    await audit(trx, req.user, 'document', d.id, `${d.kind} signed and issued`, { number, hash: hash.slice(0, 12) });
+    await audit(trx, req.user, 'document', d.id, `${d.kind} signed and issued`, { number, hash: hash.slice(0, 12), signatory: signatory!.name });
     return { number };
   });
 }));
@@ -299,18 +349,34 @@ finance.post('/documents/:id/amend', allow('reportIssue'), h(async (req) => {
 finance.post('/documents/:id/email', h(async (req) => {
   const cid = req.user.company_id;
   const d = await loadDoc(cid, Number(req.params.id));
-  const body = z.object({ to: z.string().min(3), cc: z.string().optional(), subject: z.string().min(1), body: z.string(), pdfBase64: z.string().optional(), filename: z.string().optional() }).parse(req.body);
+  const body = z.object({
+    to: z.string().min(3), cc: z.string().optional(), subject: z.string().min(1), body: z.string(), pdfBase64: z.string().optional(), filename: z.string().optional(),
+    attachFileIds: z.array(z.number().int()).max(5).optional(),
+  }).parse(req.body);
+  if (!isEmailList(body.to)) throw new HttpError(400, 'To: enter valid email addresses separated by commas');
+  if (body.cc && !isEmailList(body.cc)) throw new HttpError(400, 'Cc: enter valid email addresses separated by commas');
   const company = await getCompany(cid);
-  const smtp = company.smtp ?? {};
-  if (!smtp.host || !smtp.user || !process.env.SMTP_PASSWORD) throw new HttpError(400, 'Email is not set up yet. Add SMTP details in Settings and SMTP_PASSWORD in the hosting environment.');
-  const transport = nodemailer.createTransport({ host: smtp.host, port: Number(smtp.port ?? 465), secure: smtp.secure ?? true, auth: { user: smtp.user, pass: process.env.SMTP_PASSWORD } });
-  await transport.sendMail({
-    from: smtp.from || `${company.name} <${smtp.user}>`, to: body.to, cc: body.cc || undefined, subject: body.subject, text: body.body,
-    attachments: body.pdfBase64 ? [{ filename: body.filename || `${d.number || d.kind}.pdf`, content: Buffer.from(body.pdfBase64, 'base64'), contentType: 'application/pdf' }] : [],
+  let send;
+  try { send = await mailer(company); } catch (e) { throw new HttpError(400, (e as Error).message); }
+  const extra = body.attachFileIds?.length
+    ? await db('files').where({ company_id: cid, entity: 'company' }).whereIn('id', body.attachFileIds).select('name', 'mime', 'data') : [];
+  await send({
+    to: body.to, cc: body.cc, subject: body.subject,
+    text: `${body.body.trim()}\n\n${footerText(company, { kind: d.kind as string })}`.trim(),
+    html: emailHtml(company, body.body, { kind: d.kind as string }),
+    attachments: [
+      ...(body.pdfBase64 ? [{ filename: body.filename || `${d.number || d.kind}.pdf`, content: Buffer.from(body.pdfBase64, 'base64'), contentType: 'application/pdf' }] : []),
+      ...extra.map((f) => ({ filename: f.name, content: Buffer.from(String(f.data), 'base64'), contentType: f.mime })),
+    ],
   });
   if (d.kind === 'quote' && d.status === 'draft') await db('documents').where({ id: d.id }).update({ status: 'sent', issued_at: now(), issued_by: req.user.id, hash: sha256(d.data) });
-  await audit(db, req.user, 'document', d.id, 'emailed', { to: body.to, cc: body.cc, subject: body.subject });
+  await audit(db, req.user, 'document', d.id, 'emailed', { to: body.to, cc: body.cc, subject: body.subject, attachments: extra.map((f) => f.name) });
   return { ok: true };
+}));
+/** Preview of the branded footer that is added under every document email. */
+finance.get('/email/footer', h(async (req) => {
+  const company = await getCompany(req.user.company_id);
+  return { text: footerText(company, { kind: String(req.query.kind ?? '') }), html: emailHtml(company, String(req.query.body ?? ''), { kind: String(req.query.kind ?? '') }) };
 }));
 
 // ---------- payments & ledger ----------
@@ -445,6 +511,11 @@ finance.get('/dashboard', h(async (req) => {
   for (const q of quotes) {
     const days = Math.floor((Date.now() - new Date(q.date + 'T00:00:00').getTime()) / 86400000);
     if (days >= 7) reminders.push({ kind: 'Quote follow-up', text: `${q.number} to ${q.client_name} sent ${days} days ago`, link: `/documents/${q.id}`, level: 'info' });
+  }
+  const since = new Date(Date.now() - 3 * 86400000).toISOString();
+  for (const a of await db('audit_log').where({ company_id: cid, entity: 'user', entity_id: req.user.id, action: 'new device sign-in' }).andWhere('at', '>=', since).orderBy('id', 'desc').limit(3)) {
+    const det = parseJson<Record<string, string>>(a.detail, {});
+    reminders.push({ kind: 'New sign-in', text: `Your account signed in on ${det.device ?? 'a new device'} (${det.ip ?? ''}) ${new Date(a.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}. Not you? Change your password.`, link: '/account', level: 'warning' });
   }
   for (const f of await followUpsDue(cid, req.user.id)) reminders.push({ kind: `${f.type} due`, text: `${f.subject}${f.client_name ? ` – ${f.client_name}` : ''} (${formatDate(f.due_date)})`, link: '/followups', level: f.due_date < td ? 'danger' : 'warning' });
   for (const e of eq.filter((e) => e.due_date <= in30)) reminders.push({ kind: 'Calibration', text: `${e.name} calibration ${e.due_date < td ? 'expired' : 'due'} ${formatDate(e.due_date)}`, link: '/equipment', level: e.due_date < td ? 'danger' : 'warning' });
