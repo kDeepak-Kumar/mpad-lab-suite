@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
-import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles } from '@tabler/icons-react';
+import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles, IconFileText } from '@tabler/icons-react';
+import { TermsSettings } from '../../components/Terms';
 import { useSearchParams } from 'react-router-dom';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList, WA_TEMPLATES, WA_PLACEHOLDERS, fillWa } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
@@ -19,6 +20,7 @@ const SECTIONS: { group: string; items: { key: string; label: string; hint: stri
     { key: 'bank', label: 'Bank & payments', hint: 'Printed on invoices and used in WhatsApp payment messages', icon: IconBuildingBank, color: '#079455' },
     { key: 'numbering', label: 'Numbering', hint: 'Number formats for quotations, invoices, samples, ULR and reports', icon: IconHash, color: '#475467' },
     { key: 'defaults', label: 'Defaults & rules', hint: 'GST rate, SAC, validity, standard notes and review rules', icon: IconListCheck, color: '#2a78d6' },
+    { key: 'terms', label: 'Terms & conditions', hint: 'Reusable sets of terms (Boreholes, SPT, SBC…) to insert into quotations and reports', icon: IconFileText, color: '#0e9384' },
     { key: 'signatories', label: 'Signatories', hint: 'Who signs quotations, invoices and reports, with their signatures', icon: IconSignature, color: '#7a5af8' },
   ] },
   { group: 'Communication', items: [
@@ -127,6 +129,12 @@ export function CompanySettings() {
             <NumberInput label="Default GST rate (%)" value={v.defaults?.gstRate ?? 18} onChange={(x) => set('defaults.gstRate', Number(x))} />
             {T('Default SAC', 'defaults.sac')}
             <NumberInput label="Quotation validity (days)" value={v.defaults?.validityDays ?? 30} onChange={(x) => set('defaults.validityDays', Number(x))} />
+            <NumberInput label="Retain samples for (days after receipt)" description="Default when a material has no own value" value={v.defaults?.retentionDays ?? 30} onChange={(x) => set('defaults.retentionDays', Number(x))} />
+          </SimpleGrid>
+          <Text size="sm" fw={500} mt="md">Sample retention per material (days)</Text>
+          <SimpleGrid cols={{ base: 2, md: 4 }} mt={4}>
+            {['Soil', 'Cement', 'Concrete', 'Coarse aggregate', 'Fine aggregate', 'Steel', 'Water', 'Bricks'].map((m) => (
+              <NumberInput key={m} size="xs" label={m} placeholder={String(v.defaults?.retentionDays ?? 30)} value={v.defaults?.retentionByMaterial?.[m] ?? ''} onChange={(x) => set('defaults.retentionByMaterial', { ...(v.defaults?.retentionByMaterial ?? {}), [m]: x === '' ? undefined : Number(x) })} />))}
           </SimpleGrid>
           <Textarea mt="sm" label="Default quotation notes (one per line)" autosize minRows={3} value={v.defaults?.quoteNotes ?? ''} onChange={(e) => set('defaults.quoteNotes', e.currentTarget.value)} />
           <Textarea mt="sm" label="Standard report notes (one per line, added to every report after test-specific notes)" autosize minRows={4} value={v.defaults?.reportNotes ?? ''} onChange={(e) => set('defaults.reportNotes', e.currentTarget.value)} />
@@ -163,6 +171,7 @@ export function CompanySettings() {
         {sec === "signatories" && <><SignatoriesSettings v={v} set={set} /></>}
         {sec === "security" && <><SecuritySettings /></>}
         {sec === "docs" && <><CompanyDocuments /></>}
+        {sec === "terms" && <TermsSettings v={v} set={set} />}
         {sec === "whatsapp" && <><WhatsAppSettings v={v} set={set} /></>}
         {sec === "email" && <>
           <Alert variant="light" mb="sm">Documents are emailed from your own mailbox. For Gmail use host smtp.gmail.com, port 465 and an App Password. For cPanel mail use mail.yourdomain.com. The password itself is set as SMTP_PASSWORD in the hosting environment, never stored here.</Alert>
@@ -177,6 +186,7 @@ export function CompanySettings() {
           </Paper>
         </Grid.Col>
       </Grid>
+      {dirty && !cur.selfSave && <div style={{ height: 88 }} />}
       {dirty && !cur.selfSave && (
         <div className="set-savebar">
           <Text size="sm" fw={600}>You have unsaved changes</Text>

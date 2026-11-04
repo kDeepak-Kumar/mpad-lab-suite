@@ -289,6 +289,47 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '009_outsourcing_purchases_disposal',
+    up: async (k) => {
+      const addCols = async (table: string, cols: Record<string, (t: Knex.AlterTableBuilder) => void>) => {
+        for (const [c, fn] of Object.entries(cols)) if (!(await k.schema.hasColumn(table, c))) await k.schema.alterTable(table, fn);
+      };
+      await addCols('samples', {
+        retention_days: (t) => { t.integer('retention_days').unsigned().nullable(); }, dispose_after: (t) => { t.string('dispose_after', 10).nullable(); },
+        disposed_at: (t) => { t.string('disposed_at', 10).nullable(); }, disposal_method: (t) => { t.string('disposal_method', 60).nullable(); },
+        disposal_note: (t) => { t.string('disposal_note', 500).nullable(); }, disposed_by: (t) => { t.integer('disposed_by').unsigned().nullable(); },
+      });
+      await addCols('catalog', { performed_by: (t) => { t.string('performed_by', 10).defaultTo('inhouse'); }, vendor_id: (t) => { t.integer('vendor_id').unsigned().nullable(); } });
+      await addCols('files', { archived_at: (t) => { t.string('archived_at', 32).nullable(); }, archive_path: (t) => { t.string('archive_path', 300).nullable(); }, kind: (t) => { t.string('kind', 30).nullable(); } });
+      if (!(await k.schema.hasTable('vendors'))) await k.schema.createTable('vendors', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('name', 200).notNullable(); t.string('kind', 20).defaultTo('lab');
+        t.string('gstin', 20); t.string('state_code', 4); t.string('pan', 20); t.string('nabl_cert', 60); t.string('nabl_valid_till', 10); t.text('services');
+        t.string('contact', 120); t.string('phone', 40); t.string('email', 190); t.text('address'); json(t, 'bank'); t.boolean('active').defaultTo(true); t.string('created_at', 32);
+        t.index(['company_id', 'name']);
+      });
+      if (!(await k.schema.hasTable('outsource_jobs'))) await k.schema.createTable('outsource_jobs', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.integer('vendor_id').unsigned().nullable(); t.integer('sample_id').unsigned().notNullable();
+        json(t, 'test_ids'); t.string('status', 12).defaultTo('to_send'); t.string('sent_date', 10); t.string('expected_date', 10); t.string('received_date', 10);
+        t.string('vendor_report_no', 80); t.string('vendor_report_date', 10); t.text('notes'); t.integer('created_by').unsigned().nullable(); t.string('created_at', 32); t.string('updated_at', 32);
+        t.index(['company_id', 'status']); t.index(['company_id', 'sample_id']);
+      });
+      if (!(await k.schema.hasTable('purchases'))) await k.schema.createTable('purchases', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.integer('vendor_id').unsigned().nullable(); t.string('category', 20).notNullable();
+        t.string('bill_no', 80); t.string('bill_date', 10); t.string('sac', 12); t.decimal('rate', 6, 2).defaultTo(18);
+        t.decimal('taxable', 14, 2).defaultTo(0); t.decimal('cgst', 14, 2).defaultTo(0); t.decimal('sgst', 14, 2).defaultTo(0); t.decimal('igst', 14, 2).defaultTo(0);
+        t.decimal('total', 14, 2).defaultTo(0); t.decimal('tds', 14, 2).defaultTo(0); t.boolean('itc_eligible').defaultTo(true); t.string('status', 12).defaultTo('unpaid');
+        t.integer('job_id').unsigned().nullable(); t.integer('equipment_id').unsigned().nullable(); t.text('notes');
+        t.integer('created_by').unsigned().nullable(); t.string('created_at', 32);
+        t.index(['company_id', 'bill_date']);
+      });
+      if (!(await k.schema.hasTable('purchase_payments'))) await k.schema.createTable('purchase_payments', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.integer('purchase_id').unsigned().notNullable(); t.string('date', 10);
+        t.decimal('amount', 14, 2).defaultTo(0); t.string('mode', 30); t.string('ref', 120); t.integer('created_by').unsigned().nullable(); t.string('created_at', 32);
+        t.index(['company_id', 'purchase_id']);
+      });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

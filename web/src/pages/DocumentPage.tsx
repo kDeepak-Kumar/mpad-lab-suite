@@ -11,6 +11,7 @@ import { RecordForm } from '../components/RecordForm';
 import { DocRenderer } from '../doc/DocRenderer';
 import { WhatsAppButton, WhatsAppModal, docWaVars } from '../components/WhatsApp';
 import { trackRecent } from '../favorites';
+import { TermsPicker } from '../components/Terms';
 import { SharingButton, SharingModal } from '../components/Sharing';
 import { DesignPanel } from '../doc/DesignPanel';
 import { DocDetailsForm } from '../doc/LinesEditor';
@@ -270,7 +271,10 @@ function ReportDetails({ doc, data, onChange, disabled }: { doc: any; data: Reco
         <Group justify="space-between" mb={4}><Text size="sm" fw={500}>Remarks / conclusion</Text>{can('useAI') && !disabled && <Button size="compact-xs" variant="light" leftSection={<IconSparkles size={12} />} loading={busy} onClick={suggest}>Suggest with AI</Button>}</Group>
         <Textarea disabled={disabled} placeholder="e.g. The soil can be used for backfilling purpose." autosize minRows={2} value={data.remarks ?? ''} onChange={(e) => set({ remarks: e.currentTarget.value })} />
       </div>
-      <Textarea disabled={disabled} label="Notes (one per line – only notes for the tests on this report are pre-filled)" autosize minRows={4} value={notes.join('\n')} onChange={(e) => set({ notes: e.currentTarget.value.split('\n') })} />
+      <div>
+        <Group justify="space-between" mb={4}><Text size="sm" fw={500}>Notes (one per line – only notes for the tests on this report are pre-filled)</Text><TermsPicker kind="report" disabled={disabled} onInsert={(l) => set({ notes: [...notes.filter(Boolean), ...l] })} /></Group>
+        <Textarea disabled={disabled} autosize minRows={4} value={notes.join('\n')} onChange={(e) => set({ notes: e.currentTarget.value.split('\n') })} />
+      </div>
       {(data.charts ?? []).length > 0 && <Switch disabled={disabled} label={`Include ${data.charts.length} graph(s) with explanations`} checked={!data.hideCharts} onChange={(e) => set({ hideCharts: !e.currentTarget.checked })} />}
       {doc.status === 'issued' && <Alert color="teal" variant="light">Issued on {data.issueText}.</Alert>}
     </Stack>

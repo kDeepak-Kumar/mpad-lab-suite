@@ -540,6 +540,9 @@ finance.get('/dashboard', h(async (req) => {
   const due = outstanding.map((o) => ({ ...o, balance: Number(o.total) - (paid.get(o.id) ?? 0) }));
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
   const reminders: { kind: string; text: string; link: string; level: 'info' | 'warning' | 'danger'; ref?: string }[] = [];
+  const disposals = await db('samples as s').leftJoin('clients as c', 'c.id', 's.client_id').where('s.company_id', cid).whereNull('s.disposed_at').whereNotNull('s.dispose_after')
+    .andWhere('s.dispose_after', '<=', td).select('s.id', 's.code', 's.dispose_after', 'c.name as client_name').orderBy('s.dispose_after').limit(30);
+  for (const d of disposals) reminders.push({ kind: 'Sample disposal', text: `${d.code} (${d.client_name}) – retention ended ${formatDate(d.dispose_after)}. Dispose or return, then record it.`, link: `/samples?open=${d.id}`, level: 'info', ref: `dispose:${d.id}` });
   for (const t of tests.filter((t) => ['pending', 'in_progress', 'returned'].includes(t.status) && t.due_date && t.due_date <= td))
     reminders.push({ kind: 'Test due', text: `${t.report_name || t.billing_name} – ${t.code} (${t.client_name}) due ${formatDate(t.due_date)}`, link: `/tests/${t.id}`, level: t.due_date < td ? 'danger' : 'warning', ref: `due:test:${t.id}:${t.due_date}:${t.due_date < td ? 'late' : 'today'}` });
   for (const t of tests.filter((t) => t.status === 'returned')) reminders.push({ kind: 'Returned', text: `${t.report_name || t.billing_name} – ${t.code} needs correction`, link: `/tests/${t.id}`, level: 'warning', ref: `returned:test:${t.id}` });

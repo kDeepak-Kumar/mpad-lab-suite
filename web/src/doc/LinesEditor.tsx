@@ -1,3 +1,4 @@
+import { TermsPicker } from '../components/Terms';
 import { moveItem, useDragReorder } from '../components/useDragReorder';
 import { useState } from 'react';
 import { ActionIcon, Button, Group, Modal, NumberInput, Paper, Select, Stack, Switch, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
@@ -85,7 +86,10 @@ export function DocDetailsForm({ kind, data, onChange, totals, disabled }: { kin
         </Group>
       )}
       {!includeGst && kind === 'quote' && showQty && <Text size="xs" c="dimmed">Tip: keep a note such as “GST will be applicable on above rates”.</Text>}
-      {kind === 'quote' && <Textarea disabled={disabled} label="Notes / terms (one per line)" autosize minRows={3} value={data.notes ?? ''} onChange={(e) => set({ notes: e.currentTarget.value })} />}
+      {kind === 'quote' && <div>
+        <Group justify="space-between" mb={4}><Text size="sm" fw={500}>Notes / terms (one per line)</Text><TermsPicker kind="quote" disabled={disabled} onInsert={(l) => set({ notes: [...String(data.notes ?? '').split('\n').filter(Boolean), ...l].join('\n') })} /></Group>
+        <Textarea disabled={disabled} autosize minRows={3} value={data.notes ?? ''} onChange={(e) => set({ notes: e.currentTarget.value })} />
+      </div>}
       {paste && <EnquiryModal catalog={catalog ?? []} onClose={() => setPaste(false)} onLines={(ls, notes) => { set({ lines: [...lines, ...ls.map((x) => { const c = catalog?.find((k) => k.id === x.catalogId); return c ? { ...lineFrom(c, x.qty || 1) } : { description: x.description, rate: 0, qty: x.qty || 1, unit: '', remarks: '' }; })], notes: notes ? `${data.notes ?? ''}\n${notes}`.trim() : data.notes }); setPaste(false); }} />}
     </Stack>
   );

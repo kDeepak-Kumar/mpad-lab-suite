@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Group, Modal, MultiSelect, Select, SimpleGrid, Stack, Text, Badge, Paper, SegmentedControl, Divider } from '@mantine/core';
+import { Alert, Button, Group, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Divider } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useCan, useFields, useMe, isAdmin } from '../ctx';
@@ -50,6 +50,7 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
         </SimpleGrid>
         <Divider label="Sample details" labelPosition="left" />
         <RecordForm object="sample" value={v} onChange={setV} cols={3} exclude={['accreditation']} />
+        <NumberInput mt="sm" w={260} label="Retain sample for (days)" description="Blank = default for this material (Settings → Defaults)" min={0} max={3650} value={v.retention_days ?? ''} onChange={(x) => setV({ ...v, retention_days: x === '' ? null : Number(x) })} />
         <Divider label="Tests" labelPosition="left" />
         <MultiSelect label="Tests to perform" required searchable data={testable.filter((c) => !v.material || c.material === v.material || tests.includes(String(c.id))).map((c) => ({ value: String(c.id), label: `${c.report_name || c.billing_name} (${c.method || c.code})${c.nabl ? '' : ' · Non-NABL'}` }))} value={tests} onChange={setTests} />
         {outOfScope.length > 0 && <Alert color={isAdmin(me) ? 'orange' : 'red'} variant="light">Not in NABL scope: {outOfScope.map((c) => c.report_name || c.billing_name).join(', ')}. {isAdmin(me) ? 'As System Admin you may still register them.' : 'Register those as a separate Non-NABL sample.'}</Alert>}
@@ -71,6 +72,7 @@ export function SamplesPage() {
   const { data: sample, reload: reloadSample } = useApi<any>(openId ? `/samples/${openId}` : null, [openId]);
   const [edit, setEdit] = useState<any>(null);
   const [waSample, setWaSample] = useState<any>(null);
+  const [dispose, setDispose] = useState<any>(null);
   const cols: Col[] = [
     { key: 'code', label: 'Job code', render: (s) => <Text size="sm" fw={550}>{s.code}</Text> },
     { key: 'accreditation', label: 'Type', type: 'badge' },
@@ -82,6 +84,8 @@ export function SamplesPage() {
     { key: 'tests', label: 'Tests', value: (s) => s.tests.map((t: any) => t.report_name || t.billing_name).join(', '),
       render: (s) => <Group gap={4}>{s.tests.map((t: any, i: number) => <Badge key={i} size="xs" variant="light" color={t.status === 'reported' ? 'teal' : t.status === 'accepted' ? 'green' : 'gray'} style={{ textTransform: 'none' }}>{t.report_name || t.billing_name}</Badge>)}</Group> },
     { key: 'status', label: 'Status', type: 'status' },
+    { key: 'disposal', label: 'Disposal', filter: 'select', value: (s) => (s.disposed_at ? 'Disposed' : s.dispose_after && s.dispose_after <= localToday() ? 'Due' : 'Retained'),
+      render: (s) => (s.disposed_at ? <Badge size="sm" variant="light" color="gray">Disposed {dmy(s.disposed_at)}</Badge> : s.dispose_after ? <Badge size="sm" variant="light" color={s.dispose_after <= localToday() ? 'orange' : 'teal'}>{s.dispose_after <= localToday() ? 'Due' : 'Keep till'} {dmy(s.dispose_after)}</Badge> : '') },
     { key: 'quantity', label: 'Quantity', hidden: true }, { key: 'condition', label: 'Condition', hidden: true }, { key: 'customer_ref', label: 'Customer ref', hidden: true },
     ...custom,
   ];
@@ -103,7 +107,7 @@ export function SamplesPage() {
             ) : (
               <Paper withBorder p="sm">
                 <SimpleGrid cols={2} spacing={4}>
-                  {[['Client', sample.client?.name], ['ULR', sample.ulr || '—'], ['Received', dmy(sample.received_date)], ['Material', sample.material], ['Quantity', sample.quantity], ['Condition', sample.condition], ['Source', sample.source], ['Customer ref', sample.customer_ref], ['Description', sample.description]].map(([k, val]) => <Text key={k} size="sm"><Text span c="dimmed">{k}: </Text>{val}</Text>)}
+                  {[['Client', sample.client?.name], ['ULR', sample.ulr || '—'], ['Received', dmy(sample.received_date)], ['Retention', sample.disposed_at ? `Disposed ${dmy(sample.disposed_at)} – ${sample.disposal_method}${sample.disposal_note ? ` (${sample.disposal_note})` : ''}` : sample.dispose_after ? `${sample.retention_days} days · keep till ${dmy(sample.dispose_after)}` : '—'], ['Material', sample.material], ['Quantity', sample.quantity], ['Condition', sample.condition], ['Source', sample.source], ['Customer ref', sample.customer_ref], ['Description', sample.description]].map(([k, val]) => <Text key={k} size="sm"><Text span c="dimmed">{k}: </Text>{val}</Text>)}
                 </SimpleGrid>
               </Paper>
             )}
@@ -111,10 +115,21 @@ export function SamplesPage() {
             <Group justify="flex-end">
               {can('sample.edit') && !edit && <Button variant="default" onClick={() => setEdit({ ...sample })}>Edit details</Button>}
               <Button variant="default" onClick={() => printLabel(sample)}>Print sample label</Button>
+              {can('sample.edit') && (sample.disposed_at
+                ? <Button variant="subtle" color="gray" onClick={async () => { await api(`/samples/${sample.id}/disposal`, { method: 'DELETE' }); reloadSample(); reload(); }}>Undo disposal</Button>
+                : <Button variant="default" onClick={() => setDispose({ date: localToday(), method: 'Discarded as per lab procedure', note: '' })}>Record disposal</Button>)}
               <WhatsAppButton label="Acknowledge on WhatsApp" variant="light" onClick={() => setWaSample(sample)} />
             </Group>
           </Stack>
         )}
+      </Modal>
+      <Modal opened={Boolean(dispose)} onClose={() => setDispose(null)} title={`Record disposal · ${sample?.code ?? ''}`}>
+        {dispose && <Stack>
+          <TextInput type="date" label="Date" value={dispose.date} onChange={(e) => setDispose({ ...dispose, date: e.currentTarget.value })} />
+          <Select label="What was done" data={['Discarded as per lab procedure', 'Returned to customer', 'Retained on customer request', 'Sent to external lab', 'Consumed in testing']} value={dispose.method} onChange={(x) => setDispose({ ...dispose, method: x })} allowDeselect={false} />
+          <TextInput label="Remarks (optional)" value={dispose.note} onChange={(e) => setDispose({ ...dispose, note: e.currentTarget.value })} />
+          <Group justify="flex-end"><Button onClick={async () => { await api(`/samples/${sample.id}/disposal`, { body: dispose }); ok('Disposal recorded'); setDispose(null); reloadSample(); reload(); }}>Save</Button></Group>
+        </Stack>}
       </Modal>
       {waSample && <WhatsAppModal context="sample" clientId={waSample.client_id} title={`Sample ${waSample.code} received`} link={{ kind: 'sample', id: waSample.id }}
         vars={{ client: waSample.client?.name, sample_code: waSample.code, date: dmy(waSample.received_date), tests: [...new Set((waSample.tests ?? []).map((t: any) => t.report_name || t.billing_name))].join(', ') }}

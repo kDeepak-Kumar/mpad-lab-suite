@@ -56,6 +56,7 @@ const sampleSchema = z.object({
   material: z.string().min(1), description: z.string().optional().nullable(), quantity: z.string().optional().nullable(),
   condition: z.string().optional().nullable(), source: z.string().optional().nullable(), received_date: isoDate,
   customer_ref: z.string().optional().nullable(), specification: z.string().optional().nullable(), sample_label: z.string().optional().nullable(),
+  retention_days: z.number().int().min(0).max(3650).nullable().optional(),
   tests: z.array(z.object({ catalog_id: z.number(), assigned_to: z.number().nullable().optional(), due_date: isoDate.optional().nullable().or(z.literal('')) })).min(1, 'Add at least one test'),
 });
 lab.get('/samples', allow('sample.read'), h(async (req) => {
@@ -84,7 +85,8 @@ lab.post('/samples', allow('samples'), h(async (req) => {
     const { seq, number: code } = await nextNumber(trx, cid, 'sample', ctx);
     const ulr = accreditation === 'NABL' ? await formatWithSeq(cid, 'ulr', seq, ctx, trx) : null;
     const { tests, custom, ...sample } = s;
-    const id = await insert(trx, 'samples', { ...sample, accreditation, data: toJson(mergeCustom(null, custom)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
+    const keep = s.retention_days ?? await defaultRetention(cid, s.material);
+    const id = await insert(trx, 'samples', { ...sample, retention_days: keep, dispose_after: addDays(s.received_date, keep), accreditation, data: toJson(mergeCustom(null, custom)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
     for (const t of tests) {
       const cat = cats.find((c) => c.id === t.catalog_id)!;
       const tpl = await getObsTemplate(cid, cat.obs_template_code, null, trx);
@@ -107,12 +109,35 @@ lab.get('/samples/:id', allow('sample.read'), h(async (req) => {
   const r0 = row(s, ['data']) as Record<string, any>;
   return { ...r0, custom: r0.data?.custom ?? {}, client, tests };
 }));
+/** Days a sample is retained after receipt: Settings → Defaults (per material, else general), else 30. */
+async function defaultRetention(cid: number, material: string) {
+  const d = ((await getCompany(cid)).defaults ?? {}) as Record<string, any>;
+  return Number(d.retentionByMaterial?.[material] ?? d.retentionDays ?? 30);
+}
+lab.post('/samples/:id/disposal', allow('samples'), h(async (req) => {
+  const cid = req.user.company_id, id = Number(req.params.id);
+  const ex = await db('samples').where({ id, company_id: cid }).first('id');
+  if (!ex) throw new HttpError(404, 'Sample not found');
+  const b = z.object({ date: isoDate, method: z.string().min(2).max(60), note: z.string().max(500).optional().nullable() }).parse(req.body);
+  await db('samples').where({ id }).update({ disposed_at: b.date, disposal_method: b.method, disposal_note: b.note ?? null, disposed_by: req.user.id });
+  await audit(db, req.user, 'sample', id, 'disposal recorded', b);
+  return { ok: true };
+}));
+lab.delete('/samples/:id/disposal', allow('samples'), h(async (req) => {
+  await db('samples').where({ id: Number(req.params.id), company_id: req.user.company_id }).update({ disposed_at: null, disposal_method: null, disposal_note: null, disposed_by: null });
+  await audit(db, req.user, 'sample', Number(req.params.id), 'disposal undone');
+  return { ok: true };
+}));
 lab.put('/samples/:id', allow('samples'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
   const ex = await db('samples').where({ id, company_id: cid }).first();
   if (!ex) throw new HttpError(404, 'Sample not found');
   if (ex.status === 'reported' && !isAdmin(req.user)) throw new HttpError(409, 'This sample is already reported');
   const { custom, ...patch } = (await cleanWrite(cid, req.user.roleDef, 'sample', sampleSchema.omit({ tests: true }).partial().parse(req.body), { creating: false })) as Record<string, any>;
+  if (patch.retention_days !== undefined || patch.received_date) {
+    const keep = patch.retention_days ?? ex.retention_days ?? await defaultRetention(cid, ex.material);
+    patch.retention_days = keep; patch.dispose_after = addDays(patch.received_date ?? ex.received_date, keep);
+  }
   if (patch.accreditation === 'NABL' && !ex.ulr) {
     const client = await db('clients').where({ id: ex.client_id }).first();
     patch.ulr = await formatWithSeq(cid, 'ulr', ex.seq, { date: ex.received_date, client: client?.short_code, material: ex.material });

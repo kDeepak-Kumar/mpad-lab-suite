@@ -13,6 +13,10 @@ const t = (code: string, material: string, billing_name: string, report_name: st
  * the lab edits them (and the NABL flag) in Settings → Catalog.
  */
 export const PACK_CATALOG: CatalogSeed[] = [
+  // Water and cement chemistry – usually sub-contracted (mark them Outsourced in the Rate card)
+  t('WAT-456', 'Water', 'Water for construction – IS 456 parameters', 'Water for construction purposes', 'IS 3025 / IS 456 : 2000', 3000, 'WAT-456', 5, 'Per sample', { nabl: false }),
+  t('WAT-10500', 'Water', 'Drinking water – physical & chemical (IS 10500)', 'Drinking water analysis', 'IS 3025 / IS 10500 : 2012', 4500, 'WAT-10500', 5, 'Per sample', { nabl: false }),
+  t('CEM-CHEM', 'Cement', 'Chemical analysis of cement', 'Chemical analysis of cement', 'IS 4032 : 1985', 5000, 'CEM-CHEM', 7, 'Per sample', { nabl: false }),
   // Soil
   t('SOIL-MC', 'Soil', 'Natural moisture content of soil', 'Natural moisture content', 'IS 2720 (Part 2) : 1973 RA 2020', 300, 'SOIL-MC', 1),
   t('SOIL-SG', 'Soil', 'Specific gravity of soil', 'Specific gravity', 'IS 2720 (Part 3/Sec 1) : 1980 RA 2021', 600, 'SOIL-SG'),
