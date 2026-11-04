@@ -62,7 +62,23 @@ async function sync(cid: number, period: string, userId: number) {
     for (const r of rows) await insert(db, 'gst_entries', { ...r, created_by: userId, created_at: now(), updated_at: now() });
     if (mine.length) refreshed++; else added++;
   }
-  return { added, refreshed, removed, invoices: invoices.length };
+  // Vendor bills (sub-contracted tests, equipment, consumables, calibration…) → purchases / input tax credit.
+  const bills = await db('purchases as p').leftJoin('vendors as v', 'v.id', 'p.vendor_id').where('p.company_id', cid).andWhere('p.bill_date', '>=', from).andWhere('p.bill_date', '<=', to)
+    .select('p.*', 'v.name as vendor_name', 'v.gstin as vendor_gstin', 'v.state_code as vendor_state');
+  const prev = await db('gst_entries').where({ company_id: cid, period, kind: 'purchase', source: 'bill' });
+  for (const b of bills) {
+    const mine = prev.filter((e) => e.document_id === b.id);
+    if (mine.some((e) => e.edited || e.excluded)) continue;
+    const row = { company_id: cid, period, kind: 'purchase', source: 'bill', document_id: b.id, doc_no: b.bill_no, doc_date: b.bill_date, party: b.vendor_name ?? '', gstin: b.vendor_gstin ?? '',
+      pos: String(company.stateCode ?? ''), sac: b.sac ?? '', rate: num(b.rate), taxable: r2(num(b.taxable)), cgst: r2(num(b.cgst)), sgst: r2(num(b.sgst)), igst: r2(num(b.igst)), cess: 0,
+      total: r2(num(b.total)), itc_eligible: Boolean(b.itc_eligible), note: `Vendor bill (${b.category})` };
+    if (mine.length) await db('gst_entries').whereIn('id', mine.map((e) => e.id)).delete();
+    await insert(db, 'gst_entries', { ...row, created_by: userId, created_at: now(), updated_at: now() });
+    if (mine.length) refreshed++; else added++;
+  }
+  const gone = prev.filter((e) => !e.edited && !bills.some((b) => b.id === e.document_id));
+  if (gone.length) { await db('gst_entries').whereIn('id', gone.map((e) => e.id)).delete(); removed += gone.length; }
+  return { added, refreshed, removed, invoices: invoices.length, bills: bills.length };
 }
 
 function summarise(sales: any[], purchases: any[], ownState: string) {

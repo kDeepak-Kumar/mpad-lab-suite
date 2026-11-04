@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Group, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Divider } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconTruckDelivery } from '@tabler/icons-react';
+import { JOB_STATUS } from './Outsourcing';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useCan, useFields, useMe, isAdmin } from '../ctx';
 import { PageHeader, StatusBadge, TypeBadge } from '../components/ui';
@@ -111,6 +112,7 @@ export function SamplesPage() {
                 </SimpleGrid>
               </Paper>
             )}
+            <SampleOutsourcing sample={sample} />
             <ListView id="sample-tests" rows={sample.tests} onRow={(t) => nav(`/tests/${t.id}`)} columns={[{ key: 'test', label: 'Test', value: (t) => t.report_name || t.billing_name }, { key: 'assignee', label: 'Assigned' }, { key: 'due_date', label: 'Due', type: 'date' }, { key: 'status', label: 'Status', type: 'status' }]} />
             <Group justify="flex-end">
               {can('sample.edit') && !edit && <Button variant="default" onClick={() => setEdit({ ...sample })}>Edit details</Button>}
@@ -147,4 +149,34 @@ function printLabel(s: any) {
     ${s.ulr ? `<div style="font-size:11px">ULR: ${s.ulr}</div>` : ''}<div style="font-size:11px">Tests: ${s.tests.map((t: any) => t.report_name || t.billing_name).join(', ')}</div></div>
     <script>window.onload=()=>{window.print();}</script></body></html>`);
   w.document.close();
+}
+
+/** Outsourced jobs of a sample, and sending more of its tests to an external lab. */
+function SampleOutsourcing({ sample }: { sample: any }) {
+  const nav = useNavigate();
+  const can = useCan();
+  const { data: jobs, reload } = useApi<any[]>(`/outsourcing?sample_id=${sample.id}`, [sample.id]);
+  const { data: vendors } = useApi<any[]>(can('manageOutsourcing') ? '/vendors' : null, []);
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState<{ tests: string[]; vendor: string | null }>({ tests: [], vendor: null });
+  const taken = new Set((jobs ?? []).filter((j) => j.status !== 'cancelled').flatMap((j) => j.test_ids));
+  const free = sample.tests.filter((t: any) => !taken.has(t.id) && ['pending', 'in_progress'].includes(t.status));
+  if (!jobs?.length && !can('manageOutsourcing')) return null;
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Group justify="space-between">
+        <Group gap="xs"><IconTruckDelivery size={16} color="#7a5af8" /><Text size="sm" fw={600}>External laboratory</Text>
+          {(jobs ?? []).map((j) => <Badge key={j.id} variant="light" color={JOB_STATUS[j.status]?.color} style={{ cursor: 'pointer', textTransform: 'none' }} onClick={() => nav(`/outsourcing?open=${j.id}`)}>{j.vendor_name ?? 'Lab not chosen'} · {JOB_STATUS[j.status]?.label}</Badge>)}
+          {!jobs?.length && <Text size="xs" c="dimmed">All tests in-house</Text>}</Group>
+        {can('manageOutsourcing') && free.length > 0 && <Button size="compact-xs" variant="light" onClick={() => setOpen(true)}>Outsource tests…</Button>}
+      </Group>
+      <Modal opened={open} onClose={() => setOpen(false)} title="Send tests to an external laboratory">
+        <Stack>
+          <MultiSelect label="Tests" data={free.map((t: any) => ({ value: String(t.id), label: t.report_name || t.billing_name }))} value={v.tests} onChange={(x) => setV({ ...v, tests: x })} />
+          <Select label="External laboratory" searchable clearable data={(vendors ?? []).map((x) => ({ value: String(x.id), label: x.name }))} value={v.vendor} onChange={(x) => setV({ ...v, vendor: x })} description="Add labs under Purchases → Vendors" />
+          <Group justify="flex-end"><Button disabled={!v.tests.length} onClick={async () => { const r = await api<any>('/outsourcing', { body: { sample_id: sample.id, test_ids: v.tests.map(Number), vendor_id: v.vendor ? Number(v.vendor) : null } }); setOpen(false); reload(); nav(`/outsourcing?open=${r.id}`); }}>Create job</Button></Group>
+        </Stack>
+      </Modal>
+    </Paper>
+  );
 }

@@ -12,3 +12,4 @@ screenshots/
 *.sqlite-shm
 *.sqlite-wal
 data/
+web/public/ocr/

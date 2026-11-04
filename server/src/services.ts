@@ -123,11 +123,19 @@ export async function buildReportData(cid: number, testIds: number[]) {
     const label = lv && !isError(lv) ? formatValue(lv) : '';
     const multi = (perKey.get(`${t.template_code}|${t.sample_id}`) ?? 1) > 1;
     const suffix = sampleIds.length > 1 ? ` – ${sampleLabel}` : '';
+    // Results from an external (sub-contracted) laboratory are identified on the report – ISO/IEC 17025 clause 7.8.2.1 (p).
+    const ext = (obsIn as { external?: { vendor?: string; nabl?: string; reportNo?: string; reportDate?: string } }).external;
+    if (ext?.vendor) {
+      const n = `* ${cat?.report_name || tpl.name}: tested by external laboratory ${ext.vendor}${ext.nabl ? ` (NABL accreditation ${ext.nabl})` : ''}${ext.reportNo ? `, their test report no. ${ext.reportNo}` : ''}${ext.reportDate ? ` dated ${formatDate(ext.reportDate)}` : ''}.`;
+      if (!notes.includes(n)) notes.push(n);
+    }
     for (const rr of tpl.reportRows.filter((x) => shown(`row:${x.group ?? ''}|${x.name}|${x.unit}`))) {
+      // direct-entry sheets (water, chemical): a parameter left blank was not tested – leave it off the report
+      if (!tpl.grids.length && formatValue(results[rr.result] as never, rr.decimals) === '') continue;
       const group = multi && label ? label : rr.group;
       const key = `${tpl.code}|${multi ? label : ''}|${rr.group ?? ''}|${rr.name}|${rr.unit}`;
       let r = rows.find((x) => x.key === key);
-      if (!r) { r = { key, group, name: rr.name, unit: rr.unit, method: cat?.method || tpl.method, spec: '', values: sampleIds.map(() => '') }; rows.push(r); }
+      if (!r) { r = { key, group, name: ext?.vendor ? `${rr.name} *` : rr.name, unit: rr.unit, method: cat?.method || tpl.method, spec: '', values: sampleIds.map(() => '') }; rows.push(r); }
       r.values[sIdx] = formatValue(results[rr.result] as never, rr.decimals);
       if (!r.spec) r.spec = reportSpec(rr, res);
     }

@@ -130,6 +130,7 @@ export function CompanySettings() {
             {T('Default SAC', 'defaults.sac')}
             <NumberInput label="Quotation validity (days)" value={v.defaults?.validityDays ?? 30} onChange={(x) => set('defaults.validityDays', Number(x))} />
             <NumberInput label="Retain samples for (days after receipt)" description="Default when a material has no own value" value={v.defaults?.retentionDays ?? 30} onChange={(x) => set('defaults.retentionDays', Number(x))} />
+            <NumberInput label="Keep vendor reports & bills in the app (months)" description="Then moved to the archive folder (backed up, still downloadable)" min={1} max={120} value={v.defaults?.retainMonths ?? 12} onChange={(x) => set('defaults.retainMonths', Number(x))} />
           </SimpleGrid>
           <Text size="sm" fw={500} mt="md">Sample retention per material (days)</Text>
           <SimpleGrid cols={{ base: 2, md: 4 }} mt={4}>

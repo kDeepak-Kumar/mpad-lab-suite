@@ -368,6 +368,7 @@ const catSchema = z.object({
   unit: z.string().optional().nullable(), rate: z.coerce.number().min(0, 'Rate cannot be negative').optional(), sac: z.string().optional().nullable(), gst_rate: z.coerce.number().min(0).max(28, 'GST rate must be between 0 and 28 %').optional(),
   conditions: z.string().optional().nullable(), report_notes: z.string().optional().nullable(), obs_template_code: z.string().optional().nullable(),
   tat_days: z.coerce.number().int('Turnaround must be whole days').min(0).max(365).optional().nullable(), active: z.boolean().optional(), custom,
+  performed_by: z.enum(['inhouse', 'vendor']).optional(), vendor_id: z.number().nullable().optional(),
 });
 core.get('/catalog', h(async (req) => (await db('catalog').where({ company_id: req.user.company_id }).orderBy(['material', 'billing_name']))
   .map((r: Record<string, any>) => stripHidden(req.user.roleDef, 'catalog', withCustom(r)))));

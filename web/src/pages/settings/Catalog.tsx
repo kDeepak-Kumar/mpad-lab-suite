@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, FileButton, Group, Modal, Select, Stack, Text, Alert, Badge } from '@mantine/core';
+import { Button, FileButton, Group, Modal, Paper, SegmentedControl, Select, Stack, Text, Alert, Badge } from '@mantine/core';
 import { api, downloadCsv, ok, parseCsv, useApi } from '../../api';
 import { useCan } from '../../ctx';
 import { PageHeader } from '../../components/ui';
@@ -27,6 +27,7 @@ export function CatalogSettings() {
     { key: 'report_name', label: 'Report name' }, { key: 'material', label: 'Material', filter: 'select' }, { key: 'method', label: 'Method' },
     { key: 'scope', label: 'Scope', value: (c) => (c.nabl ? 'NABL' : 'Non-NABL'), type: 'badge' },
     { key: 'unit', label: 'Unit', filter: 'select' }, { key: 'rate', label: 'Rate', type: 'money' },
+    { key: 'performed_by', label: 'Performed by', filter: 'select', value: (c) => (c.performed_by === 'vendor' ? 'Outsourced' : 'In-house'), render: (c) => (c.performed_by === 'vendor' ? <Badge size="sm" variant="light" color="grape">Outsourced</Badge> : <Text size="xs" c="dimmed">In-house</Text>) },
     { key: 'obs_template_code', label: 'Observation sheet', render: (c) => c.obs_template_code ?? <Text size="xs" c="dimmed">quote only</Text> },
     { key: 'active', label: 'Active', value: (c) => (c.active ? 'Yes' : 'No'), filter: 'select', hidden: true },
     ...custom,
@@ -48,6 +49,7 @@ export function CatalogSettings() {
 
 function CatalogModal({ item, templates, onClose, readOnly, canDelete }: { item: any; templates: any[]; onClose: (saved: boolean) => void; readOnly: boolean; canDelete: boolean }) {
   const [v, setV] = useState<any>(item);
+  const { data: vendors } = useApi<any[]>('/vendors', []);
   const save = async () => {
     const { id, company_id, created_at, data, ...body } = v;
     if (id) await api(`/catalog/${id}`, { method: 'PUT', body }); else await api('/catalog', { body });
@@ -58,6 +60,14 @@ function CatalogModal({ item, templates, onClose, readOnly, canDelete }: { item:
       <Stack>
         <RecordForm object="catalog" value={v} onChange={setV} cols={3} disabled={readOnly} exclude={['obs_template_code']} />
         <Select label="Observation sheet" clearable disabled={readOnly} data={templates.map((t) => ({ value: t.code, label: `${t.name} (${t.code} v${t.version})` }))} value={v.obs_template_code ?? null} onChange={(x) => setV({ ...v, obs_template_code: x })} description="Leave empty for services that are only quoted/billed (transport, mobilisation…)" />
+        <Paper withBorder p="sm" radius="md">
+          <Group align="flex-end" gap="md" wrap="wrap">
+            <div><Text size="sm" fw={500} mb={4}>Performed by</Text>
+              <SegmentedControl disabled={readOnly} value={v.performed_by === 'vendor' ? 'vendor' : 'inhouse'} onChange={(x) => setV({ ...v, performed_by: x, vendor_id: x === 'inhouse' ? null : v.vendor_id })} data={[{ value: 'inhouse', label: 'In-house' }, { value: 'vendor', label: 'Outsourced (external lab)' }]} /></div>
+            {v.performed_by === 'vendor' && <Select w={260} label="Default external lab" clearable searchable disabled={readOnly} data={(vendors ?? []).filter((x) => x.kind === 'lab' || x.kind === 'other').map((x) => ({ value: String(x.id), label: x.name }))} value={v.vendor_id ? String(v.vendor_id) : null} onChange={(x) => setV({ ...v, vendor_id: x ? Number(x) : null })} />}
+          </Group>
+          {v.performed_by === 'vendor' && <Text size="xs" c="dimmed" mt={6}>Registering a sample with this test creates an Outsourced tests job (“to send”). Add vendors under Purchases → Vendors.</Text>}
+        </Paper>
         <Group justify="space-between">
           {item.id && canDelete ? <Button variant="subtle" color="red" onClick={async () => { if (window.confirm('Delete this item? Items already used on tests are deactivated instead.')) { await api(`/catalog/${item.id}`, { method: 'DELETE' }); onClose(true); } }}>Delete</Button> : <span />}
           {!readOnly && <Button onClick={save} disabled={!v.billing_name}>Save</Button>}

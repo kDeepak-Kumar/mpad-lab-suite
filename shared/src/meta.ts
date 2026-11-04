@@ -79,7 +79,7 @@ export interface Layout { object: string; fields: string[]; hidden: string[]; li
 export const TABS: { key: string; label: string }[] = [
   { key: 'home', label: 'Home' }, { key: 'clients', label: 'Clients' }, { key: 'followups', label: 'Follow-ups' }, { key: 'quotes', label: 'Quotations' }, { key: 'workorders', label: 'Work orders' },
   { key: 'samples', label: 'Sample register' }, { key: 'tests', label: 'Tests & observations' }, { key: 'prepare', label: 'Prepare report' }, { key: 'reports', label: 'Reports' },
-  { key: 'invoices', label: 'Invoices' }, { key: 'payments', label: 'Payments' }, { key: 'ledger', label: 'Ledgers' }, { key: 'gst', label: 'GST returns' }, { key: 'registers', label: 'Registers' },
+  { key: 'invoices', label: 'Invoices' }, { key: 'payments', label: 'Payments' }, { key: 'ledger', label: 'Ledgers' }, { key: 'gst', label: 'GST returns' }, { key: 'purchases', label: 'Purchases & vendor bills' }, { key: 'outsourcing', label: 'Outsourced tests' }, { key: 'registers', label: 'Registers' },
   { key: 'analytics', label: 'Analytics & AI' }, { key: 'company', label: 'Company & branding' }, { key: 'catalog', label: 'Rate card' }, { key: 'equipment', label: 'Equipment' },
   { key: 'templates', label: 'Templates' }, { key: 'users', label: 'Users' }, { key: 'setup', label: 'Setup (customise)' },
 ];
@@ -97,7 +97,7 @@ export const OWD_OPTIONS: { value: Owd; label: string; hint: string }[] = [
 export const ACTIONS: { key: string; label: string }[] = [
   { key: 'enterObservations', label: 'Enter observation sheets' }, { key: 'reviewTests', label: 'Review (accept/return) observations' },
   { key: 'prepareReports', label: 'Prepare test reports' }, { key: 'signReports', label: 'Verify, sign and issue reports' },
-  { key: 'issueInvoices', label: 'Issue invoices' }, { key: 'recordPayments', label: 'Record payments' }, { key: 'manageGst', label: 'Prepare GST returns' },
+  { key: 'issueInvoices', label: 'Issue invoices' }, { key: 'recordPayments', label: 'Record payments' }, { key: 'manageGst', label: 'Prepare GST returns' }, { key: 'managePurchases', label: 'Record vendor bills, purchases and payments' }, { key: 'manageOutsourcing', label: 'Send samples to external labs and enter their results' },
   { key: 'viewAnalytics', label: 'View analytics & dashboards' }, { key: 'useAI', label: 'Use the AI assistant' },
   { key: 'manageTemplates', label: 'Edit templates' }, { key: 'manageSettings', label: 'Company settings' },
   { key: 'manageUsers', label: 'Manage users' }, { key: 'manageCustomization', label: 'Customise fields, picklists, layouts, roles' },
@@ -123,16 +123,16 @@ const acts = (keys: string[]) => Object.fromEntries(ACTIONS.map((a) => [a.key, k
 export const BUILTIN_ROLES: RoleDef[] = [
   { key: 'admin', label: 'System Administrator', system: true, admin: true, tabs: TABS.map((t) => t.key), objects: objs({}, all), actions: acts(ACTIONS.map((a) => a.key)), fields: {} },
   { key: 'owner', label: 'Owner / Director', system: true, tabs: TABS.map((t) => t.key), objects: objs({}, all), actions: acts(ACTIONS.map((a) => a.key)), fields: {} },
-  { key: 'frontdesk', label: 'Front desk / Sales', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'workorders', 'samples', 'tests', 'reports', 'invoices', 'payments'],
-    objects: objs({ client: ce, quote: ce, workorder: ce, sample: ce, test: ro, report: ro, invoice: ce, payment: ro, catalog: ro, equipment: none }), actions: acts(['useAI']), fields: {} },
+  { key: 'frontdesk', label: 'Front desk / Sales', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'workorders', 'samples', 'outsourcing', 'tests', 'reports', 'invoices', 'payments'],
+    objects: objs({ client: ce, quote: ce, workorder: ce, sample: ce, test: ro, report: ro, invoice: ce, payment: ro, catalog: ro, equipment: none }), actions: acts(['useAI', 'manageOutsourcing']), fields: {} },
   { key: 'technician', label: 'Technician', system: true, tabs: ['home', 'samples', 'tests'],
     objects: objs({ sample: ro, test: { read: true, create: false, edit: true, delete: false }, catalog: ro, equipment: ro }), actions: acts(['enterObservations']), fields: { 'catalog.rate': 'hidden' } },
-  { key: 'reviewer', label: 'Reviewer / Technical manager', system: true, tabs: ['home', 'samples', 'tests', 'prepare', 'reports', 'equipment', 'templates'],
-    objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'manageTemplates', 'useAI']), fields: {} },
-  { key: 'signatory', label: 'Authorised signatory', system: true, tabs: ['home', 'samples', 'tests', 'prepare', 'reports', 'equipment', 'templates', 'analytics'],
-    objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'signReports', 'manageTemplates', 'viewAnalytics', 'useAI']), fields: {} },
-  { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'invoices', 'payments', 'ledger', 'gst', 'registers', 'analytics'],
-    objects: objs({ client: { ...ce, viewAll: true }, quote: { ...ro, viewAll: true }, workorder: ro, invoice: { ...ce, viewAll: true, modifyAll: true }, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'manageGst', 'viewAnalytics', 'useAI']), fields: {} },
+  { key: 'reviewer', label: 'Reviewer / Technical manager', system: true, tabs: ['home', 'samples', 'outsourcing', 'tests', 'prepare', 'reports', 'equipment', 'templates'],
+    objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'manageTemplates', 'useAI', 'manageOutsourcing']), fields: {} },
+  { key: 'signatory', label: 'Authorised signatory', system: true, tabs: ['home', 'samples', 'outsourcing', 'tests', 'prepare', 'reports', 'equipment', 'templates', 'analytics'],
+    objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'signReports', 'manageTemplates', 'viewAnalytics', 'useAI', 'manageOutsourcing']), fields: {} },
+  { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'invoices', 'payments', 'ledger', 'gst', 'purchases', 'registers', 'analytics'],
+    objects: objs({ client: { ...ce, viewAll: true }, quote: { ...ro, viewAll: true }, workorder: ro, invoice: { ...ce, viewAll: true, modifyAll: true }, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'manageGst', 'managePurchases', 'viewAnalytics', 'useAI']), fields: {} },
 ];
 
 /** Does a role allow an action or object operation, e.g. "reviewTests" or "invoice.edit"? */

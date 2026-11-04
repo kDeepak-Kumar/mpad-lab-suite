@@ -26,7 +26,7 @@ function entrySheet(o: { code: string; name: string; material: string; category:
     procedure: ['Enter each result as reported (by this laboratory or the external laboratory). Leave a parameter blank if it was not tested – blank rows are left off the report.'],
     sampleCalc: [],
     example: {
-      input: { header: Object.fromEntries(o.params.filter((p) => !p.text).slice(0, 2).map((p, i) => [p.key, 7 + i])) },
+      input: { header: Object.fromEntries(o.params.filter((p) => !p.text).slice(0, 2).map((p, i) => [p.key, 7 + i])), grids: {} },
       expect: Object.fromEntries(o.params.filter((p) => !p.text).slice(0, 2).map((p, i) => [`r_${p.key}`, 7 + i])),
     },
   };

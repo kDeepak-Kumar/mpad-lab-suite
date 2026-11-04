@@ -24,7 +24,13 @@ find "$DIR" -name 'suite-*.sqlite.gz' -mtime +"$KEEP_DAYS" -delete
 if command -v rclone >/dev/null && rclone listremotes 2>/dev/null | grep -q '^gdrive:$'; then
   rclone copy "$OUT.gz" gdrive:MPAD-Backups --quiet && echo "$(date) copied to Google Drive"
   rclone delete gdrive:MPAD-Backups --min-age "${DRIVE_KEEP_DAYS}d" --include 'suite-*.sqlite.gz' --quiet || true
+  # archived vendor reports / evidence / bills (moved out of the database after the retention period) – kept forever on Drive
+  ARCH="$(dirname "$DB")/archive"
+  [ -d "$ARCH" ] && rclone copy "$ARCH" gdrive:MPAD-Backups/archive --quiet && echo "$(date) archive synced to Google Drive"
 fi
+# local copy of the archive folder alongside the database backups
+ARCH="$(dirname "$DB")/archive"
+[ -d "$ARCH" ] && tar -czf "$DIR/archive-latest.tgz" -C "$(dirname "$ARCH")" archive 2>/dev/null || true
 
 USED=$(df --output=pcent "$DIR" | tail -1 | tr -dc '0-9')
 [ "${USED:-0}" -ge "${DISK_WARN_PCT:-80}" ] && echo "$(date) WARNING: disk ${USED}% full"

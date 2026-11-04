@@ -6,7 +6,7 @@ import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlig
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
   IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt,
-  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
+  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
@@ -46,6 +46,8 @@ const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
 const GstPage = page(() => import('./pages/Gst'), 'GstPage');
+const OutsourcingPage = page(() => import('./pages/Outsourcing'), 'OutsourcingPage');
+const PurchasesPage = page(() => import('./pages/Purchases'), 'PurchasesPage');
 const Required2fa = page(() => import('./pages/Account'), 'Required2fa');
 
 export { useMe };
@@ -61,11 +63,13 @@ const NAV: NavItem[] = [
   { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconTestPipe, section: 'Laboratory' },
   { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask2, section: 'Laboratory' },
   { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconFileAnalytics, section: 'Laboratory' },
+  { label: 'Outsourced tests', to: '/outsourcing', tab: 'outsourcing', icon: IconTruckDelivery, section: 'Laboratory' },
   { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconCertificate, section: 'Laboratory' },
   { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconRuler2, section: 'Laboratory' },
   { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconFileInvoice, section: 'Accounts' },
   { label: 'Payments', to: '/payments', tab: 'payments', icon: IconWallet, section: 'Accounts' },
   { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook2, section: 'Accounts' },
+  { label: 'Purchases', to: '/purchases', tab: 'purchases', icon: IconShoppingCart, section: 'Accounts' },
   { label: 'GST returns', to: '/gst', tab: 'gst', icon: IconReceiptTax, section: 'Accounts' },
   { label: 'Registers', to: '/registers', tab: 'registers', icon: IconTable, section: 'Accounts' },
   { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconBuilding, section: 'Administration' },
@@ -194,6 +198,8 @@ function Shell() {
             <Route path="/workorders" element={<WorkOrdersPage />} />
             <Route path="/workorders/:id" element={<WorkOrderDetail />} />
             <Route path="/samples" element={<SamplesPage />} />
+            <Route path="/outsourcing" element={<OutsourcingPage />} />
+            <Route path="/purchases" element={<PurchasesPage />} />
             <Route path="/tests" element={<TestsPage />} />
             <Route path="/tests/:id" element={<TestSheetPage />} />
             <Route path="/payments" element={<PaymentsPage />} />

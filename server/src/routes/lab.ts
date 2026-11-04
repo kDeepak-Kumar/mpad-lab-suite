@@ -87,14 +87,18 @@ lab.post('/samples', allow('samples'), h(async (req) => {
     const ulr = accreditation === 'NABL' ? await formatWithSeq(cid, 'ulr', seq, ctx, trx) : null;
     const { tests, custom, ...sample } = s;
     const id = await insert(trx, 'samples', { ...sample, retention_days: keep, dispose_after: addDays(s.received_date, keep), accreditation, data: toJson(mergeCustom(null, custom)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
+    const outsourced = new Map<number | null, number[]>();
     for (const t of tests) {
       const cat = cats.find((c) => c.id === t.catalog_id)!;
       const tpl = await getObsTemplate(cid, cat.obs_template_code, null, trx);
-      await insert(trx, 'tests', {
+      const testId = await insert(trx, 'tests', {
         company_id: cid, sample_id: id, catalog_id: cat.id, template_code: tpl.code, template_version: tpl.version, status: 'pending',
         assigned_to: t.assigned_to ?? null, due_date: t.due_date || addDays(s.received_date, Number(cat.tat_days ?? 3)), created_at: now(),
       });
+      if (cat.performed_by === 'vendor') outsourced.set(cat.vendor_id ?? null, [...(outsourced.get(cat.vendor_id ?? null) ?? []), testId]);
     }
+    // Tests done by an external lab: one "to send" job per vendor, so nobody forgets to dispatch the sample.
+    for (const [vendor, ids] of outsourced) await insert(trx, 'outsource_jobs', { company_id: cid, sample_id: id, vendor_id: vendor, test_ids: toJson(ids), status: 'to_send', created_by: req.user.id, created_at: now(), updated_at: now() });
     await audit(trx, req.user, 'sample', id, 'registered', { code, ulr, accreditation, tests: tests.length });
     return { id, code, ulr, accreditation };
   });
@@ -211,7 +215,9 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
   const raw = body.observation as ObservationInput;
   const norm = normalizeObservation(tpl, { ...raw, header: raw.header ?? {}, grids: raw.grids ?? {} });
   if (norm.issues.length) throw new HttpError(400, `Please correct: ${norm.issues.slice(0, 3).join('; ')}${norm.issues.length > 3 ? ` (+${norm.issues.length - 3} more)` : ''}`);
-  const obs = norm.input;
+  // keep the external-lab marker when the sheet is edited by hand later
+  const prevExt = (t.observation as { external?: unknown } | null)?.external;
+  const obs: ObservationInput & { external?: unknown } = prevExt ? { ...norm.input, external: prevExt } : norm.input;
   // refresh equipment calibration data from the register (never trust the client copy)
   for (const slot of tpl.equipment ?? []) {
     const sel = obs.equipment?.[slot.key];
