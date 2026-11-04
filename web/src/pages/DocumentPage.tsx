@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMediaQuery } from '@mantine/hooks';
 import { Alert, Button, Checkbox, Grid, Group, Menu, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
-import { IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck, IconCopy } from '@tabler/icons-react';
+import { IconFileSearch, IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck, IconCopy } from '@tabler/icons-react';
 import { applyOverrides, computeTotals, DEFAULT_TEMPLATES, type DocOverrides, type DocTemplate, type LineInput } from '@suite/shared';
 import { api, ok, useApi, dmy, money } from '../api';
 import { useCan, useMe, isAdmin, useFields } from '../ctx';
@@ -136,6 +136,7 @@ function DocumentView({ id }: { id: number }) {
         <Menu.Item onClick={() => run(async () => { const r = await api<any>(`/documents/${doc.id}/to-workorder`, { method: 'POST' }); nav(`/workorders/${r.id}`); })}>Create work order (register samples next)</Menu.Item>
         <Menu.Item onClick={() => run(async () => { const r = await api<any>(`/documents/${doc.id}/to-invoice`, { method: 'POST' }); nav(`/documents/${r.id}`); })}>Create invoice from this quote</Menu.Item>
       </Menu.Dropdown></Menu>);
+    if (can('useAI')) actions.push(<Button key="cr" variant="subtle" leftSection={<IconFileSearch size={15} />} onClick={() => nav(`/contract-review?quote=${doc.id}`)}>Check against contract</Button>);
     if (doc.status !== 'draft') actions.push(<Button key="rev" variant="default" onClick={() => run(async () => { const r = await api<any>(`/documents/${doc.id}/revise`, { method: 'POST' }); nav(`/documents/${r.id}`); }, 'Revision created')}>Revise</Button>);
   }
   if (doc.kind === 'invoice') {

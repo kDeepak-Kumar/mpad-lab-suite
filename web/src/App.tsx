@@ -6,7 +6,7 @@ import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlig
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
   IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt,
-  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
+  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
@@ -46,6 +46,7 @@ const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
 const GstPage = page(() => import('./pages/Gst'), 'GstPage');
+const ContractReviewPage = page(() => import('./pages/ContractReview'), 'ContractReviewPage');
 const OutsourcingPage = page(() => import('./pages/Outsourcing'), 'OutsourcingPage');
 const PurchasesPage = page(() => import('./pages/Purchases'), 'PurchasesPage');
 const Required2fa = page(() => import('./pages/Account'), 'Required2fa');
@@ -60,6 +61,7 @@ const NAV: NavItem[] = [
   { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar, section: 'Sales & CRM' },
   { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardCheck, section: 'Sales & CRM' },
   { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconCalendarEvent, section: 'Sales & CRM' },
+  { label: 'Contract review', to: '/contract-review', tab: 'quotes', icon: IconFileSearch, section: 'Sales & CRM' },
   { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconTestPipe, section: 'Laboratory' },
   { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask2, section: 'Laboratory' },
   { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconFileAnalytics, section: 'Laboratory' },
@@ -199,6 +201,7 @@ function Shell() {
             <Route path="/workorders/:id" element={<WorkOrderDetail />} />
             <Route path="/samples" element={<SamplesPage />} />
             <Route path="/outsourcing" element={<OutsourcingPage />} />
+            <Route path="/contract-review" element={<ContractReviewPage />} />
             <Route path="/purchases" element={<PurchasesPage />} />
             <Route path="/tests" element={<TestsPage />} />
             <Route path="/tests/:id" element={<TestSheetPage />} />

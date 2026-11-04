@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { runReport, withTime, REPORT_OBJECTS, DATE_PRESETS, type ReportSpec, type LineInput } from '@suite/shared';
 import { db, parseJson, today } from './db';
-import { allow, h, HttpError, type AuthUser } from './auth';
-import { getCompany, paidAgainst } from './services';
+import { allow, can, h, HttpError, type AuthUser } from './auth';
+import { audit, getCompany, paidAgainst } from './services';
 
 export const analytics = Router();
 
@@ -136,15 +136,15 @@ analytics.get('/analytics/insights', allow('viewAnalytics'), h(async (req) => {
 // ---------------- AI assistant ----------------
 type AiSettings = { enabled?: boolean; provider?: string; baseUrl?: string; model?: string; apiKey?: string };
 
-export async function chat(ai: AiSettings, system: string, user: string): Promise<string> {
+export async function chat(ai: AiSettings, system: string, user: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string> {
   if (!ai?.enabled || !ai.model) throw new Error('AI is not configured');
-  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 45000);
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45000);
   try {
     if (ai.provider === 'anthropic') {
       const r = await fetch(`${(ai.baseUrl || 'https://api.anthropic.com').replace(/\/$/, '')}/v1/messages`, {
         method: 'POST', signal: ctl.signal,
         headers: { 'content-type': 'application/json', 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: ai.model, max_tokens: 1500, system, messages: [{ role: 'user', content: user }] }),
+        body: JSON.stringify({ model: ai.model, max_tokens: opts.maxTokens ?? 1500, system, messages: [{ role: 'user', content: user }] }),
       });
       const j: any = await r.json();
       if (!r.ok) throw new Error(j?.error?.message || `AI request failed (${r.status})`);
@@ -153,7 +153,7 @@ export async function chat(ai: AiSettings, system: string, user: string): Promis
     const r = await fetch(`${(ai.baseUrl || '').replace(/\/$/, '')}/chat/completions`, {
       method: 'POST', signal: ctl.signal,
       headers: { 'content-type': 'application/json', ...(ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {}) },
-      body: JSON.stringify({ model: ai.model, temperature: 0, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+      body: JSON.stringify({ model: ai.model, temperature: 0, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
     });
     const j: any = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error?.message || (Array.isArray(j) ? j[0]?.error?.message : '') || `AI request failed (${r.status})`);
@@ -319,6 +319,73 @@ analytics.post('/ai/assist', h(async (req) => {
   const cats = await db('catalog').where({ company_id: req.user.company_id, active: true }).select('id', 'billing_name', 'report_name', 'material', 'unit', 'rate');
   const text = await chat(ai, `Extract the tests/services a client is asking for from their enquiry and map each to the rate card. Reply ONLY with JSON {"lines":[{"catalogId": number|null, "description": string, "qty": number}], "notes": string}. Rate card: ${JSON.stringify(cats)}`, String(input).slice(0, 6000));
   return extractJson(text);
+}));
+
+/**
+ * Contract / specification review: what testing the project needs, where it differs from how the lab normally works,
+ * unusual obligations, and price differences against a quotation or the rate card. Rates are compared in code,
+ * not by the model, so the figures are exact.
+ */
+analytics.post('/ai/contract-review', h(async (req) => {
+  if (!can(req.user, 'useAI')) throw new HttpError(403, 'Your role cannot use the AI assistant');
+  const cid = req.user.company_id;
+  const b = z.object({ text: z.string().min(200, 'The document has too little readable text'), fileName: z.string().max(200).optional(), quote_id: z.number().nullable().optional() }).parse(req.body);
+  const company = await getCompany(cid);
+  const ai = company.ai as AiSettings | undefined;
+  if (!ai?.enabled) throw new HttpError(400, 'Turn on the AI assistant in Settings → Company & branding → AI assistant');
+  const cats = await db('catalog').where({ company_id: cid, active: true }).select('id', 'billing_name', 'report_name', 'material', 'method', 'unit', 'rate', 'nabl', 'tat_days', 'performed_by');
+  let quote: { number: string; lines: { description: string; rate: number; qty?: number; catalogId?: number }[] } | null = null;
+  if (b.quote_id) {
+    const q = await db('documents').where({ id: b.quote_id, company_id: cid, kind: 'quote' }).first('number', 'data');
+    if (!q) throw new HttpError(404, 'Quotation not found');
+    const d = JSON.parse(q.data || '{}'); quote = { number: q.number, lines: (d.lines ?? []).map((l: any) => ({ description: l.description, rate: Number(l.rate), qty: l.qty, catalogId: l.catalogId })) };
+  }
+  const d = (company.defaults ?? {}) as Record<string, any>;
+  const lab = {
+    name: company.name, accreditation: company.accreditation?.certNo ? `${company.accreditation.body || 'NABL'} ${company.accreditation.certNo}` : 'none',
+    standardTerms: { quotationValidityDays: d.validityDays ?? 30, paymentTermsDays: d.paymentTermsDays ?? 30, sampleRetentionDays: d.retentionDays ?? 30, gstRate: d.gstRate ?? 18, reportsVia: 'email PDF with QR verification' },
+    rateCard: cats.map((c) => ({ id: c.id, test: c.report_name || c.billing_name, material: c.material, method: c.method, unit: c.unit, rate: Number(c.rate), nabl: Boolean(c.nabl), turnaroundDays: c.tat_days, outsourced: c.performed_by === 'vendor' })),
+  };
+  const MAX = 60000;
+  const text = b.text.length > MAX ? b.text.slice(0, MAX) : b.text;
+  const system = `You are the technical manager of an Indian civil-engineering materials testing laboratory reviewing a client's contract / tender / specification before quoting.
+Use ONLY what the document says. Quote the clause number or a short phrase so it can be found. Do not invent requirements, rates or clauses. If something is unclear, put it in "questions".
+Reply ONLY with JSON:
+{"summary": string (3-5 sentences),
+ "requirements": [{"test": string, "material": string, "standard": string, "frequency": string, "acceptance": string, "clause": string, "catalogId": number|null, "scope": "in_scope"|"outsourced"|"not_offered"}],
+ "deviations": [{"topic": string, "contract": string, "ourPractice": string, "risk": "low"|"medium"|"high", "suggestion": string}],
+ "unusualClauses": [{"clause": string, "text": string, "why": string, "risk": "low"|"medium"|"high"}],
+ "contractRates": [{"item": string, "catalogId": number|null, "rate": number, "unit": string, "clause": string}],
+ "questions": [string]}
+"catalogId" must be an id from the lab's rate card when the test clearly matches, else null. "scope": in_scope if the rate card has it in-house, outsourced if marked outsourced, not_offered if no match.
+Deviations: compare against the lab's standard terms and normal practice (test methods/IS codes, frequencies, turnaround, witness/third-party testing, sample retention, reporting format, NABL requirement, payment terms, penalties).
+Unusual clauses: liability or penalties beyond the fee, liquidated damages, indemnities, unlimited retesting at lab cost, very long retention, onerous payment terms (> 60 days, payment after client's client pays), IP/confidentiality traps, jurisdiction away from the lab's city, mandatory insurance, retention money, bank guarantees.
+contractRates: only rates actually printed in the document (BOQ / schedule of rates), as numbers in rupees.`;
+  const out = await chat(ai, system, `LAB:\n${JSON.stringify(lab)}\n\nDOCUMENT${b.fileName ? ` (${b.fileName})` : ''}:\n${text}`, { maxTokens: 6000, timeoutMs: 150000 });
+  let j: any;
+  try { j = extractJson(out); } catch { throw new HttpError(502, 'The AI reply could not be read. Try again, or use a stronger model in Settings → AI assistant.'); }
+  const arr = (x: unknown) => (Array.isArray(x) ? x : []);
+  const catById = new Map(cats.map((c) => [c.id, c]));
+  const validId = (x: unknown) => (typeof x === 'number' && catById.has(x) ? x : null);
+  // exact rate comparison: contract rate vs our quotation line (if a quotation was chosen) else the rate card
+  const pricing = arr(j.contractRates).map((r: any) => {
+    const id = validId(r.catalogId);
+    const qLine = quote?.lines.find((l) => (id && l.catalogId === id));
+    const ours = qLine ? qLine.rate : id ? Number(catById.get(id)!.rate) : null;
+    const theirs = Number(r.rate);
+    const diff = ours !== null && Number.isFinite(theirs) ? Math.round((theirs - ours) * 100) / 100 : null;
+    return { item: String(r.item ?? ''), unit: String(r.unit ?? ''), clause: String(r.clause ?? ''), contractRate: Number.isFinite(theirs) ? theirs : null, ourRate: ours, source: qLine ? `quotation ${quote!.number}` : id ? 'rate card' : '', catalogId: id,
+      difference: diff, pct: diff !== null && ours ? Math.round((diff / ours) * 1000) / 10 : null };
+  });
+  const result = {
+    summary: String(j.summary ?? ''), truncated: b.text.length > MAX,
+    requirements: arr(j.requirements).map((r: any) => ({ ...r, catalogId: validId(r.catalogId), catalogName: validId(r.catalogId) ? (catById.get(r.catalogId)!.report_name || catById.get(r.catalogId)!.billing_name) : null })),
+    deviations: arr(j.deviations), unusualClauses: arr(j.unusualClauses), pricing, questions: arr(j.questions).map(String),
+    quote: quote ? quote.number : null,
+    notQuoted: quote ? arr(j.requirements).filter((r: any) => validId(r.catalogId) && !quote!.lines.some((l) => l.catalogId === r.catalogId)).map((r: any) => String(r.test)) : [],
+  };
+  await audit(db, req.user, 'company', cid, 'contract reviewed with AI', { file: b.fileName, requirements: result.requirements.length, flags: result.unusualClauses.length });
+  return result;
 }));
 
 export { type AuthUser };

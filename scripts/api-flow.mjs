@@ -385,4 +385,15 @@ await api('accounts', 'POST', '/purchases', { vendor_id: lab2.id, category: 'cal
 expect((await api('owner', 'GET', '/vendors')).find((v) => v.id === lab2.id).spend === 3540, 'vendor spend totals all bills');
 await api('frontdesk', 'POST', `/samples/${ws.id}/disposal`, { date: today, method: 'Returned to customer' });
 expect((await api('frontdesk', 'GET', `/samples/${ws.id}`)).disposed_at === today, 'sample disposal recorded');
+console.log('17. AI contract review');
+if (process.env.MOCK_AI) {
+  await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });
+  const wq3 = await api('frontdesk', 'POST', '/documents', { kind: 'quote', client_id: client.id, data: { lines: [{ description: 'Water test', rate: 3200, qty: 1, catalogId: wat.id }] } });
+  const cr = await api('frontdesk', 'POST', '/ai/contract-review', { text: 'CONTRACT. '.repeat(30) + ' Clause 14.2 Testing of water as per IS 456. BOQ 7 water testing Rs 2500 per sample.', fileName: 'contract.pdf', quote_id: wq3.id });
+  expect(cr.summary.startsWith('Testing contract'), 'contract text reaches the AI and the summary comes back');
+  const pw = cr.pricing.find((p) => p.catalogId === wat.id);
+  expect(pw.ourRate === 3200 && pw.difference === -700 && pw.pct === -21.9 && /quotation/.test(pw.source), 'price difference vs the quotation computed exactly (₹2500 vs ₹3200 = −₹700, −21.9%)');
+  expect(cr.requirements[1].catalogId === null && cr.unusualClauses[0].risk === 'high' && cr.deviations.length === 1, 'invented rate-card ids are dropped; risky clauses and deviations returned');
+  await api('owner', 'PUT', '/company', { ai: { enabled: false } });
+} else console.log('  (skipped – set MOCK_AI to run)');
 console.log('\nALL CHECKS PASSED');
