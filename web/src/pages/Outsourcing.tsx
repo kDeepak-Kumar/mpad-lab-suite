@@ -7,8 +7,9 @@ import { api, dmy, localToday, money, ok, useApi } from '../api';
 import { useCan } from '../ctx';
 import { PageHeader } from '../components/ui';
 import { ListView } from '../components/ListView';
-import { compressFile, blobToBase64, readDocumentText, matchValues, findReportMeta, type Match } from '../lib/vendorDocs';
+import { readDocumentText, matchValues, findReportMeta, type Match } from '../lib/vendorDocs';
 import { BillModal } from './Purchases';
+import { Attachments } from '../components/Attachments';
 
 export const JOB_STATUS: Record<string, { label: string; color: string }> = {
   to_send: { label: 'To send', color: 'orange' }, sent: { label: 'Sent to lab', color: 'blue' }, received: { label: 'Report received', color: 'grape' },
@@ -16,15 +17,6 @@ export const JOB_STATUS: Record<string, { label: string; color: string }> = {
 };
 const STEP = { to_send: 0, sent: 1, received: 2, entered: 3, cancelled: 0 } as Record<string, number>;
 const kb = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-
-/** Compress, then attach to a record. Returns a short "5.2 MB → 410 KB" note. */
-export async function uploadCompressed(entity: string, entityId: number, file: File, kind: string, onProgress?: (m: string) => void) {
-  onProgress?.('Compressing…');
-  const p = await compressFile(file, onProgress);
-  onProgress?.('Uploading…');
-  await api('/files', { body: { entity, entity_id: entityId, name: p.name, mime: p.mime, data: await blobToBase64(p.blob), kind } });
-  return { packed: p, note: p.after < p.before ? `${kb(p.before)} → ${kb(p.after)}` : kb(p.after) };
-}
 
 export function OutsourcingPage() {
   const { data, reload } = useApi<any[]>('/outsourcing');
@@ -55,7 +47,6 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
   const { data: vendors } = useApi<any[]>('/vendors', []);
   const can = useCan();
   const nav = useNavigate();
-  const [busy, setBusy] = useState<string | null>(null);
   const [f, setF] = useState<any>({});
   const [importing, setImporting] = useState<any>(null);
   const [bill, setBill] = useState(false);
@@ -67,12 +58,6 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
     await api(`/outsourcing/${id}`, { method: 'PUT', body: { vendor_id: f.vendor_id ? Number(f.vendor_id) : null, sent_date: f.sent_date || null, expected_date: f.expected_date || null, vendor_report_no: f.vendor_report_no || null, vendor_report_date: f.vendor_report_date || null, notes: f.notes || null, ...patch } });
     if (msg) ok(msg); reload(); onChange();
   };
-  const upload = async (file: File | null, kind: string) => {
-    if (!file) return;
-    try { const r = await uploadCompressed('outsource', id, file, kind, setBusy); ok(`${file.name} attached (${r.note})`); reload(); onChange(); } finally { setBusy(null); }
-  };
-  const reports = j.files.filter((x: any) => x.kind === 'vendor_report');
-  const evidence = j.files.filter((x: any) => x.kind !== 'vendor_report');
   return (
     <Drawer opened onClose={onClose} position="right" size="xl" title={<Group gap="xs"><Text fw={650}>Outsourced · {j.sample_code}</Text><Badge variant="light" color={JOB_STATUS[j.status]?.color}>{JOB_STATUS[j.status]?.label}</Badge></Group>}>
       <Stack>
@@ -89,7 +74,6 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
           <Stepper.Step label="Results" description="Read & confirm" icon={<IconScan size={16} />} />
           <Stepper.Step label="Report" description="Verify & sign" icon={<IconFileCheck size={16} />} />
         </Stepper>
-        {busy && <Alert variant="light" icon={<Loader size={16} />}>{busy}</Alert>}
 
         <Paper withBorder p="md" radius="md">
           <Text fw={600} mb="xs">1 · Dispatch</Text>
@@ -103,9 +87,9 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
           <Group mt="sm" gap="xs">
             {edit && j.status === 'to_send' && <Button size="xs" leftSection={<IconTruckDelivery size={14} />} onClick={() => save({ status: 'sent' }, 'Marked as sent')}>Mark as sent</Button>}
             {edit && j.status !== 'to_send' && <Button size="xs" variant="default" onClick={() => save({}, 'Saved')}>Save</Button>}
-            {edit && <FileButton accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(file) => upload(file, 'evidence')}>{(p) => <Button size="xs" variant="light" leftSection={<IconPaperclip size={14} />} {...p}>Attach evidence (optional)</Button>}</FileButton>}
           </Group>
-          <FileList files={evidence} />
+          <div style={{ marginTop: 10 }}><Attachments entity="outsource" entityId={id} kind="evidence" readOnly={!edit} compact buttonLabel="Attach evidence (optional)" onChange={() => { reload(); onChange(); }}
+            emptyText="Optional: delivery challan, courier slip or a photo of the sealed sample." /></div>
         </Paper>
 
         <Paper withBorder p="md" radius="md">
@@ -114,10 +98,10 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
             <TextInput label="Their report no." disabled={!edit} value={f.vendor_report_no} onChange={(e) => setF({ ...f, vendor_report_no: e.currentTarget.value })} />
             <TextInput type="date" label="Their report date" disabled={!edit} value={f.vendor_report_date} onChange={(e) => setF({ ...f, vendor_report_date: e.currentTarget.value })} />
           </SimpleGrid>
-          <Group mt="sm" gap="xs">
-            {edit && <FileButton accept="application/pdf,image/png,image/jpeg,image/webp" onChange={async (file) => { await upload(file, 'vendor_report'); if (file && ['to_send', 'sent'].includes(j.status)) await save({ status: 'received' }); }}>{(p) => <Button size="xs" leftSection={<IconFileUpload size={14} />} {...p}>Upload their report</Button>}</FileButton>}
-          </Group>
-          <FileList files={reports} onRead={edit ? (file) => setImporting(file) : undefined} />
+          <div style={{ marginTop: 10 }}><Attachments entity="outsource" entityId={id} kind="vendor_report" readOnly={!edit} compact buttonLabel="Upload their report"
+            onUploaded={() => { if (['to_send', 'sent'].includes(j.status)) save({ status: 'received' }); }} onChange={() => { reload(); onChange(); }}
+            emptyText="Upload the report the external lab issued – then use Read results."
+            rowAction={edit ? (file) => <Button size="compact-xs" variant="light" color="grape" leftSection={<IconScan size={13} />} onClick={() => setImporting(file)}>Read results</Button> : undefined} /></div>
         </Paper>
 
         <Paper withBorder p="md" radius="md">
@@ -131,20 +115,6 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
       {importing && <ImportModal job={j} file={importing} onClose={(done) => { setImporting(null); if (done) { reload(); onChange(); } }} />}
       {bill && <BillModal initial={{ category: 'subcontract', vendor_id: j.vendor_id, job_id: j.id, bill_date: localToday(), rate: 18 }} onClose={(s) => { setBill(false); if (s) { reload(); onChange(); } }} />}
     </Drawer>
-  );
-}
-
-function FileList({ files, onRead }: { files: any[]; onRead?: (f: any) => void }) {
-  if (!files.length) return null;
-  return (
-    <Stack gap={4} mt="sm">
-      {files.map((x) => (
-        <Group key={x.id} gap="xs" justify="space-between" className="file-row">
-          <Group gap={6}><IconPaperclip size={14} color="#667085" /><Anchor size="sm" href={`/api/files/${x.id}/download?inline=1`} target="_blank">{x.name}</Anchor><Text size="xs" c="dimmed">{kb(x.size)} · {dmy(String(x.created_at).slice(0, 10))}{x.archived_at ? ' · archived' : ''}</Text></Group>
-          {onRead && <Button size="compact-xs" variant="light" color="grape" leftSection={<IconScan size={13} />} onClick={() => onRead(x)}>Read results</Button>}
-        </Group>
-      ))}
-    </Stack>
   );
 }
 

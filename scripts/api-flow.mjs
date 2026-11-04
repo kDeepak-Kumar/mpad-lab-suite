@@ -385,6 +385,25 @@ await api('accounts', 'POST', '/purchases', { vendor_id: lab2.id, category: 'cal
 expect((await api('owner', 'GET', '/vendors')).find((v) => v.id === lab2.id).spend === 3540, 'vendor spend totals all bills');
 await api('frontdesk', 'POST', `/samples/${ws.id}/disposal`, { date: today, method: 'Returned to customer' });
 expect((await api('frontdesk', 'GET', `/samples/${ws.id}`)).disposed_at === today, 'sample disposal recorded');
+console.log('18. Equipment import');
+const eqRows = [
+  { 'Equipment name*': 'Example – Proving ring 50 kN', Category: 'Proving ring' },
+  { 'Equipment name*': 'Proving ring 50 kN', Category: 'proving ring', 'Equipment ID': 'IMP/PR/01', 'Certificate no.': 'CAL/1', 'Calibrated on': '15-06-2026', 'Calibration due': '14-06-2027', 'Calibration factor': '0.0521' },
+  { 'Equipment name*': 'CTM 2000 kN', Category: 'Compression testing machine', 'Equipment ID': 'IMP/CTM/01', 'Calibrated on': '2026-06-20', 'Calibration due': '2027-06-19', 'Correction factor': '1.002' },
+  { 'Equipment name*': 'Bad dates', 'Equipment ID': 'IMP/X/1', 'Calibrated on': '20-06-2026', 'Calibration due': '19-06-2025' },
+  { 'Equipment name*': 'Odd thing', Category: 'Spectrometer', 'Equipment ID': 'IMP/SP/1', 'Calibration factor': 'abc' },
+];
+let ei = await api('owner', 'POST', '/equipment/import', { rows: eqRows, dryRun: true });
+expect(ei.summary.added === 2 && ei.summary.errors === 2 && ei.results[0].status === 'skipped', `equipment import check: 2 new, 2 errors, example row skipped`);
+expect(/before the calibration date/.test(ei.results[3].message) && /not a number/.test(ei.results[4].message), 'import explains bad dates and non-numeric values');
+await api('owner', 'POST', '/equipment/import', { rows: eqRows, dryRun: false });
+let eqs = await api('owner', 'GET', '/equipment');
+const pr = eqs.find((e) => e.id_no === 'IMP/PR/01');
+expect(pr && pr.category === 'Proving ring' && pr.cal_date === '2026-06-15' && pr.due_date === '2027-06-14' && Number(pr.data.factor) === 0.0521, 'imported equipment has category, DD-MM-YYYY dates and calibration factor');
+await api('owner', 'POST', '/equipment/import', { rows: [{ 'Equipment name*': 'Proving ring 50 kN', 'Equipment ID': 'IMP/PR/01', 'Certificate no.': 'CAL/2', 'Calibrated on': '15-06-2027', 'Calibration due': '14-06-2028', 'Calibration factor': '0.0519' }], dryRun: false });
+eqs = await api('owner', 'GET', '/equipment');
+const pr2 = eqs.filter((e) => e.id_no === 'IMP/PR/01');
+expect(pr2.length === 1 && pr2[0].cert_no === 'CAL/2' && pr2[0].due_date === '2028-06-14' && Number(pr2[0].data.factor) === 0.0519 && pr2[0].category === 'Proving ring', 're-import with the same Equipment ID updates calibration (no duplicate)');
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

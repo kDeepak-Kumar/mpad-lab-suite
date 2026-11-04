@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { passwordRule, sendAccessLink } from './onboarding';
 import { docVisibility, recordAccess, restrictList } from '../sharing';
 import { z } from 'zod';
-import { DEFAULT_TEMPLATES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
+import { DEFAULT_TEMPLATES, EQUIPMENT_CATEGORIES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
 import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession } from '../auth';
 import { audit, getCompany, ledger } from '../services';
@@ -408,6 +408,81 @@ const eqCheck = (v: { cal_date?: string | null; due_date?: string | null; data?:
 };
 const eqSchema = eqBase.superRefine(eqCheck);
 const eqPatch = eqBase.partial().superRefine(eqCheck);
+/** Equipment import: header names → fields. Calibration-value columns go into data.<key>. */
+const EQ_COLS: Record<string, string> = {
+  'equipment name': 'name', 'name': 'name', 'equipment': 'name', 'category': 'category', 'equipment id': 'id_no', 'id': 'id_no', 'id no': 'id_no', 'id no.': 'id_no',
+  'make / model': 'make', 'make': 'make', 'model': 'make', 'certificate no.': 'cert_no', 'certificate no': 'cert_no', 'certificate': 'cert_no', 'cert no': 'cert_no',
+  'calibrated on': 'cal_date', 'calibration date': 'cal_date', 'calibration due': 'due_date', 'due date': 'due_date', 'next calibration': 'due_date', 'active': 'active',
+};
+const EQ_VALUE_COLS: Record<string, string> = {
+  'calibration factor': 'factor', 'correction factor': 'correction', 'least count': 'lc', 'volume': 'volume', 'mass': 'mass', 'readability': 'readability',
+  'capacity': 'capacity', 'ram area': 'ram_area', 'anvil average rebound': 'anvil_avg', 'anvil nominal rebound': 'anvil_nominal', 'reference transit time': 'ref_time',
+  'mass of sand in cone': 'cone_mass', 'sand bulk density': 'sand_density',
+};
+/** 31-12-2026, 31/12/26, 2026-12-31, Excel serial 46387, or a JS date string → YYYY-MM-DD. */
+function importDate(v: string): string | null | 'bad' {
+  const s = v.trim(); if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/); if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if (/^\d{5}$/.test(s)) { const d = new Date(Date.UTC(1899, 11, 30) + Number(s) * 86400000); return d.toISOString().slice(0, 10); }
+  const d = new Date(s); if (!Number.isNaN(d.getTime()) && /[a-z]/i.test(s)) return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return 'bad';
+}
+core.post('/equipment/import', allow('equipment.create'), h(async (req) => {
+  const { rows, dryRun } = z.object({ rows: z.array(z.record(z.any())).max(3000, 'Import at most 3,000 rows at a time'), dryRun: z.boolean().default(true) }).parse(req.body);
+  const cid = req.user.company_id;
+  const existing = await db('equipment').where({ company_id: cid }).select('id', 'name', 'id_no', 'data');
+  const byId = new Map(existing.filter((e) => e.id_no).map((e) => [String(e.id_no).trim().toLowerCase(), e]));
+  const byName = new Map(existing.filter((e) => !e.id_no).map((e) => [String(e.name).trim().toLowerCase(), e]));
+  const results: { row: number; name: string; status: string; message?: string }[] = [];
+  const seen = new Set<string>();
+  let added = 0, updated = 0, errors = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const raw: Record<string, string> = {}; const vals: Record<string, number> = {};
+    const bad: string[] = [];
+    for (const [k, v] of Object.entries(rows[i])) {
+      const h = k.replace(/\*/g, '').replace(/\(.*?\)/g, '').trim().toLowerCase();
+      const key = EQ_COLS[h]; const vk = EQ_VALUE_COLS[h];
+      const sv = String(v ?? '').trim();
+      if (key) raw[key] = sv;
+      else if (vk && sv !== '') { const n = Number(sv.replace(/,/g, '')); if (Number.isFinite(n)) vals[vk] = n; else bad.push(`${k} is not a number`); }
+    }
+    const row = i + 2, name = raw.name ?? '';
+    if (!name && !raw.id_no) { results.push({ row, name: '', status: 'skipped', message: 'Empty row' }); continue; }
+    if (/^example/i.test(name)) { results.push({ row, name, status: 'skipped', message: 'Example row' }); continue; }
+    if (!name) bad.push('Equipment name is required');
+    const cal = importDate(raw.cal_date ?? ''), due = importDate(raw.due_date ?? '');
+    if (cal === 'bad') bad.push(`Calibrated on "${raw.cal_date}" is not a date (use DD-MM-YYYY)`);
+    if (due === 'bad') bad.push(`Calibration due "${raw.due_date}" is not a date (use DD-MM-YYYY)`);
+    if (cal && due && cal !== 'bad' && due !== 'bad' && due < cal) bad.push('Due date is before the calibration date');
+    const known = raw.category ? EQUIPMENT_CATEGORIES.find((c) => c.toLowerCase() === raw.category.toLowerCase()) : undefined;
+    const note = raw.category && !known ? `Category "${raw.category}" is not in the list – saved as Other` : undefined;
+    const category = raw.category ? known ?? 'Other' : null; // blank: new equipment → Other, existing → unchanged
+    const dupKey = (raw.id_no || name).toLowerCase();
+    if (seen.has(dupKey)) bad.push(`Repeated in the file (${raw.id_no ? 'same Equipment ID' : 'same name'})`);
+    seen.add(dupKey);
+    if (bad.length) { errors++; results.push({ row, name, status: 'error', message: bad.join('; ') }); continue; }
+    const match = raw.id_no ? byId.get(raw.id_no.toLowerCase()) : byName.get(name.toLowerCase());
+    const rec: Record<string, unknown> = { name, category, id_no: raw.id_no || null, make: raw.make || null, cert_no: raw.cert_no || null, cal_date: cal || null, due_date: due || null,
+      ...(raw.active ? { active: !/^(n|no|false|0|inactive)$/i.test(raw.active) } : {}) };
+    if (match) {
+      updated++; results.push({ row, name, status: 'update', message: note ?? 'Existing equipment – details and calibration updated' });
+      if (!dryRun) {
+        const data = { ...parseJson<Record<string, unknown>>(match.data, {}), ...vals };
+        for (const k of Object.keys(rec)) if (rec[k] === null) delete rec[k]; // blank cells keep the current value
+        await db('equipment').where({ id: match.id }).update({ ...rec, data: toJson(data) });
+        await audit(db, req.user, 'equipment', match.id, 'updated (import)', { cert: rec.cert_no, due: rec.due_date });
+      }
+    } else {
+      added++; results.push({ row, name, status: 'new', message: note });
+      if (!dryRun) {
+        const id = await insert(db, 'equipment', { ...rec, category: rec.category ?? 'Other', active: rec.active ?? true, data: toJson(vals), company_id: cid, created_at: now() });
+        await audit(db, req.user, 'equipment', id, 'created (import)', { name });
+      }
+    }
+  }
+  return { results, summary: { added, updated, errors, rows: rows.length } };
+}));
 core.get('/equipment', h(async (req) => (await db('equipment').where({ company_id: req.user.company_id }).orderBy('name')).map((r: Record<string, any>) => withCustom(r))));
 core.post('/equipment', allow('equipment.create'), h(async (req) => {
   const { rest, cu } = split(await cleanWrite(req.user.company_id, req.user.roleDef, 'equipment', eqSchema.parse(req.body), { creating: true }));

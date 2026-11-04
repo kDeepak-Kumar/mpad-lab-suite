@@ -79,7 +79,14 @@ export function fileToDataUrl(file: File, maxPx = 600): Promise<string> {
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
         c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
-        resolve(c.toDataURL('image/png'));
+        // PNG keeps transparency (logos, seals, signatures); large photo-like images switch to JPEG to stay under ~900 KB
+        let url = c.toDataURL('image/png');
+        if (url.length * 0.75 > 900 * 1024) {
+          const j = document.createElement('canvas'); j.width = c.width; j.height = c.height;
+          const g = j.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, j.width, j.height); g.drawImage(c, 0, 0);
+          for (const q of [0.85, 0.75, 0.65, 0.55]) { url = j.toDataURL('image/jpeg', q); if (url.length * 0.75 <= 900 * 1024) break; }
+        }
+        resolve(url);
       };
       img.onerror = reject;
       img.src = fr.result as string;

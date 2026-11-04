@@ -51,7 +51,7 @@ async function downloadTemplate() {
 }
 
 /** Rows from .xlsx, .csv or text pasted from Excel (tab separated) → objects keyed by header. */
-async function readRows(file: File | null, pasted: string): Promise<Record<string, string>[]> {
+export async function readRows(file: File | null, pasted: string): Promise<Record<string, string>[]> {
   const toObjects = (grid: unknown[][]) => {
     const [h, ...body] = grid.filter((r) => r.some((x) => String(x ?? '').trim() !== ''));
     if (!h) return [];

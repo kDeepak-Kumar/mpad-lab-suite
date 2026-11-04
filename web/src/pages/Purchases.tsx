@@ -7,7 +7,8 @@ import { api, dmy, localToday, money, ok, useApi } from '../api';
 import { useCan, useMe } from '../ctx';
 import { PageHeader, Kpi } from '../components/ui';
 import { ListView } from '../components/ListView';
-import { uploadCompressed } from './Outsourcing';
+import { compressFile, blobToBase64, type Packed } from '../lib/vendorDocs';
+import { FilePreview, UploadPreview, kb } from '../components/Attachments';
 
 export const CATEGORIES = [
   { value: 'subcontract', label: 'Sub-contracted testing', color: 'grape' }, { value: 'equipment', label: 'Equipment', color: 'blue' },
@@ -69,7 +70,10 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
   const me = useMe();
   const [v, setV] = useState<any>({ ...initial, vendor_id: initial.vendor_id ? String(initial.vendor_id) : null, equipment_id: initial.equipment_id ? String(initial.equipment_id) : null });
   const [files, setFiles] = useState<any[]>([]);
-  const [pending, setPending] = useState<File | null>(null);
+  const [pending, setPending] = useState<Packed | null>(null);
+  const [preview, setPreview] = useState<Packed | null>(null);
+  const [viewing, setViewing] = useState<any>(null);
+  const pick = async (f: File | null) => { if (!f) return; setBusy('Compressing…'); try { setPreview(await compressFile(f, setBusy)); } finally { setBusy(''); } };
   const [busy, setBusy] = useState('');
   const [newVendor, setNewVendor] = useState(false);
   const vendor = vendors?.find((x) => String(x.id) === v.vendor_id);
@@ -81,7 +85,11 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
     try {
       const body = { vendor_id: Number(v.vendor_id), category: v.category, bill_no: v.bill_no, bill_date: v.bill_date, sac: v.sac || null, rate: Number(v.rate || 0), taxable: Number(v.taxable || 0), interstate, tds: Number(v.tds || 0), itc_eligible: v.itc_eligible !== false && v.itc_eligible !== 0, job_id: v.job_id ?? null, equipment_id: v.equipment_id ? Number(v.equipment_id) : null, notes: v.notes || null };
       const id = v.id ? (await api(`/purchases/${v.id}`, { method: 'PUT', body }), v.id) : (await api<any>('/purchases', { body })).id;
-      if (pending) { const r = await uploadCompressed('purchase', id, pending, 'bill', setBusy); ok(`Bill saved · copy attached (${r.note})`); } else ok('Bill saved');
+      if (pending) {
+        setBusy('Uploading the bill copy…');
+        await api('/files', { body: { entity: 'purchase', entity_id: id, name: pending.name, mime: pending.mime, data: await blobToBase64(pending.blob), kind: 'bill' } });
+        ok(`Bill saved · copy attached (${kb(pending.after)})`);
+      } else ok('Bill saved');
       onClose(true);
     } finally { setBusy(''); }
   };
@@ -106,8 +114,9 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
         <Switch label="Eligible for GST input tax credit" checked={v.itc_eligible !== false && v.itc_eligible !== 0} onChange={(e) => setV({ ...v, itc_eligible: e.currentTarget.checked })} />
         <Textarea label="Notes" autosize value={v.notes ?? ''} onChange={(e) => setV({ ...v, notes: e.currentTarget.value })} />
         <Group gap="xs">
-          <FileButton accept="application/pdf,image/png,image/jpeg,image/webp" onChange={setPending}>{(p) => <Button size="xs" variant="light" leftSection={<IconPaperclip size={14} />} {...p}>{pending ? pending.name : 'Attach bill copy'}</Button>}</FileButton>
-          {files.map((f) => <Anchor key={f.id} size="xs" href={`/api/files/${f.id}/download?inline=1`} target="_blank">{f.name}</Anchor>)}
+          <FileButton accept="application/pdf,image/png,image/jpeg,image/webp" onChange={pick}>{(p) => <Button size="xs" variant="light" loading={busy === 'Compressing…'} leftSection={<IconPaperclip size={14} />} {...p}>{pending ? 'Change bill copy' : 'Attach bill copy'}</Button>}</FileButton>
+          {pending && <Badge variant="light" color="teal" style={{ cursor: 'pointer', textTransform: 'none' }} onClick={() => setPreview(pending)}>{pending.name} · {kb(pending.after)} (on save)</Badge>}
+          {files.map((f) => <Anchor key={f.id} size="xs" onClick={() => setViewing(f)}>{f.name} · {kb(f.size)}</Anchor>)}
         </Group>
         {v.id && <PaymentsList bill={v} onChange={() => undefined} />}
         <Group justify="space-between">
@@ -115,6 +124,8 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
           <Button loading={Boolean(busy)} onClick={save} disabled={!v.vendor_id || !v.bill_no || !v.bill_date || v.taxable === '' || v.taxable === undefined}>{busy || 'Save bill'}</Button>
         </Group>
       </Stack>
+      {preview && <UploadPreview packed={preview} onCancel={() => setPreview(null)} onConfirm={() => { setPending(preview); setPreview(null); }} confirmLabel="Use this copy" />}
+      {viewing && <FilePreview name={viewing.name} mime={viewing.mime} url={`/api/files/${viewing.id}/download?inline=1`} onClose={() => setViewing(null)} />}
       {newVendor && <VendorModal initial={{ kind: v.category === 'subcontract' ? 'lab' : v.category === 'calibration' ? 'calibration' : 'supplier' }} onClose={async (id) => { setNewVendor(false); if (id) { await rv(); setV((x: any) => ({ ...x, vendor_id: String(id) })); } }} />}
     </Modal>
   );

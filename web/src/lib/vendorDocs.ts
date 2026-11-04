@@ -22,44 +22,79 @@ const fileToDataUrl = (b: Blob) => new Promise<string>((res, rej) => { const r =
 const loadImage = (src: string) => new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 const canvasBlob = (c: HTMLCanvasElement, q = 0.72) => new Promise<Blob>((res) => c.toBlob((b) => res(b!), 'image/jpeg', q));
 
-export interface Packed { blob: Blob; name: string; mime: string; before: number; after: number }
+export interface Packed { blob: Blob; name: string; mime: string; before: number; after: number; note?: string }
 
-/** Compress an upload, keeping text legible. Files under 300 KB are left alone. */
+/** Everything uploaded is kept under this size where possible. */
+export const TARGET_BYTES = 950 * 1024;
+
+/**
+ * Compress an upload to under ~1 MB while keeping text legible. Small files (< 250 KB) are kept as they are.
+ * Images: resized and re-encoded, stepping down until under the target. PDFs: each page re-rendered as an image,
+ * stepping down resolution/quality until the whole file is under the target. Word/Excel files cannot be compressed here.
+ */
 export async function compressFile(file: File, onProgress?: (msg: string) => void): Promise<Packed> {
   const keep = { blob: file as Blob, name: file.name, mime: file.type || 'application/octet-stream', before: file.size, after: file.size };
-  if (file.size < 300 * 1024) return keep;
+  if (file.size < 250 * 1024) return keep;
   try {
     if (/^image\/(png|jpe?g|webp)$/.test(file.type)) {
       const img = await loadImage(await fileToDataUrl(file));
-      const scale = Math.min(1, 2000 / Math.max(img.width, img.height));
-      const c = document.createElement('canvas'); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-      const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
-      const blob = await canvasBlob(c, 0.75);
-      return blob.size < file.size ? { blob, name: file.name.replace(/\.(png|webp|jpe?g)$/i, '') + '.jpg', mime: 'image/jpeg', before: file.size, after: blob.size } : keep;
+      let best: Blob | null = null;
+      for (const [px, q] of [[2000, 0.78], [1700, 0.7], [1400, 0.62], [1200, 0.55], [1000, 0.5]] as const) {
+        const scale = Math.min(1, px / Math.max(img.width, img.height));
+        const c = document.createElement('canvas'); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        best = await canvasBlob(c, q);
+        if (best.size <= TARGET_BYTES) break;
+      }
+      return best && best.size < file.size ? { blob: best, name: file.name.replace(/\.(png|webp|jpe?g)$/i, '') + '.jpg', mime: 'image/jpeg', before: file.size, after: best.size } : keep;
     }
     if (file.type === 'application/pdf') {
+      if (file.size <= TARGET_BYTES) return keep; // already small: keep the original (selectable text, sharp print)
       const lib = await pdfjs();
       const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
       const { jsPDF } = await import('jspdf');
-      let pdf: InstanceType<typeof jsPDF> | null = null;
-      for (let p = 1; p <= doc.numPages; p++) {
-        onProgress?.(`Compressing page ${p} of ${doc.numPages}…`);
-        const page = await doc.getPage(p);
-        const base = page.getViewport({ scale: 1 });
-        const vp = page.getViewport({ scale: Math.min(2.2, 1650 / base.width) });
-        const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
-        const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-        await page.render({ canvasContext: g, viewport: vp }).promise;
-        const jpg = await fileToDataUrl(await canvasBlob(c, 0.7));
-        const w = base.width, h = base.height, o = w > h ? 'l' : 'p';
-        if (!pdf) pdf = new jsPDF({ orientation: o, unit: 'pt', format: [w, h], compress: true }); else pdf.addPage([w, h], o);
-        pdf.addImage(jpg, 'JPEG', 0, 0, w, h, undefined, 'FAST');
+      // per-page budget decides the starting quality, then step down if still too big
+      const steps = [[1650, 0.72], [1400, 0.62], [1200, 0.55], [1000, 0.5], [850, 0.45]] as const;
+      let best: Blob | null = null;
+      for (const [si, [px, q]] of steps.entries()) {
+        if (si === 0 && doc.numPages > 6) continue; // long documents start one step lower
+        let pdf: InstanceType<typeof jsPDF> | null = null;
+        for (let p = 1; p <= doc.numPages; p++) {
+          onProgress?.(`Compressing page ${p} of ${doc.numPages}${si ? ' (smaller)' : ''}…`);
+          const page = await doc.getPage(p);
+          const base = page.getViewport({ scale: 1 });
+          const vp = page.getViewport({ scale: Math.min(2.2, px / Math.max(base.width, base.height) * 1.414) });
+          const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+          const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+          await page.render({ canvasContext: g, viewport: vp }).promise;
+          const jpg = await fileToDataUrl(await canvasBlob(c, q));
+          const w = base.width, h = base.height, o = w > h ? 'l' : 'p';
+          if (!pdf) pdf = new jsPDF({ orientation: o, unit: 'pt', format: [w, h], compress: true }); else pdf.addPage([w, h], o);
+          pdf.addImage(jpg, 'JPEG', 0, 0, w, h, undefined, 'FAST');
+        }
+        best = pdf!.output('blob');
+        if (best.size <= TARGET_BYTES) break;
       }
-      const blob = pdf!.output('blob');
-      return blob.size < file.size * 0.9 ? { blob, name: file.name, mime: 'application/pdf', before: file.size, after: blob.size } : keep;
+      return best && best.size < file.size ? { blob: best, name: file.name, mime: 'application/pdf', before: file.size, after: best.size, note: best.size > TARGET_BYTES ? 'Long document – this is the smallest readable size' : undefined } : keep;
     }
   } catch { /* fall back to the original */ }
-  return keep;
+  return { ...keep, note: file.size > TARGET_BYTES ? 'This file type cannot be compressed here – save it as PDF to make it smaller' : undefined };
+}
+/** Page images of a PDF for previews (works on phones and in browsers without a PDF viewer). */
+export async function pdfPageImages(data: ArrayBuffer, maxPages = 12, width = 1100): Promise<{ pages: string[]; total: number }> {
+  const lib = await pdfjs();
+  const doc = await lib.getDocument({ data: new Uint8Array(data) }).promise;
+  const pages: string[] = [];
+  for (let p = 1; p <= Math.min(doc.numPages, maxPages); p++) {
+    const page = await doc.getPage(p);
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: width / base.width });
+    const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: g, viewport: vp }).promise;
+    pages.push(c.toDataURL('image/jpeg', 0.85));
+  }
+  return { pages, total: doc.numPages };
 }
 export const blobToBase64 = async (b: Blob) => (await fileToDataUrl(b)).replace(/^data:[^;]+;base64,/, '');
 

@@ -3,6 +3,7 @@ import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, Sim
 import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles, IconFileText } from '@tabler/icons-react';
 import { TermsSettings } from '../../components/Terms';
 import { LabSpinner } from '../../components/LabSpinner';
+import { Attachments } from '../../components/Attachments';
 import { useSearchParams } from 'react-router-dom';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList, WA_TEMPLATES, WA_PLACEHOLDERS, fillWa } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
@@ -382,34 +383,11 @@ function SecuritySettings() {
 
 /** Brochure and other company documents, kept in one place and attachable to any email. */
 function CompanyDocuments() {
-  const { data, reload } = useApi<any[]>('/files?entity=company&entity_id=0', []);
-  const [busy, setBusy] = useState(false);
-  const upload = async (file: File | null) => {
-    if (!file) return;
-    setBusy(true);
-    try { const dataUrl = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(file); });
-      await api('/files', { body: { entity: 'company', entity_id: 0, name: file.name, mime: file.type || 'application/pdf', data: dataUrl } }); ok('Uploaded'); reload(); }
-    finally { setBusy(false); }
-  };
   return (
     <Stack maw={820}>
-      <Alert variant="light">Keep the company brochure, accreditation certificate, scope of accreditation and rate cards here. They can be attached to any quotation, invoice or report email with one click.</Alert>
-      <Group><FileButton onChange={upload} accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">{(p) => <Button leftSection={<IconUpload size={16} />} loading={busy} {...p}>Upload document</Button>}</FileButton><Text size="xs" c="dimmed">PDF, image, Word or Excel · up to 10 MB</Text></Group>
-      {(data ?? []).map((f) => (
-        <Paper key={f.id} withBorder p="sm">
-          <Group justify="space-between" wrap="nowrap">
-            <div style={{ minWidth: 0 }}>
-              <Group gap={6}><Anchor href={`/api/files/${f.id}/download?inline=1`} target="_blank" fw={600}>{f.name}</Anchor>{/brochure/i.test(f.name) && <Badge size="xs" variant="light">Brochure</Badge>}</Group>
-              <Text size="xs" c="dimmed">{Math.max(1, Math.round(f.size / 1024))} KB · {f.uploaded_by_name ?? ''} · {new Date(f.created_at).toLocaleDateString('en-IN')}</Text>
-            </div>
-            <Group gap={4} wrap="nowrap">
-              <ActionIcon variant="subtle" component="a" href={`/api/files/${f.id}/download`}><IconDownload size={16} /></ActionIcon>
-              <ActionIcon variant="subtle" color="red" onClick={async () => { if (!window.confirm(`Delete ${f.name}?`)) return; await api(`/files/${f.id}`, { method: 'DELETE' }); reload(); }}><IconTrash size={16} /></ActionIcon>
-            </Group>
-          </Group>
-        </Paper>
-      ))}
-      {!(data ?? []).length && <Text size="sm" c="dimmed">No documents yet.</Text>}
+      <Alert variant="light">Keep the company brochure, accreditation certificate, scope of accreditation and rate cards here. They can be attached to any quotation, invoice or report email with one click. Files are compressed to under 1 MB so emails stay light.</Alert>
+      <Attachments entity="company" entityId={0} title="Company documents" buttonLabel="Upload document" emptyText="No documents yet."
+        accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
     </Stack>
   );
 }
