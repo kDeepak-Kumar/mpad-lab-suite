@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import { roleAllows, type RoleDef } from '@suite/shared';
@@ -64,6 +65,12 @@ export const isAdmin = (u: AuthUser) => Boolean(u.roleDef?.admin);
 
 export const allow = (perm: string): RequestHandler => (req, res, next) =>
   can(req.user, perm) ? next() : res.status(403).json({ error: 'Your role does not allow this action' });
+
+/**
+ * Yes/no field that also accepts what the database returns (SQLite stores booleans as 1/0) and "true"/"false",
+ * so editing a loaded record and saving it back never fails with "should be boolean".
+ */
+export const zBool = z.preprocess((v) => (v === 1 || v === '1' || v === 'true' ? true : v === 0 || v === '0' || v === 'false' ? false : v), z.boolean({ invalid_type_error: 'must be yes or no' }));
 
 export class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 

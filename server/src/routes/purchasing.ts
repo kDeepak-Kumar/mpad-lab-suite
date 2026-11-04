@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db, insert, now, parseJson, toJson, today } from '../db';
-import { allow, can, h, HttpError, requireAuth, type AuthUser } from '../auth';
+import { allow, can, h, HttpError, requireAuth, type AuthUser, zBool } from '../auth';
 import { normalizeObservation, evaluateObservation, type ObservationInput } from '@suite/shared';
 import { audit, getObsTemplate } from '../services';
 
@@ -23,7 +23,7 @@ const vendorSchema = z.object({
   gstin: z.string().trim().toUpperCase().max(20).optional().nullable(), state_code: z.string().max(4).optional().nullable(), pan: z.string().max(20).optional().nullable(),
   nabl_cert: z.string().max(60).optional().nullable(), nabl_valid_till: optDate, services: z.string().max(2000).optional().nullable(),
   contact: z.string().max(120).optional().nullable(), phone: z.string().max(40).optional().nullable(), email: z.string().max(190).optional().nullable(),
-  address: z.string().max(1000).optional().nullable(), bank: z.record(z.string()).optional().nullable(), active: z.boolean().optional(),
+  address: z.string().max(1000).optional().nullable(), bank: z.record(z.string()).optional().nullable(), active: zBool.optional(),
 });
 purchasing.get('/vendors', h(async (req) => {
   if (!canSee(req.user, 'managePurchases', 'manageOutsourcing', 'catalog.read')) throw new HttpError(403, 'Your role cannot see vendors');
@@ -104,8 +104,8 @@ const CATEGORIES = ['subcontract', 'equipment', 'consumables', 'calibration', 'o
 const billSchema = z.object({
   vendor_id: z.number({ invalid_type_error: 'Choose the vendor' }), category: z.enum(CATEGORIES), bill_no: z.string().trim().min(1, 'Enter the bill number').max(80), bill_date: isoDate,
   sac: z.string().max(12).optional().nullable(), rate: z.number().min(0).max(28).default(18), taxable: z.number().min(0),
-  interstate: z.boolean().optional(), cgst: z.number().min(0).optional(), sgst: z.number().min(0).optional(), igst: z.number().min(0).optional(),
-  tds: z.number().min(0).default(0), itc_eligible: z.boolean().default(true), job_id: z.number().nullable().optional(), equipment_id: z.number().nullable().optional(), notes: z.string().max(2000).optional().nullable(),
+  interstate: zBool.optional(), cgst: z.number().min(0).optional(), sgst: z.number().min(0).optional(), igst: z.number().min(0).optional(),
+  tds: z.number().min(0).default(0), itc_eligible: zBool.default(true), job_id: z.number().nullable().optional(), equipment_id: z.number().nullable().optional(), notes: z.string().max(2000).optional().nullable(),
 });
 function taxes(b: z.infer<typeof billSchema>) {
   const tax = r2(b.taxable * b.rate / 100);
@@ -192,7 +192,7 @@ purchasing.post('/outsourcing/:id/import', allow('manageOutsourcing'), h(async (
   if (!job) throw new HttpError(404, 'Outsourced job not found');
   const b = z.object({
     test_id: z.number(), template_code: z.string().max(60).optional(), values: z.record(z.union([z.string(), z.number(), z.null()])),
-    report_no: z.string().max(80).optional().nullable(), report_date: optDate, submit: z.boolean().default(false),
+    report_no: z.string().max(80).optional().nullable(), report_date: optDate, submit: zBool.default(false),
   }).parse(req.body);
   if (!parseJson<number[]>(job.test_ids, []).includes(b.test_id)) throw new HttpError(400, 'This test is not part of the outsourced job');
   const t = await db('tests').where({ id: b.test_id, company_id: cid }).first();

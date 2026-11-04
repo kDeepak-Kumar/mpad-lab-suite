@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { r2, stateName, validateGstin } from '@suite/shared';
 import { db, insert, now, parseJson } from '../db';
-import { allow, h, HttpError, requireAuth } from '../auth';
+import { allow, h, HttpError, requireAuth, zBool } from '../auth';
 import { audit, getCompany } from '../services';
 
 /**
@@ -144,7 +144,7 @@ const rowSchema = z.object({
   doc_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid date'), party: z.string().trim().min(1, 'Party name is required').max(200),
   gstin: z.string().trim().max(20).optional().nullable(), pos: z.string().trim().max(2).optional().nullable(), sac: z.string().trim().max(12).optional().nullable(),
   rate: z.coerce.number().min(0).max(28), taxable: z.coerce.number(), cgst: z.coerce.number().default(0), sgst: z.coerce.number().default(0), igst: z.coerce.number().default(0),
-  cess: z.coerce.number().default(0), total: z.coerce.number().optional(), itc_eligible: z.boolean().optional(), note: z.string().max(300).optional().nullable(), excluded: z.boolean().optional(),
+  cess: z.coerce.number().default(0), total: z.coerce.number().optional(), itc_eligible: zBool.optional(), note: z.string().max(300).optional().nullable(), excluded: zBool.optional(),
 });
 function cleanRow(b: z.infer<typeof rowSchema>) {
   const gstin = b.gstin ? b.gstin.replace(/\s/g, '').toUpperCase() : '';

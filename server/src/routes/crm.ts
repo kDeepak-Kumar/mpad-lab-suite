@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { formatDate } from '@suite/shared';
 import { db, insert, now, parseJson, row, today } from '../db';
-import { h, HttpError, requireAuth } from '../auth';
+import { h, HttpError, requireAuth, zBool } from '../auth';
 import { audit, getCompany, getDocTemplate, sha256 } from '../services';
 
 /**
@@ -83,7 +83,7 @@ const actSchema = z.object({
   type: z.enum(TYPES), subject: z.string().min(2).max(300), notes: z.string().max(5000).optional().nullable(),
   client_id: z.number().nullable().optional(), due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   assigned_to: z.number().nullable().optional(), link_kind: z.string().max(20).nullable().optional(), link_id: z.number().nullable().optional(),
-  done: z.boolean().optional(), outcome: z.string().max(300).nullable().optional(),
+  done: zBool.optional(), outcome: z.string().max(300).nullable().optional(),
 });
 crm.post('/activities', h(async (req) => {
   const cid = req.user.company_id;

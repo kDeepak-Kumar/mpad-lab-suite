@@ -7,7 +7,7 @@ import { docVisibility, recordAccess, restrictList } from '../sharing';
 import { z } from 'zod';
 import { DEFAULT_TEMPLATES, EQUIPMENT_CATEGORIES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
-import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession } from '../auth';
+import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession, zBool } from '../auth';
 import { audit, getCompany, ledger } from '../services';
 import { cleanWrite, deleteMeta, getMeta, mergeCustom, saveMeta, stripHidden, type MetaKind } from '../meta';
 
@@ -103,7 +103,7 @@ core.get('/users', h(async (req) => db('users').where({ company_id: req.user.com
 const userSchema = z.object({
   name: z.string().min(1), email: z.string().email(), role: z.string(), designation: z.string().optional().nullable(),
   qualifications: z.string().optional().nullable(), phone: z.string().optional().nullable(), signature: z.string().optional().nullable(),
-  active: z.boolean().optional(), password: passwordRule.optional(),
+  active: zBool.optional(), password: passwordRule.optional(),
 });
 async function checkRoleAssign(req: Express.Request & { user: any }, role?: string) {
   if (!role) return;
@@ -201,7 +201,7 @@ const IMPORT_COLS: Record<string, string> = {
   'contact name': 'contact_name', 'contact role': 'contact_role', 'contact phone': 'contact_phone', 'contact email': 'contact_email',
 };
 core.post('/clients/import', allow('client.create'), h(async (req) => {
-  const { rows, dryRun } = z.object({ rows: z.array(z.record(z.any())).max(5000, 'Import at most 5,000 rows at a time'), dryRun: z.boolean().default(true) }).parse(req.body);
+  const { rows, dryRun } = z.object({ rows: z.array(z.record(z.any())).max(5000, 'Import at most 5,000 rows at a time'), dryRun: zBool.default(true) }).parse(req.body);
   const cid = req.user.company_id, role = req.user.roleDef;
   const states = INDIAN_STATES;
   const stateOf = (v: string) => { const t = v.trim().toLowerCase(); if (!t) return null; const s = states.find((x) => x.code === t.padStart(2, '0') || x.name.toLowerCase() === t); return s?.code ?? undefined; };
@@ -364,10 +364,10 @@ core.delete('/contacts/:id', allow('client.edit'), h(async (req) => {
 // ---------- rate card / test catalog ----------
 const catSchema = z.object({
   code: z.string().optional().nullable(), material: z.string().optional().nullable(), billing_name: z.string().min(1),
-  report_name: z.string().optional().nullable(), method: z.string().optional().nullable(), nabl: z.boolean().optional(),
+  report_name: z.string().optional().nullable(), method: z.string().optional().nullable(), nabl: zBool.optional(),
   unit: z.string().optional().nullable(), rate: z.coerce.number().min(0, 'Rate cannot be negative').optional(), sac: z.string().optional().nullable(), gst_rate: z.coerce.number().min(0).max(28, 'GST rate must be between 0 and 28 %').optional(),
   conditions: z.string().optional().nullable(), report_notes: z.string().optional().nullable(), obs_template_code: z.string().optional().nullable(),
-  tat_days: z.coerce.number().int('Turnaround must be whole days').min(0).max(365).optional().nullable(), active: z.boolean().optional(), custom,
+  tat_days: z.coerce.number().int('Turnaround must be whole days').min(0).max(365).optional().nullable(), active: zBool.optional(), custom,
   performed_by: z.enum(['inhouse', 'vendor']).optional(), vendor_id: z.number().nullable().optional(),
 });
 core.get('/catalog', h(async (req) => (await db('catalog').where({ company_id: req.user.company_id }).orderBy(['material', 'billing_name']))
@@ -400,7 +400,7 @@ core.delete('/catalog/:id', allow('catalog.delete'), h(async (req) => {
 // ---------- equipment ----------
 const eqBase = z.object({
   name: z.string().min(1), category: z.string().optional().nullable(), id_no: z.string().optional().nullable(), make: z.string().optional().nullable(),
-  data: z.record(z.any()).optional(), cert_no: z.string().optional().nullable(), cal_date: isoDateOpt, due_date: isoDateOpt, active: z.boolean().optional(), custom,
+  data: z.record(z.any()).optional(), cert_no: z.string().optional().nullable(), cal_date: isoDateOpt, due_date: isoDateOpt, active: zBool.optional(), custom,
 });
 const eqCheck = (v: { cal_date?: string | null; due_date?: string | null; data?: Record<string, unknown> }, ctx: z.RefinementCtx) => {
   if (v.cal_date && v.due_date && v.due_date < v.cal_date) ctx.addIssue({ code: 'custom', path: ['due_date'], message: 'Calibration due date cannot be before the calibration date' });
@@ -429,7 +429,7 @@ function importDate(v: string): string | null | 'bad' {
   return 'bad';
 }
 core.post('/equipment/import', allow('equipment.create'), h(async (req) => {
-  const { rows, dryRun } = z.object({ rows: z.array(z.record(z.any())).max(3000, 'Import at most 3,000 rows at a time'), dryRun: z.boolean().default(true) }).parse(req.body);
+  const { rows, dryRun } = z.object({ rows: z.array(z.record(z.any())).max(3000, 'Import at most 3,000 rows at a time'), dryRun: zBool.default(true) }).parse(req.body);
   const cid = req.user.company_id;
   const existing = await db('equipment').where({ company_id: cid }).select('id', 'name', 'id_no', 'data');
   const byId = new Map(existing.filter((e) => e.id_no).map((e) => [String(e.id_no).trim().toLowerCase(), e]));

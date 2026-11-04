@@ -404,6 +404,19 @@ await api('owner', 'POST', '/equipment/import', { rows: [{ 'Equipment name*': 'P
 eqs = await api('owner', 'GET', '/equipment');
 const pr2 = eqs.filter((e) => e.id_no === 'IMP/PR/01');
 expect(pr2.length === 1 && pr2[0].cert_no === 'CAL/2' && pr2[0].due_date === '2028-06-14' && Number(pr2[0].data.factor) === 0.0519 && pr2[0].category === 'Proving ring', 're-import with the same Equipment ID updates calibration (no duplicate)');
+console.log('19. Saving records exactly as loaded (yes/no stored as 1/0)');
+const uRow = (await api('owner', 'GET', '/users')).find((u) => u.email === 'frontdesk@demo.lab');
+await api('owner', 'PUT', `/users/${uRow.id}`, { ...uRow, active: 1, phone: '9876543210' });
+expect((await api('owner', 'GET', '/users')).find((u) => u.id === uRow.id).phone === '9876543210', 'user edited with active = 1 (as loaded) saves the phone number');
+const cRow = (await api('owner', 'GET', '/catalog'))[0];
+await api('owner', 'PUT', `/catalog/${cRow.id}`, { ...cRow, nabl: cRow.nabl ? 1 : 0, active: 1 });
+const eRow = (await api('owner', 'GET', '/equipment'))[0];
+const { id: _e, company_id: _c, created_at: _ca, updated_at: _u, custom: _cu, ...eBody } = eRow;
+await api('owner', 'PUT', `/equipment/${eRow.id}`, { ...eBody, active: 1 });
+const vRow = (await api('owner', 'GET', '/vendors'))[0];
+await api('owner', 'PUT', `/vendors/${vRow.id}`, { name: vRow.name, active: 0 });
+expect((await api('owner', 'GET', '/vendors')).find((v) => v.id === vRow.id).active == 0, 'rate card, equipment and vendor accept 1/0 for yes/no');
+await api('owner', 'PUT', `/vendors/${vRow.id}`, { name: vRow.name, active: 'true' });
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

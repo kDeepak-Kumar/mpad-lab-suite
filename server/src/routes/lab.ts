@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { evaluateObservation, normalizeObservation, type ObservationInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
-import { allow, can, h, HttpError, isAdmin, type AuthUser } from '../auth';
+import { allow, can, h, HttpError, isAdmin, type AuthUser, zBool } from '../auth';
 import { cleanWrite, mergeCustom } from '../meta';
 import { audit, buildReportData, getCompany, getObsTemplate, nextNumber, formatWithSeq } from '../services';
 import { isIsoDate } from '@suite/shared';
@@ -246,7 +246,7 @@ lab.put('/tests/:id/report-options', h(async (req) => {
   if (!t) throw new HttpError(404, 'Test not found');
   if (t.status === 'reported') throw new HttpError(409, 'The report is already issued. Amend the report to change what it shows.');
   if (!(can(req.user, 'enterObservations') || can(req.user, 'reviewTests') || can(req.user, 'reportPrepare'))) throw new HttpError(403, 'Your role cannot change report options');
-  const { show } = z.object({ show: z.record(z.boolean()) }).parse(req.body);
+  const { show } = z.object({ show: z.record(zBool) }).parse(req.body);
   const obs = { header: {}, grids: {}, ...((t.observation as ObservationInput | null) ?? {}), show };
   await db('tests').where({ id }).update({ observation: toJson(obs) });
   await audit(db, req.user, 'test', id, 'report options changed', { show });

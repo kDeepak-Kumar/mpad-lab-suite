@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db, now } from '../db';
-import { allow, checkPassword, clearPolicyCache, companyRequires2fa, h, hashPassword, HttpError, isAdmin, requireAuth, setSession } from '../auth';
+import { allow, checkPassword, clearPolicyCache, companyRequires2fa, h, hashPassword, HttpError, isAdmin, requireAuth, setSession, zBool } from '../auth';
 import { audit, getCompany } from '../services';
 import { mailer } from '../alerts';
 import { emailHtml } from '../email';
@@ -16,7 +16,7 @@ export const account = Router();
 
 const loginSchema = z.object({
   email: z.string().email('Enter a valid email address'), password: z.string().min(1, 'Enter your password'),
-  code: z.string().optional(), remember: z.boolean().optional(),
+  code: z.string().optional(), remember: zBool.optional(),
 });
 
 account.post('/auth/login', h(async (req, res) => {
@@ -187,7 +187,7 @@ account.post('/account/admin/idle', allow('settings'), h(async (req) => {
 }));
 
 account.post('/account/admin/policy', allow('settings'), h(async (req) => {
-  const { require2fa } = z.object({ require2fa: z.boolean() }).parse(req.body);
+  const { require2fa } = z.object({ require2fa: zBool }).parse(req.body);
   const row = await db('companies').where({ id: req.user.company_id }).first();
   const data = JSON.parse(row.data ?? '{}');
   if (require2fa) {
