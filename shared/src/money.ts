@@ -66,8 +66,10 @@ export function computeTotals(
 }
 
 /** 1234567.5 → "12,34,567.50" (Indian grouping). */
-export function inr(x: number, decimals = 0): string {
-  return x.toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+export function inr(x: number | string | null | undefined, decimals = 0): string {
+  const n = typeof x === 'string' ? Number(x.replace(/,/g, '')) : x;
+  if (n === null || n === undefined || !Number.isFinite(n)) return ''; // blank instead of crashing on a missing amount
+  return n.toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
@@ -92,6 +94,8 @@ export function numberToWordsIndian(n: number): string {
 }
 
 export function amountInWords(amount: number): string {
+  if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return '';
+  amount = Number(amount);
   const rupees = Math.floor(Math.abs(amount));
   const paise = Math.round((Math.abs(amount) - rupees) * 100);
   return `Rupees ${numberToWordsIndian(rupees)}${paise ? ` and ${two(paise)} Paise` : ''} Only`;

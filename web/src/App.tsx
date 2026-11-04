@@ -16,6 +16,7 @@ import { Loading } from './components/ui';
 import { SideNav, type NavItem } from './components/SideNav';
 import { FavProvider } from './favorites';
 import { IdleGuard } from './components/IdleGuard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Pages load on demand, so the app opens fast and only fetches what a screen needs.
 const page = <K extends string>(loader: () => Promise<Record<K, ComponentType<any>>>, name: K) => lazy(() => loader().then((m) => ({ default: m[name] })));
@@ -185,6 +186,7 @@ function Shell() {
         </AppShell.Section>
       </AppShell.Navbar>
       <AppShell.Main>
+        <ErrorBoundary resetKey={loc.pathname + loc.search}>
         <Suspense fallback={<Loading />}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -224,6 +226,7 @@ function Shell() {
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </AppShell.Main>
       <BottomNav items={items} onMore={toggle} />
       <Spotlight actions={actions} query={query} onQueryChange={setQuery} filter={(q, a) => (!q ? a : (a as SpotlightActionData[]).filter((x) => x.group === 'Records' || x.group === 'AI' || String(x.label).toLowerCase().includes(q.toLowerCase())))} nothingFound="Nothing found" highlightQuery shortcut={['mod + K']}

@@ -39,7 +39,7 @@ function totalsRows(p: RenderInput, pr: Record<string, any>): [string, number][]
   rows.push([gstIn ? pr.total : 'Total (GST extra)', tt.total]);
   return rows;
 }
-const money = (v: number) => inr(v, Math.abs(v % 1) > 0.001 ? 2 : 0);
+const money = (v: number) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '' : inr(Number(v), Math.abs(Number(v) % 1) > 0.001 ? 2 : 0));
 /** The totals block renders inside the items table (aligned under Amount) when both are visible. */
 const totalsInline = (p: RenderInput) => {
   const tb = p.template.blocks.find((b) => b.type === 'totals' && b.visible);

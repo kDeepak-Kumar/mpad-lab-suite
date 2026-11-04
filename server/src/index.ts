@@ -34,6 +34,12 @@ app.use(cookieParser());
 let VERSION = 'dev';
 app.use('/api', (_req, res, next) => { res.setHeader('X-App-Version', VERSION); res.setHeader('Cache-Control', 'no-store'); next(); });
 app.get('/api/health', (_req, res) => res.json({ ok: true, version: VERSION, time: new Date().toISOString() }));
+// Screen crashes reported by the browser (ErrorBoundary) – written to the server log for diagnosis.
+app.post('/api/client-error', express.json({ limit: '20kb' }), (req, res) => {
+  const b = req.body ?? {};
+  console.error(`[client-error] ${String(b.url ?? '').slice(0, 200)} :: ${String(b.message ?? '').slice(0, 300)}\n${String(b.stack ?? '').slice(0, 3000)}`);
+  res.json({ ok: true });
+});
 app.use('/api', publicApi, account, onboarding, share, purchasing, gst, core, lab, finance, analytics, crm, files);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

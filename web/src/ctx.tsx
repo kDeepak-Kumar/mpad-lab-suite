@@ -13,7 +13,7 @@ export interface Meta {
 }
 
 export const MeCtx = createContext<Me | null>(null);
-export const MetaCtx = createContext<{ meta: Meta; reload: () => void } | null>(null);
+export const MetaCtx = createContext<{ meta: Meta; reload: () => Promise<unknown> | void } | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const useMeta = () => useContext(MetaCtx)!;
 

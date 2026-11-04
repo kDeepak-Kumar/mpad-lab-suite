@@ -67,7 +67,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
   const state: ViewDef = { name: def?.name ?? '', filters, columns: visible, sort: sort ?? undefined, search, display, groupBy };
   const base: ViewDef = def ?? { name: '', filters: [], columns: defaults, search: '', display: 'table', groupBy: null };
   const dirty = JSON.stringify([filters, visible, sort ?? null, search, display, groupBy ?? null]) !== JSON.stringify([base.filters ?? [], base.columns?.length ? base.columns : defaults, base.sort ?? null, base.search ?? '', base.display ?? 'table', base.groupBy ?? null]);
-  const mineOrAdmin = current && (current.owner_id === me.user.id || can('manageCustomization'));
+  const mineOrAdmin = Boolean(current && def && (current.owner_id === me.user.id || can('manageCustomization')));
 
   const shown = visible.map((k) => columns.find((c) => c.key === k)).filter(Boolean) as Col<T>[];
   const filtered = useMemo(() => {
@@ -122,20 +122,20 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
 
   const persist = async (key: string, name: string, shared: boolean) => {
     await api(`/meta/listview/${encodeURIComponent(key)}`, { method: 'PUT', body: { ...state, name, shared } });
-    reloadMeta();
+    await reloadMeta(); // the new view must be in the list before it is selected
   };
   const saveNew = async (name: string, shared: boolean) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const key = `${id}:${shared ? '' : `u${me.user.id}-`}${slug}`;
     await persist(key, name, shared); ok(`View “${name}” saved`); setView(key); setSaveOpen(null);
   };
-  const saveCurrent = async () => { if (!current) return; await persist(current.key, def!.name, current.owner_id === null); ok('View updated'); };
+  const saveCurrent = async () => { if (!current || !def) return; await persist(current.key, def.name, current.owner_id === null); ok('View updated'); };
   const rename = async (name: string, shared: boolean) => {
     if (!current) return;
-    await api(`/meta/listview/${encodeURIComponent(current.key)}`, { method: 'PUT', body: { ...(def as object), name, shared } }); reloadMeta(); ok('View updated'); setSaveOpen(null);
+    await api(`/meta/listview/${encodeURIComponent(current.key)}`, { method: 'PUT', body: { ...(def as object), name, shared } }); await reloadMeta(); ok('View updated'); setSaveOpen(null);
   };
   const viewLabel = view === '__all' ? 'All records' : def?.name ?? 'All records';
-  const favRef = view === '__all' ? null : `${loc.pathname}?view=${encodeURIComponent(view)}`;
+  const favRef = view === '__all' || !def ? null : `${loc.pathname}?view=${encodeURIComponent(view)}`;
   const pad = density === 'compact' ? '5px 12px' : undefined;
 
   return (
@@ -159,7 +159,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
               <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => setSaveOpen('new')}>New view from current filters…</Menu.Item>
             </Menu.Dropdown>
           </Menu>
-          {favRef && <FavStar kind="listview" refKey={favRef} label={def!.name} sub={document.title.split('·')[0]?.trim() || undefined} />}
+          {favRef && def && <FavStar kind="listview" refKey={favRef} label={def.name} sub={document.title.split('·')[0]?.trim() || undefined} />}
           {dirty && <Group gap={4} className="lv-dirty"><Text size="xs" c="orange.7" fw={600}>Unsaved changes</Text>
             {mineOrAdmin ? <Button size="compact-xs" onClick={saveCurrent}>Save</Button> : null}
             <Button size="compact-xs" variant="light" onClick={() => setSaveOpen('new')}>Save as…</Button>
@@ -244,7 +244,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
       </div>}
       {display !== 'kanban' && pages > 1 && <Group justify="center" p="xs" style={{ borderTop: '1px solid var(--line)' }}><Pagination size="sm" total={pages} value={page} onChange={setPage} /></Group>}
       <SaveViewModal mode={saveOpen} onClose={() => setSaveOpen(null)} onSave={saveOpen === 'rename' ? rename : saveNew} canShare={can('manageCustomization')}
-        initial={saveOpen === 'rename' && current ? { name: def!.name, shared: current.owner_id === null } : undefined} />
+        initial={saveOpen === 'rename' && current && def ? { name: def.name, shared: current.owner_id === null } : undefined} />
       {fieldsOpen && <FieldsModal columns={columns} visible={visible} onClose={() => setFieldsOpen(false)} onApply={(v) => { setVisible(v); setFieldsOpen(false); }} defaults={defaults} />}
     </Paper>
   );
