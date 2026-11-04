@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import { storageInfo } from '../storage';
 import { collectAlerts, runAlerts, type AlertSettings } from '../alerts';
 import { Router } from 'express';
+import { passwordRule, sendAccessLink } from './onboarding';
 import { z } from 'zod';
 import { DEFAULT_TEMPLATES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
@@ -92,11 +94,11 @@ core.delete('/meta/:kind/:key', h(async (req) => {
 
 // ---------- users ----------
 core.get('/users', h(async (req) => db('users').where({ company_id: req.user.company_id })
-  .select('id', 'name', 'email', 'role', 'designation', 'qualifications', 'phone', 'active', 'signature', 'totp_enabled')));
+  .select('id', 'name', 'email', 'role', 'designation', 'qualifications', 'phone', 'active', 'signature', 'totp_enabled', 'password_set', 'email_verified_at')));
 const userSchema = z.object({
   name: z.string().min(1), email: z.string().email(), role: z.string(), designation: z.string().optional().nullable(),
   qualifications: z.string().optional().nullable(), phone: z.string().optional().nullable(), signature: z.string().optional().nullable(),
-  active: z.boolean().optional(), password: z.string().min(8, 'Password must be at least 8 characters').optional(),
+  active: z.boolean().optional(), password: passwordRule.optional(),
 });
 async function checkRoleAssign(req: Express.Request & { user: any }, role?: string) {
   if (!role) return;
@@ -107,10 +109,17 @@ async function checkRoleAssign(req: Express.Request & { user: any }, role?: stri
 core.post('/users', allow('users'), h(async (req) => {
   const { password, ...u } = userSchema.parse(req.body);
   await checkRoleAssign(req as never, u.role);
-  if (!password) throw new HttpError(400, 'Set an initial password (6+ characters)');
-  const id = await insert(db, 'users', { ...u, email: u.email.toLowerCase(), company_id: req.user.company_id, password_hash: await hashPassword(password), created_at: now() });
-  await audit(db, req.user, 'user', id, 'created', { email: u.email, role: u.role });
-  return { id };
+  const email = u.email.toLowerCase();
+  if (await db('users').where({ email }).first('id')) throw new HttpError(400, 'A user with this email already exists');
+  // Without a password the user is invited: they confirm their email and choose their own password from the link.
+  const id = await insert(db, 'users', {
+    ...u, email, company_id: req.user.company_id, created_at: now(),
+    password_hash: await hashPassword(password ?? crypto.randomBytes(24).toString('base64url')), password_set: Boolean(password),
+  });
+  await audit(db, req.user, 'user', id, password ? 'created' : 'created and invited', { email, role: u.role });
+  if (password) return { id };
+  const invite = await sendAccessLink(req, { id, name: u.name, email, company_id: req.user.company_id }, 'invite', req.user.id);
+  return { id, invite };
 }));
 core.put('/users/:id', h(async (req) => {
   const id = Number(req.params.id);
@@ -123,7 +132,11 @@ core.put('/users/:id', h(async (req) => {
   await checkRoleAssign(req as never, u.role);
   const patch: Record<string, unknown> = { ...u };
   if (u.email) patch.email = u.email.toLowerCase();
-  if (password) patch.password_hash = await hashPassword(password);
+  if (password) { patch.password_hash = await hashPassword(password); patch.password_set = true; }
+  if (u.email && target && u.email.toLowerCase() !== target.email) {
+    if (await db('users').where({ email: u.email.toLowerCase() }).whereNot({ id }).first('id')) throw new HttpError(400, 'A user with this email already exists');
+    patch.email_verified_at = null; // new address is not confirmed yet
+  }
   await db('users').where({ id, company_id: req.user.company_id }).update(patch);
   await audit(db, req.user, 'user', id, 'updated', { fields: Object.keys(patch).filter((k) => k !== 'password_hash' && k !== 'signature') });
   return { ok: true };

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Badge, Button, Checkbox, ColorSwatch, Grid, Group, Modal, NavLink, Paper, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconEye, IconEyeOff, IconPlus, IconTrash, IconLock } from '@tabler/icons-react';
+import { IconGripVertical, IconEye, IconEyeOff, IconPlus, IconTrash, IconLock } from '@tabler/icons-react';
 import { ACTIONS, OBJECTS, PERM_OBJECTS, TABS, objectDef, type FieldDef, type MetaFieldType, type Picklist, type RoleDef } from '@suite/shared';
+import { moveItem, useDragReorder } from '../../components/useDragReorder';
 import { api, ok } from '../../api';
 import { useMeta } from '../../ctx';
 import { PageHeader } from '../../components/ui';
@@ -46,7 +47,7 @@ function ObjectManager() {
     setOrder(saved?.fields?.length ? [...saved.fields.filter((k) => keys.includes(k)), ...keys.filter((k) => !saved.fields.includes(k))] : keys);
     setHidden(saved?.hidden ?? []);
   }, [obj, meta]);
-  const move = (i: number, d: number) => { const o = [...order]; const j = i + d; if (j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; setOrder(o); };
+  const dnd = useDragReorder(`layout-${obj}`, (from, to) => setOrder((o) => moveItem(o, from, to)));
   const saveLayout = async () => { await api(`/meta/layout/${obj}`, { method: 'PUT', body: { object: obj, fields: order, hidden } }); ok('Layout saved'); reload(); };
   const delField = async (key: string) => { if (!window.confirm('Delete this field? Values already entered stay in the records but are no longer shown.')) return; await api(`/meta/field/${obj}.${key}`, { method: 'DELETE' }); ok('Field deleted'); reload(); };
   return (
@@ -59,7 +60,7 @@ function ObjectManager() {
       <Grid.Col span={{ base: 12, md: 9 }}>
         <Paper withBorder p="md">
           <Group justify="space-between" mb="sm">
-            <div><Text fw={650}>{def.plural}: fields and layout</Text><Text size="xs" c="dimmed">Order sets how forms show the fields. Hidden fields disappear from forms for everyone. Field access per role is under Roles & permissions.</Text></div>
+            <div><Text fw={650}>{def.plural}: fields and layout</Text><Text size="xs" c="dimmed">Drag the ⋮⋮ handle to set the order forms show the fields in. Hidden fields disappear from forms for everyone. Field access per role is under Roles & permissions.</Text></div>
             <Group gap="xs"><Button variant="default" onClick={() => setNewField({ type: 'text', object: obj } as never)} leftSection={<IconPlus size={14} />}>New field</Button><Button onClick={saveLayout}>Save layout</Button></Group>
           </Group>
           {['quote', 'invoice', 'report', 'workorder', 'payment', 'test'].includes(obj) && <Alert variant="light" mb="sm">Standard fields of {def.plural.toLowerCase()} are built into their screens. Fields you add here appear under “Additional fields” and can be printed using a Text block with {'{{doc.custom.field_name}}'}.</Alert>}
@@ -70,8 +71,8 @@ function ObjectManager() {
                 const f = all.find((x) => x.key === k); if (!f) return null;
                 const isHidden = hidden.includes(k);
                 return (
-                  <Table.Tr key={k} style={{ opacity: isHidden ? 0.5 : 1 }}>
-                    <Table.Td><Group gap={2}><ActionIcon size="sm" variant="subtle" onClick={() => move(i, -1)}><IconArrowUp size={14} /></ActionIcon><ActionIcon size="sm" variant="subtle" onClick={() => move(i, 1)}><IconArrowDown size={14} /></ActionIcon></Group></Table.Td>
+                  <Table.Tr key={k} {...dnd.rowProps(i)} style={{ opacity: isHidden ? 0.5 : 1 }}>
+                    <Table.Td w={44}><span className="drag-handle" {...dnd.handleProps(i)}><IconGripVertical size={16} /></span></Table.Td>
                     <Table.Td>{f.label} {f.custom ? <Badge size="xs" variant="light" color="grape">custom</Badge> : null}</Table.Td>
                     <Table.Td><Text size="xs" ff="monospace">{f.custom ? `custom.${f.key}` : f.key}</Text></Table.Td>
                     <Table.Td>{TYPES.find((t) => t.value === f.type)?.label ?? f.type}{f.picklist ? <Text span size="xs" c="dimmed"> ({f.picklist})</Text> : null}</Table.Td>
@@ -141,7 +142,7 @@ function Picklists() {
     const k = slug(name);
     await api(`/meta/picklist/${k}`, { method: 'PUT', body: { key: k, label: name, values: [] } }); reload(); setKey(k);
   };
-  const move = (i: number, d: number) => { const o = [...vals]; const j = i + d; if (j < 0 || j >= o.length) return; [o[i], o[j]] = [o[j], o[i]]; setVals(o); };
+  const dnd = useDragReorder(`picklist-${key}`, (from, to) => setVals((o) => moveItem(o, from, to)));
   return (
     <Grid>
       <Grid.Col span={{ base: 12, md: 3 }}>
@@ -157,8 +158,8 @@ function Picklists() {
             {pl.system && <Alert variant="light" mb="sm">The application relies on the existing values of this picklist (e.g. NABL selects the NABL letterhead). You can rename labels, add values or change colours.</Alert>}
             <Stack gap={6}>
               {vals.map((v, i) => (
-                <Group key={i} gap="xs" wrap="nowrap">
-                  <ActionIcon size="sm" variant="subtle" onClick={() => move(i, -1)}><IconArrowUp size={14} /></ActionIcon><ActionIcon size="sm" variant="subtle" onClick={() => move(i, 1)}><IconArrowDown size={14} /></ActionIcon>
+                <Group key={i} gap="xs" wrap="nowrap" {...dnd.rowProps(i)} style={{ borderRadius: 6 }}>
+                  <span className="drag-handle" {...dnd.handleProps(i)}><IconGripVertical size={16} /></span>
                   <TextInput size="xs" w={220} value={v.value} disabled={pl.system && (pl.values.some((x) => x.value === v.value))} onChange={(e) => setVals(vals.map((x, j) => (j === i ? { ...x, value: e.currentTarget.value } : x)))} placeholder="Value" />
                   <TextInput size="xs" w={220} value={v.label ?? ''} onChange={(e) => setVals(vals.map((x, j) => (j === i ? { ...x, label: e.currentTarget.value } : x)))} placeholder="Display label (optional)" />
                   <Group gap={4}>{COLORS.map((c) => <ColorSwatch key={c} size={16} color={`var(--mantine-color-${c}-6)`} style={{ cursor: 'pointer', outline: v.color === c ? '2px solid #101828' : undefined }} onClick={() => setVals(vals.map((x, j) => (j === i ? { ...x, color: c } : x)))} />)}</Group>

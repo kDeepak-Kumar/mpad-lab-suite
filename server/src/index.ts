@@ -14,6 +14,7 @@ import { analytics } from './analytics';
 import { ensurePlatform } from './meta';
 import { syncTemplatePack } from './packs';
 import { crm, publicApi } from './routes/crm';
+import { onboarding } from './routes/onboarding';
 import { account } from './routes/account';
 import { gst } from './routes/gst';
 import { files } from './routes/files';
@@ -30,7 +31,7 @@ app.use(cookieParser());
 let VERSION = 'dev';
 app.use('/api', (_req, res, next) => { res.setHeader('X-App-Version', VERSION); res.setHeader('Cache-Control', 'no-store'); next(); });
 app.get('/api/health', (_req, res) => res.json({ ok: true, version: VERSION, time: new Date().toISOString() }));
-app.use('/api', publicApi, account, gst, core, lab, finance, analytics, crm, files);
+app.use('/api', publicApi, account, onboarding, gst, core, lab, finance, analytics, crm, files);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built web app (single deployment for cPanel / any Node host)

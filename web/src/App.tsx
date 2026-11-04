@@ -10,7 +10,7 @@ import {
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
-import { Login } from './pages/Login';
+import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
 import { Loading } from './components/ui';
 
@@ -78,9 +78,10 @@ export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const loc = useLocation();
   useEffect(() => {
-    if (loc.pathname === '/login' || loc.pathname.startsWith('/d/')) { setMe(null); return; }
+    if (loc.pathname === '/login' || /^\/(d|welcome|reset)\//.test(loc.pathname)) { setMe(null); return; }
     api<Me>('/auth/me', { quiet: true }).then(setMe).catch(() => setMe(null));
   }, [loc.pathname === '/login']);
+  if (/^\/(welcome|reset)\//.test(loc.pathname)) return <Routes><Route path="/welcome/:token" element={<SetPasswordPage />} /><Route path="/reset/:token" element={<SetPasswordPage />} /></Routes>;
   if (loc.pathname.startsWith('/d/')) return <Suspense fallback={<Center h="100vh"><Loader /></Center>}><Routes><Route path="/d/:token" element={<SharedDocPage />} /></Routes></Suspense>;
   if (me === undefined && !loc.pathname.startsWith('/verify/')) return <Center h="100vh"><Loader /></Center>;
   if (loc.pathname.startsWith('/verify/')) return <Routes><Route path="/verify/:token" element={<VerifyPage />} /></Routes>;

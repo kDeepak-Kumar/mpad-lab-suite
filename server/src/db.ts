@@ -250,6 +250,17 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '007_user_tokens',
+    up: async (k) => {
+      await k.schema.createTable('user_tokens', (t) => {
+        t.increments('id'); t.integer('user_id').unsigned().notNullable(); t.string('purpose', 12).notNullable(); t.string('token_hash', 64).notNullable();
+        t.string('expires_at', 32); t.string('used_at', 32).nullable(); t.integer('created_by').unsigned().nullable(); t.string('created_at', 32);
+        t.unique(['token_hash']); t.index(['user_id', 'purpose']);
+      });
+      await k.schema.alterTable('users', (t) => { t.boolean('password_set').defaultTo(true); t.string('email_verified_at', 32).nullable(); });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {

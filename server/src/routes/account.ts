@@ -5,6 +5,7 @@ import { allow, checkPassword, clearPolicyCache, companyRequires2fa, h, hashPass
 import { audit, getCompany } from '../services';
 import { mailer } from '../alerts';
 import { emailHtml } from '../email';
+import { passwordRule } from './onboarding';
 import {
   backupCodesLeft, currentDeviceHash, describeAgent, deviceTrusted, loginBlocked, loginFailed, loginOk, newBackupCodes, newTotpSecret,
   otpauthUrl, seal, touchDevice, unseal, useBackupCode, verifyTotp,
@@ -24,6 +25,7 @@ account.post('/auth/login', h(async (req, res) => {
   const wait = loginBlocked(req, em);
   if (wait) throw new HttpError(429, `Too many attempts. Try again in ${wait} minute${wait > 1 ? 's' : ''}.`);
   const u = await db('users').where({ email: em, active: true }).first();
+  if (u && (u.password_set === false || u.password_set === 0)) throw new HttpError(401, 'Your account is not activated yet. Open the invitation link sent to your email to set your password, or use “Forgot password”.');
   if (!u || !(await checkPassword(password, u.password_hash))) { loginFailed(req, em); throw new HttpError(401, 'Email or password is incorrect'); }
 
   if (u.totp_enabled && !(await deviceTrusted(u.id, req))) {
@@ -129,7 +131,7 @@ account.post('/account/2fa/backup-codes', h(async (req) => {
 }));
 
 account.post('/account/password', h(async (req, res: Response) => {
-  const { current, next } = z.object({ current: z.string().min(1, 'Enter your current password'), next: z.string().min(8, 'New password must be at least 8 characters') }).parse(req.body);
+  const { current, next } = z.object({ current: z.string().min(1, 'Enter your current password'), next: passwordRule }).parse(req.body);
   const u = await confirmPassword(req, current);
   if (current === next) throw new HttpError(400, 'Choose a password different from the current one');
   const tv = Number(u.token_version ?? 0) + 1;
