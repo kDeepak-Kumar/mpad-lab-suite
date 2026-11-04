@@ -20,7 +20,7 @@ core.get('/auth/me', h(async (req) => {
   const company = await getCompany(req.user.company_id);
   const { roleDef, ...user } = req.user;
   const u = await db('users').where({ id: req.user.id }).first('totp_enabled');
-  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo }, security: { totpEnabled: Boolean(u?.totp_enabled), required: Boolean((company as any).security?.require2fa) } };
+  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo }, security: { totpEnabled: Boolean(u?.totp_enabled), required: Boolean((company as any).security?.require2fa), idleMinutes: Number((company as any).security?.idleMinutes ?? 10), idleWarnAfter: Number((company as any).security?.idleWarnAfter ?? 7) } };
 }));
 
 // ---------- email alerts (SLA / calibration) ----------
@@ -59,8 +59,8 @@ core.put('/company', allow('settings'), h(async (req) => {
   if (body.ai) body.ai = { ...body.ai, apiKey: body.ai.apiKey ? body.ai.apiKey : cur.ai && (cur.ai as any).apiKey, hasKey: undefined };
   const { id: _i, name, ...data } = { ...cur, ...body };
   await db('companies').where({ id: req.user.company_id }).update({ name, data: toJson(data) });
-  await audit(db, req.user, 'company', req.user.company_id, 'updated settings');
-  return maskCompany(await getCompany(req.user.company_id));
+  await audit(db, req.user, 'company', req.user.company_id, 'updated settings', { fields: Object.keys(body) });
+  return { ok: true };
 }));
 
 // ---------- metadata (picklists, custom fields, layouts, roles, list views, reports, dashboards) ----------

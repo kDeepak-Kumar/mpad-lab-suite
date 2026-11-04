@@ -5,7 +5,7 @@ export interface Me {
   user: { id: number; name: string; email: string; role: string };
   role: RoleDef;
   company: { id: number; name: string; stateCode: string; logo?: string };
-  security?: { totpEnabled: boolean; required: boolean };
+  security?: { totpEnabled: boolean; required: boolean; idleMinutes?: number; idleWarnAfter?: number };
 }
 export interface Meta {
   picklists: Picklist[]; fields: (FieldDef & { object: string })[]; layouts: Layout[]; roles: RoleDef[];

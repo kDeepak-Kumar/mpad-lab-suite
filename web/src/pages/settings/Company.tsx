@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
 import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles, IconFileText } from '@tabler/icons-react';
 import { TermsSettings } from '../../components/Terms';
+import { LabSpinner } from '../../components/LabSpinner';
 import { useSearchParams } from 'react-router-dom';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList, WA_TEMPLATES, WA_PLACEHOLDERS, fillWa } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
@@ -34,22 +35,36 @@ const SECTIONS: { group: string; items: { key: string; label: string; hint: stri
 ];
 
 export function CompanySettings() {
-  const { data, reload } = useApi<any>('/company');
+  const { data, setData } = useApi<any>('/company');
   const [v, setV] = useState<any>(null);
   const [sp, setSp] = useSearchParams();
   const sec = sp.get('section') ?? 'profile';
   const go = (k: string) => setSp({ section: k }, { replace: true });
   const cur = SECTIONS.flatMap((g) => g.items).find((i) => i.key === sec) ?? SECTIONS[0].items[0];
-  useEffect(() => { if (data) setV(data); }, [data]);
-  const dirty = Boolean(v && data && JSON.stringify(v) !== JSON.stringify(data));
+  // Which top-level settings were edited: only those are sent, and no big comparisons on every keystroke.
+  const [edited, setEdited] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (data && !edited.size) setV(data); }, [data]);
+  const dirty = edited.size > 0;
   if (!v) return <Loading />;
-  const set = (path: string, val: any) => setV((o: any) => {
-    const n = structuredClone(o); const ks = path.split('.'); let cur = n;
-    for (const k of ks.slice(0, -1)) cur = cur[k] ??= {};
-    cur[ks[ks.length - 1]] = val; return n;
-  });
+  const set = (path: string, val: any) => {
+    const ks = path.split('.');
+    setEdited((e) => (e.has(ks[0]) ? e : new Set(e).add(ks[0])));
+    setV((o: any) => {
+      const n = { ...o }; let cur = n;
+      for (const k of ks.slice(0, -1)) { cur[k] = Array.isArray(cur[k]) ? [...cur[k]] : { ...(cur[k] ?? {}) }; cur = cur[k]; }
+      cur[ks[ks.length - 1]] = val; return n;
+    });
+  };
   const T = (label: string, path: string, props: any = {}) => <TextInput label={label} value={path.split('.').reduce((a: any, k) => a?.[k], v) ?? ''} onChange={(e) => set(path, e.currentTarget.value)} {...props} />;
-  const save = async () => { await api('/company', { method: 'PUT', body: v }); ok('Settings saved'); reload(); };
+  // Send only the settings that changed – not the logo, seal and letterhead images every time.
+  const save = async () => {
+    const changed = Object.fromEntries([...edited].map((k) => [k, v[k] ?? null]));
+    if (!Object.keys(changed).length) return;
+    setSaving(true);
+    try { await api('/company', { method: 'PUT', body: changed }); setEdited(new Set()); setData(v); ok('Settings saved'); }
+    finally { setSaving(false); }
+  };
   const img = (label: string, key: string, hint: string) => (
     <Paper withBorder p="sm">
       <Text size="sm" fw={600}>{label}</Text><Text size="xs" c="dimmed" mb="xs">{hint}</Text>
@@ -62,7 +77,7 @@ export function CompanySettings() {
   );
   return (
     <>
-      <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={!cur.selfSave && <Button onClick={save} disabled={!dirty}>{dirty ? 'Save changes' : 'Saved'}</Button>} />
+      <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={!cur.selfSave && <Button onClick={save} loading={saving} disabled={!dirty}>{dirty ? 'Save changes' : 'Saved'}</Button>} />
       <Grid gutter="lg">
         <Grid.Col span={{ base: 12, md: 3, xl: 2.5 }}>
           <Paper withBorder radius="lg" p={6} className="set-nav">
@@ -188,10 +203,11 @@ export function CompanySettings() {
         </Grid.Col>
       </Grid>
       {dirty && !cur.selfSave && <div style={{ height: 88 }} />}
-      {dirty && !cur.selfSave && (
+      {saving && <div className="saving-pill"><LabSpinner size={40} /><Text size="sm" fw={600}>Saving your changes…</Text></div>}
+      {dirty && !saving && !cur.selfSave && (
         <div className="set-savebar">
           <Text size="sm" fw={600}>You have unsaved changes</Text>
-          <Group gap="xs"><Button variant="default" onClick={() => setV(data)}>Discard</Button><Button onClick={save}>Save changes</Button></Group>
+          <Group gap="xs"><Button variant="default" onClick={() => { setV(data); setEdited(new Set()); }}>Discard</Button><Button onClick={save}>Save changes</Button></Group>
         </div>
       )}
     </>
@@ -350,6 +366,7 @@ function SecuritySettings() {
         <Switch disabled={busy} label={me.required ? 'Required for all users' : 'Optional (each user decides)'} checked={me.required}
           onChange={async (e) => { setBusy(true); try { await api('/account/admin/policy', { body: { require2fa: e.currentTarget.checked } }); ok('Security policy updated'); window.location.reload(); } finally { setBusy(false); } }} />
       </Paper>
+      <IdleSettings initial={me.idle} />
       <Paper withBorder p="md">
         <Text fw={600}>Full backup</Text>
         <Text size="xs" c="dimmed" mb="sm">Download everything – clients, documents, observation sheets, settings and attachments – as one file. Keep a copy every month outside the server (e.g. on your Google Drive). The server also makes its own nightly backups.</Text>
@@ -437,5 +454,24 @@ function WhatsAppSettings({ v, set }: { v: any; set: (path: string, value: unkno
         </Stack>
       </SimpleGrid>
     </Stack>
+  );
+}
+
+/** Automatic sign-out after inactivity, with a warning first. */
+function IdleSettings({ initial }: { initial: { idleMinutes: number; warnAfter: number } }) {
+  const [v, setV] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const off = v.idleMinutes === 0;
+  return (
+    <Paper withBorder p="md">
+      <Text fw={600}>Automatic sign-out when inactive</Text>
+      <Text size="xs" c="dimmed" mb="sm">Signs users out after a period without any typing, clicking or scrolling – protects shared and unattended computers. A warning with “Stay signed in” appears first.</Text>
+      <Group align="flex-end">
+        <NumberInput w={170} label="Sign out after (minutes)" description="0 = never" min={0} max={480} value={v.idleMinutes} onChange={(x) => setV({ ...v, idleMinutes: Number(x) || 0 })} />
+        <NumberInput w={170} label="Warn after (minutes)" disabled={off} min={1} max={479} value={v.warnAfter} onChange={(x) => setV({ ...v, warnAfter: Number(x) || 1 })} error={!off && v.warnAfter >= v.idleMinutes ? 'Must be less' : undefined} />
+        <Button loading={busy} disabled={!off && v.warnAfter >= v.idleMinutes} onClick={async () => { setBusy(true); try { await api('/account/admin/idle', { body: v }); ok('Saved – applies at the next page load'); } finally { setBusy(false); } }}>Save</Button>
+      </Group>
+      {!off && <Text size="xs" c="dimmed" mt={6}>Warning after {v.warnAfter} min of inactivity, sign-out after {v.idleMinutes} min ({v.idleMinutes - v.warnAfter} min to respond).</Text>}
+    </Paper>
   );
 }

@@ -8,6 +8,20 @@ const cache = new Map<string, { at: number; data: unknown }>();
 const listeners = new Set<() => void>();
 export const invalidate = () => { cache.clear(); listeners.forEach((l) => l()); };
 
+/** Set while signing out / redirecting: background refreshes then fail silently instead of showing red errors. */
+let leaving = false;
+function toLogin(reason?: string) {
+  if (leaving) return;
+  leaving = true;
+  window.location.href = reason ? `/login?reason=${reason}` : '/login';
+}
+/** Sign out without triggering a refresh of every open screen (which would fail with "not signed in"). */
+export async function signOut(reason?: string) {
+  leaving = true;
+  try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch { /* offline: cookie expires anyway */ }
+  window.location.href = reason ? `/login?reason=${reason}` : '/login';
+}
+
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; quiet?: boolean } = {}): Promise<T> {
   const method = opts.method ?? (opts.body !== undefined ? 'POST' : 'GET');
   const r = await fetch(`/api${path}`, {
@@ -20,8 +34,8 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   try { j = await r.json(); } catch { /* empty */ }
   if (!r.ok) {
     const msg = j?.error || `Request failed (${r.status})`;
-    if (r.status === 401 && !path.startsWith('/auth')) { window.location.href = '/login'; }
-    if (!opts.quiet) notifications.show({ color: 'red', title: 'Could not complete', message: msg });
+    if (r.status === 401 && !path.startsWith('/auth')) { toLogin('expired'); throw new ApiError(r.status, msg); }
+    if (!opts.quiet && !leaving) notifications.show({ color: 'red', title: 'Could not complete', message: msg });
     throw new ApiError(r.status, msg);
   }
   if (method === 'GET') cache.set(path, { at: Date.now(), data: j });

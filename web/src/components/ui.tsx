@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { FavStar } from '../favorites';
+import { LabSpinner } from './LabSpinner';
 import { Badge, Group, Stack, Text, Table, Paper, Loader, Center, Skeleton } from '@mantine/core';
 import type { ReactNode } from 'react';
 
@@ -44,7 +45,7 @@ export function Path({ steps, current }: { steps: { key: string; label: string }
 }
 
 export function Loading() {
-  return <Stack p="md" gap="sm"><Skeleton h={28} w="40%" /><Skeleton h={14} w="25%" /><Skeleton h={260} mt="md" radius="lg" /></Stack>;
+  return <Center mih={320}><LabSpinner size={60} label="Loading…" /></Center>;
 }
 export function Spinner() { return <Center p="xl"><Loader size="sm" /></Center>; }
 

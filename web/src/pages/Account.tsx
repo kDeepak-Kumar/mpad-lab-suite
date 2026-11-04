@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Badge, Button, Code, Group, Modal, Paper, PasswordInput, PinInput, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import { IconDeviceDesktop, IconDeviceMobile, IconShieldCheck, IconShieldLock } from '@tabler/icons-react';
 import qrcode from 'qrcode-generator';
-import { api, ok, useApi } from '../api';
+import { api, ok, signOut, useApi } from '../api';
 import { PageHeader, Loading } from '../components/ui';
 
 /** My account: password, two-step verification, devices that are signed in. */
@@ -137,7 +137,7 @@ export function Required2fa() {
       <div style={{ width: '100%', maxWidth: 520 }}>
         <Title order={3} mb="xs">One more step</Title>
         <TwoFactorCard state={data} onChange={reload} />
-        <Group justify="center" mt="md"><Button variant="subtle" onClick={async () => { await api('/auth/logout', { method: 'POST' }); window.location.href = '/login'; }}>Sign out</Button></Group>
+        <Group justify="center" mt="md"><Button variant="subtle" onClick={() => signOut()}>Sign out</Button></Group>
       </div>
     </div>
   );

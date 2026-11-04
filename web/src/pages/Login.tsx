@@ -61,6 +61,8 @@ export function Login({ onLogin }: { onLogin: () => Promise<unknown> }) {
                 <Text fw={700} fz={26} lh={1.2}>Welcome back</Text>
                 <Text size="sm" c="dimmed">Sign in to {b.name || 'your workspace'}</Text>
               </div>
+              {!error && sp.get('reason') === 'idle' && <Alert color="blue" variant="light">You were signed out after a period of inactivity. Sign in again to continue.</Alert>}
+              {!error && sp.get('reason') === 'expired' && <Alert color="blue" variant="light">Your session ended. Sign in again to continue.</Alert>}
               {error && <Alert color="red" variant="light">{error}</Alert>}
               <TextInput label="Email" size="md" type="email" value={email} onChange={(e) => setEmail(e.currentTarget.value)} autoComplete="username" required autoFocus />
               <div>

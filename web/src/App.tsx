@@ -8,13 +8,14 @@ import {
   IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt,
   IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
-import { api, useApi } from './api';
+import { api, signOut, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
 import { Loading } from './components/ui';
 import { SideNav, type NavItem } from './components/SideNav';
 import { FavProvider } from './favorites';
+import { IdleGuard } from './components/IdleGuard';
 
 // Pages load on demand, so the app opens fast and only fetches what a screen needs.
 const page = <K extends string>(loader: () => Promise<Record<K, ComponentType<any>>>, name: K) => lazy(() => loader().then((m) => ({ default: m[name] })));
@@ -112,7 +113,7 @@ function Shell() {
   useEffect(close, [loc.pathname]);
   const { data: dash } = useApi<any>('/dashboard');
   const items = NAV.filter((n) => hasTab(me, n.tab));
-  const logout = async () => { await api('/auth/logout', { method: 'POST' }); window.location.href = '/login'; };
+  const logout = () => signOut();
   const reminders: any[] = dash?.reminders ?? [];
 
   // command palette: navigate, create and search records
@@ -146,6 +147,7 @@ function Shell() {
   const width = mini ? 68 : 252;
   return (
     <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' }, navbar: { borderRight: '1px solid var(--line)' }, header: { borderBottom: '1px solid var(--line)' } }}>
+      <IdleGuard minutes={me.security?.idleMinutes ?? 10} warnAfter={me.security?.idleWarnAfter ?? 7} />
       <AppShell.Header className="no-print">
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">

@@ -79,7 +79,7 @@ account.get('/account/security', h(async (req) => {
   const cur = currentDeviceHash(req);
   const devices = await db('user_devices').where({ user_id: req.user.id }).orderBy('last_seen', 'desc');
   return {
-    totpEnabled: Boolean(u.totp_enabled), backupCodesLeft: backupCodesLeft(u.backup_codes), required: await companyRequires2fa(req.user.company_id),
+    totpEnabled: Boolean(u.totp_enabled), backupCodesLeft: backupCodesLeft(u.backup_codes), required: await companyRequires2fa(req.user.company_id), idle: await idlePolicy(req.user.company_id),
     devices: devices.map((d) => ({ id: d.id, label: describeAgent(d.user_agent), ip: d.ip, firstSeen: d.first_seen, lastSeen: d.last_seen, current: d.device_hash === cur, remembered: Boolean(d.trusted_until && d.trusted_until > new Date().toISOString()) })),
   };
 }));
@@ -166,6 +166,23 @@ account.post('/account/admin/reset-2fa/:id', allow('users'), h(async (req) => {
   await db('users').where({ id }).update({ totp_secret: null, totp_pending: null, totp_enabled: false, backup_codes: null, token_version: Number(t.token_version ?? 0) + 1 });
   await db('user_devices').where({ user_id: id }).update({ trusted_until: null });
   await audit(db, req.user, 'user', id, 'two-step verification reset by admin');
+  return { ok: true };
+}));
+
+async function idlePolicy(cid: number) {
+  const sec = ((await getCompany(cid)) as any).security ?? {};
+  return { idleMinutes: Number(sec.idleMinutes ?? 10), warnAfter: Number(sec.idleWarnAfter ?? 7) };
+}
+/** Automatic sign-out after inactivity (minutes; 0 = off) and when the warning appears. */
+account.post('/account/admin/idle', allow('settings'), h(async (req) => {
+  const b = z.object({ idleMinutes: z.number().int().min(0).max(480), warnAfter: z.number().int().min(1).max(479) })
+    .refine((x) => x.idleMinutes === 0 || x.warnAfter < x.idleMinutes, 'The warning must come before the sign-out').parse(req.body);
+  if (b.idleMinutes && b.idleMinutes < 3) throw new HttpError(400, 'Use at least 3 minutes, or 0 to turn automatic sign-out off');
+  const row = await db('companies').where({ id: req.user.company_id }).first();
+  const data = JSON.parse(row.data ?? '{}');
+  data.security = { ...(data.security ?? {}), idleMinutes: b.idleMinutes, idleWarnAfter: b.warnAfter };
+  await db('companies').where({ id: req.user.company_id }).update({ data: JSON.stringify(data) });
+  await audit(db, req.user, 'company', req.user.company_id, b.idleMinutes ? `automatic sign-out after ${b.idleMinutes} min idle (warning at ${b.warnAfter} min)` : 'automatic sign-out turned off');
   return { ok: true };
 }));
 
