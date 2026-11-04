@@ -1,4 +1,4 @@
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart } from 'recharts';
+import { Area, Bar, BarChart, CartesianGrid, Cell, Funnel, FunnelChart, LabelList, Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart } from 'recharts';
 import { Table, Text } from '@mantine/core';
 import { reportObject, timeLabel, type ReportResult } from '@suite/shared';
 import { compact, money } from '../api';
@@ -60,18 +60,54 @@ export function ReportChart({ result, height = 280 }: { result: ReportResult; he
       </ComposedChart>
     </ResponsiveContainer>
   );
-  if (chart === 'pie') return (
+  if (chart === 'area') return (
     <ResponsiveContainer width="100%" height={height}>
-      <PieChart>
-        <Pie data={data.slice(0, 8)} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="85%" paddingAngle={1} stroke="#fff" strokeWidth={2}
-          label={({ name, percent }) => `${name} ${Math.round(percent * 100)}%`} labelLine={false} style={{ fontSize: 11 }}>
-          {data.slice(0, 8).map((_, i) => <Cell key={i} fill={SERIES[i]} />)}
-        </Pie>
-        <Tooltip formatter={(v: number) => tip(v)} />
-        <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
-      </PieChart>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <defs><linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={SERIES[0]} stopOpacity={0.32} /><stop offset="100%" stopColor={SERIES[0]} stopOpacity={0.02} /></linearGradient></defs>
+        <CartesianGrid vertical={false} stroke={GRID} />
+        <XAxis dataKey="name" tick={axisTick} tickLine={false} axisLine={{ stroke: GRID }} />
+        <YAxis tick={axisTick} tickLine={false} axisLine={false} tickFormatter={(v) => compact(v)} width={52} allowDecimals={!ints} />
+        <Tooltip formatter={(v: number, n) => [tip(v), n === 'forecast' ? 'Forecast' : result.measureLabel]} />
+        <Area type="monotone" dataKey="actual" stroke={SERIES[0]} strokeWidth={2} fill="url(#areaFill)" connectNulls={false} />
+        <Line type="monotone" dataKey="forecast" stroke={SERIES[0]} strokeWidth={2} strokeDasharray="6 5" dot={false} connectNulls />
+      </ComposedChart>
     </ResponsiveContainer>
   );
+  if (chart === 'pie' || chart === 'donut') {
+    const top = data.slice(0, 7);
+    const others = data.slice(7).reduce((a, d) => a + d.value, 0);
+    const slices = others > 0 ? [...top, { name: 'Others', value: others }] : top;
+    const sum = slices.reduce((a, d) => a + d.value, 0);
+    return (
+      <div style={{ position: 'relative' }}>
+        <ResponsiveContainer width="100%" height={height}>
+          <PieChart>
+            <Pie data={slices} dataKey="value" nameKey="name" cx="36%" innerRadius={chart === 'donut' ? '58%' : 0} outerRadius="82%" paddingAngle={chart === 'donut' ? 1.5 : 0.5} stroke="#fff" strokeWidth={2}
+              label={({ percent }) => (percent >= 0.05 ? `${Math.round(percent * 100)}%` : '')} labelLine={false} style={{ fontSize: 11, fontWeight: 600 }}>
+              {slices.map((_, i) => <Cell key={i} fill={i === 7 ? '#c3c8d0' : SERIES[i]} />)}
+            </Pie>
+            <Tooltip formatter={(v: number) => tip(v)} />
+            <Legend iconType="circle" layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: 12, maxWidth: '45%' }} />
+          </PieChart>
+        </ResponsiveContainer>
+        {chart === 'donut' && <div className="donut-center"><div className="donut-total">{isMoney(result) ? `₹${compact(sum)}` : compact(sum)}</div><div className="donut-cap">Total</div></div>}
+      </div>
+    );
+  }
+  if (chart === 'funnel') {
+    const steps = [...data].sort((a, b) => b.value - a.value).slice(0, 8).map((d, i) => ({ ...d, fill: SERIES[i] }));
+    return (
+      <ResponsiveContainer width="100%" height={height}>
+        <FunnelChart margin={{ right: 120 }}>
+          <Tooltip formatter={(v: number) => tip(v)} />
+          <Funnel dataKey="value" nameKey="name" data={steps} isAnimationActive>
+            <LabelList position="right" dataKey="name" fill={INK2} stroke="none" style={{ fontSize: 12 }} />
+            <LabelList position="center" dataKey="value" fill="#fff" stroke="none" style={{ fontSize: 11, fontWeight: 650 }} formatter={(v: number) => (isMoney(result) ? compact(v) : v)} />
+          </Funnel>
+        </FunnelChart>
+      </ResponsiveContainer>
+    );
+  }
   if (chart === 'table') return (
     <Table fz="sm" striped>
       <Table.Thead><Table.Tr><Table.Th>{result.groupLabel}</Table.Th><Table.Th ta="right">{result.measureLabel}</Table.Th></Table.Tr></Table.Thead>

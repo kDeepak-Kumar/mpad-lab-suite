@@ -1,12 +1,18 @@
+import { useLocation } from 'react-router-dom';
+import { FavStar } from '../favorites';
 import { Badge, Group, Stack, Text, Table, Paper, Loader, Center, Skeleton } from '@mantine/core';
 import type { ReactNode } from 'react';
 
-export function PageHeader({ title, subtitle, actions, eyebrow }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; eyebrow?: ReactNode }) {
+/** Page title row. A star lets the user pin the page (or record) to Favourites; pass `fav` for records whose title is not plain text. */
+export function PageHeader({ title, subtitle, actions, eyebrow, fav }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; eyebrow?: ReactNode; fav?: { label: string; sub?: string } | false }) {
+  const loc = useLocation();
+  const label = fav === false ? null : fav?.label ?? (typeof title === 'string' ? title : null);
+  const kind = /^\/clients\/\d/.test(loc.pathname) ? 'client' : /^\/documents\/\d/.test(loc.pathname) ? 'document' : /^\/workorders\/\d/.test(loc.pathname) ? 'workorder' : 'page';
   return (
     <Group justify="space-between" mb="md" align="flex-end" className="no-print" wrap="wrap" gap="sm">
       <Stack gap={2}>
         {eyebrow && <Text size="xs" c="dimmed" fw={600} tt="uppercase" style={{ letterSpacing: '.05em' }}>{eyebrow}</Text>}
-        <div className="page-title">{title}</div>
+        <Group gap={4} wrap="nowrap" align="center"><div className="page-title">{title}</div>{label && <FavStar kind={kind} refKey={loc.pathname} label={label} sub={fav ? fav.sub : typeof eyebrow === 'string' ? eyebrow : undefined} />}</Group>
         {subtitle && <Text size="sm" c="dimmed">{subtitle}</Text>}
       </Stack>
       {actions && <Group gap="xs">{actions}</Group>}

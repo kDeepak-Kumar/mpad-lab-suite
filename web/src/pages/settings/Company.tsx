@@ -1,16 +1,45 @@
 import { useEffect, useState } from 'react';
-import { Button, FileButton, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
-import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp } from '@tabler/icons-react';
+import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
+import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles } from '@tabler/icons-react';
+import { useSearchParams } from 'react-router-dom';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList, WA_TEMPLATES, WA_PLACEHOLDERS, fillWa } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
 
 const NUM_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Invoice', workorder: 'Work order', sample: 'Sample job code', ulr: 'ULR number', report: 'Test report', receipt: 'Payment receipt' };
 
+const SECTIONS: { group: string; items: { key: string; label: string; hint: string; icon: React.ComponentType<{ size?: number | string }>; color: string; selfSave?: boolean }[] }[] = [
+  { group: 'Company', items: [
+    { key: 'profile', label: 'Company profile', hint: 'Name, registration, GST and accreditation details printed on every document', icon: IconId, color: '#2a78d6' },
+    { key: 'branding', label: 'Logo & sign-in page', hint: 'Logo, seal, accreditation symbol and the branded sign-in page', icon: IconPalette, color: '#7a5af8' },
+    { key: 'letterheads', label: 'Letterheads', hint: 'NABL and standard letterheads for quotations, invoices and reports', icon: IconLayoutNavbar, color: '#0e9384' },
+    { key: 'docs', label: 'Brochure & documents', hint: 'Company profile, brochure and certificates to attach to emails', icon: IconFiles, color: '#dc6803', selfSave: true },
+  ] },
+  { group: 'Documents & billing', items: [
+    { key: 'bank', label: 'Bank & payments', hint: 'Printed on invoices and used in WhatsApp payment messages', icon: IconBuildingBank, color: '#079455' },
+    { key: 'numbering', label: 'Numbering', hint: 'Number formats for quotations, invoices, samples, ULR and reports', icon: IconHash, color: '#475467' },
+    { key: 'defaults', label: 'Defaults & rules', hint: 'GST rate, SAC, validity, standard notes and review rules', icon: IconListCheck, color: '#2a78d6' },
+    { key: 'signatories', label: 'Signatories', hint: 'Who signs quotations, invoices and reports, with their signatures', icon: IconSignature, color: '#7a5af8' },
+  ] },
+  { group: 'Communication', items: [
+    { key: 'email', label: 'Email & alerts', hint: 'Sending mailbox, email footer and automatic alerts', icon: IconMail, color: '#d92d20' },
+    { key: 'whatsapp', label: 'WhatsApp', hint: 'Message templates for the WhatsApp buttons', icon: IconBrandWhatsapp, color: '#25D366' },
+  ] },
+  { group: 'Security & AI', items: [
+    { key: 'security', label: 'Security & backup', hint: 'Two-step verification policy and full backup download', icon: IconShieldLock, color: '#101828', selfSave: true },
+    { key: 'ai', label: 'AI assistant', hint: 'AI model used for drafting, analytics questions and reviews', icon: IconSparkles, color: '#e04f16' },
+  ] },
+];
+
 export function CompanySettings() {
   const { data, reload } = useApi<any>('/company');
   const [v, setV] = useState<any>(null);
+  const [sp, setSp] = useSearchParams();
+  const sec = sp.get('section') ?? 'profile';
+  const go = (k: string) => setSp({ section: k }, { replace: true });
+  const cur = SECTIONS.flatMap((g) => g.items).find((i) => i.key === sec) ?? SECTIONS[0].items[0];
   useEffect(() => { if (data) setV(data); }, [data]);
+  const dirty = Boolean(v && data && JSON.stringify(v) !== JSON.stringify(data));
   if (!v) return <Loading />;
   const set = (path: string, val: any) => setV((o: any) => {
     const n = structuredClone(o); const ks = path.split('.'); let cur = n;
@@ -31,10 +60,30 @@ export function CompanySettings() {
   );
   return (
     <>
-      <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={<Button onClick={save}>Save settings</Button>} />
-      <Tabs defaultValue="profile">
-        <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="branding">Branding</Tabs.Tab><Tabs.Tab value="bank">Bank & payments</Tabs.Tab><Tabs.Tab value="numbering">Numbering</Tabs.Tab><Tabs.Tab value="defaults">Defaults & rules</Tabs.Tab><Tabs.Tab value="letterheads">Letterheads</Tabs.Tab><Tabs.Tab value="ai">AI assistant</Tabs.Tab><Tabs.Tab value="signatories">Signatories</Tabs.Tab><Tabs.Tab value="email">Email & alerts</Tabs.Tab><Tabs.Tab value="security">Security</Tabs.Tab><Tabs.Tab value="docs">Brochure & documents</Tabs.Tab><Tabs.Tab value="whatsapp" leftSection={<IconBrandWhatsapp size={15} color="#25D366" />}>WhatsApp</Tabs.Tab></Tabs.List>
-        <Tabs.Panel value="profile">
+      <PageHeader title="Company & branding" subtitle="Used in every header, footer, number and document" actions={!cur.selfSave && <Button onClick={save} disabled={!dirty}>{dirty ? 'Save changes' : 'Saved'}</Button>} />
+      <Grid gutter="lg">
+        <Grid.Col span={{ base: 12, md: 3, xl: 2.5 }}>
+          <Paper withBorder radius="lg" p={6} className="set-nav">
+            {SECTIONS.map((g) => (
+              <div key={g.group}>
+                <Text className="set-group">{g.group}</Text>
+                {g.items.map((it) => (
+                  <UnstyledButton key={it.key} className={`set-item${sec === it.key ? ' active' : ''}`} onClick={() => go(it.key)} aria-current={sec === it.key ? 'page' : undefined}>
+                    <span className="set-ic" style={{ ['--c' as string]: it.color }}><it.icon size={16} /></span>
+                    <span style={{ flex: 1, minWidth: 0 }}><span className="set-label">{it.label}</span></span>
+                  </UnstyledButton>
+                ))}
+              </div>
+            ))}
+          </Paper>
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 9, xl: 9.5 }}>
+          <Paper withBorder radius="lg" p="lg" className="set-body">
+            <Group gap="sm" mb="lg" wrap="nowrap" align="flex-start">
+              <span className="set-ic big" style={{ ['--c' as string]: cur.color }}><cur.icon size={20} /></span>
+              <div><Text fw={700} fz={18}>{cur.label}</Text><Text size="sm" c="dimmed">{cur.hint}</Text></div>
+            </Group>
+        {sec === "profile" && <>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('Short name (printed under the logo, e.g. MPAD)', 'shortName')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
             <Select label="State (for GST)" searchable data={INDIAN_STATES.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` }))} value={v.stateCode ?? null} onChange={(x) => set('stateCode', x)} />
@@ -42,8 +91,8 @@ export function CompanySettings() {
             {T('Accreditation body', 'accreditation.body')}{T('Accreditation certificate no.', 'accreditation.certNo')}{T('Accreditation valid till', 'accreditation.validTill', { type: 'date' })}
           </SimpleGrid>
           <Textarea mt="sm" label="Address (footer)" autosize value={v.address ?? ''} onChange={(e) => set('address', e.currentTarget.value)} />
-        </Tabs.Panel>
-        <Tabs.Panel value="branding">
+        </>}
+        {sec === "branding" && <>
           <SimpleGrid cols={{ base: 1, md: 3 }}>
             {img('Company logo', 'logo', 'Shown at top-left of every document')}
             {img('Accreditation symbol', 'accreditationLogo', 'Printed on reports for accredited tests. Follow the accreditation body’s rules for its use.')}
@@ -59,11 +108,11 @@ export function CompanySettings() {
               <TextInput label="Brand colour (hex)" placeholder="#1f3a68" value={v.login?.accent ?? ''} onChange={(e) => set('login.accent', e.currentTarget.value)} />
             </SimpleGrid>
           </Paper>
-        </Tabs.Panel>
-        <Tabs.Panel value="bank">
+        </>}
+        {sec === "bank" && <>
           <SimpleGrid cols={{ base: 1, md: 2 }}>{T('Account name', 'bank.name')}{T('Bank', 'bank.bank')}{T('Branch', 'bank.branch')}{T('IFSC', 'bank.ifsc')}{T('Account number', 'bank.account')}{T('UPI ID (optional)', 'bank.upi')}</SimpleGrid>
-        </Tabs.Panel>
-        <Tabs.Panel value="numbering">
+        </>}
+        {sec === "numbering" && <>
           <Alert variant="light" mb="sm">Tokens: {'{SEQ}'} running number, {'{SEQ:4}'} zero-padded, {'{FY}'} 26-27, {'{YYYY}'} {'{YY}'} {'{MM}'}, {'{CLIENT}'} client short code. Numbers containing {'{FY}'} restart every April; with {'{YYYY}'} every January.</Alert>
           <Stack>
             {Object.keys(DEFAULT_NUMBERING).map((k) => {
@@ -72,8 +121,8 @@ export function CompanySettings() {
               return <Group key={k} grow><TextInput label={NUM_LABEL[k]} value={f} onChange={(e) => set(`numbering.${k}`, e.currentTarget.value)} /><TextInput label="Example" value={preview} readOnly variant="filled" /></Group>;
             })}
           </Stack>
-        </Tabs.Panel>
-        <Tabs.Panel value="defaults">
+        </>}
+        {sec === "defaults" && <>
           <SimpleGrid cols={{ base: 1, md: 3 }}>
             <NumberInput label="Default GST rate (%)" value={v.defaults?.gstRate ?? 18} onChange={(x) => set('defaults.gstRate', Number(x))} />
             {T('Default SAC', 'defaults.sac')}
@@ -82,8 +131,8 @@ export function CompanySettings() {
           <Textarea mt="sm" label="Default quotation notes (one per line)" autosize minRows={3} value={v.defaults?.quoteNotes ?? ''} onChange={(e) => set('defaults.quoteNotes', e.currentTarget.value)} />
           <Textarea mt="sm" label="Standard report notes (one per line, added to every report after test-specific notes)" autosize minRows={4} value={v.defaults?.reportNotes ?? ''} onChange={(e) => set('defaults.reportNotes', e.currentTarget.value)} />
           <Switch mt="md" label="Allow a person to review observations they entered (not recommended for ISO 17025)" checked={!!v.defaults?.allowSelfReview} onChange={(e) => set('defaults.allowSelfReview', e.currentTarget.checked)} />
-        </Tabs.Panel>
-        <Tabs.Panel value="letterheads">
+        </>}
+        {sec === "letterheads" && <>
           <Alert variant="light" mb="sm">Every quote, invoice and report has a Report type. NABL documents print with the NABL letterhead, the rest with the standard one. Use the designed header (logo, name, CIN, GSTIN and, for NABL, the accreditation symbol and certificate number) or upload your own header and footer images.</Alert>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {(['nabl', 'standard'] as const).map((k) => {
@@ -109,13 +158,13 @@ export function CompanySettings() {
               );
             })}
           </SimpleGrid>
-        </Tabs.Panel>
-        <Tabs.Panel value="ai"><AiSettings v={v} set={set} /></Tabs.Panel>
-        <Tabs.Panel value="signatories"><SignatoriesSettings v={v} set={set} /></Tabs.Panel>
-        <Tabs.Panel value="security"><SecuritySettings /></Tabs.Panel>
-        <Tabs.Panel value="docs"><CompanyDocuments /></Tabs.Panel>
-        <Tabs.Panel value="whatsapp"><WhatsAppSettings v={v} set={set} /></Tabs.Panel>
-        <Tabs.Panel value="email">
+        </>}
+        {sec === "ai" && <><AiSettings v={v} set={set} /></>}
+        {sec === "signatories" && <><SignatoriesSettings v={v} set={set} /></>}
+        {sec === "security" && <><SecuritySettings /></>}
+        {sec === "docs" && <><CompanyDocuments /></>}
+        {sec === "whatsapp" && <><WhatsAppSettings v={v} set={set} /></>}
+        {sec === "email" && <>
           <Alert variant="light" mb="sm">Documents are emailed from your own mailbox. For Gmail use host smtp.gmail.com, port 465 and an App Password. For cPanel mail use mail.yourdomain.com. The password itself is set as SMTP_PASSWORD in the hosting environment, never stored here.</Alert>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {T('SMTP host', 'smtp.host')}<NumberInput label="Port" value={v.smtp?.port ?? 465} onChange={(x) => set('smtp.port', Number(x))} />
@@ -124,8 +173,16 @@ export function CompanySettings() {
           </SimpleGrid>
           <FooterSettings v={v} set={set} />
           <AlertSettings v={v} set={set} />
-        </Tabs.Panel>
-      </Tabs>
+        </>}
+          </Paper>
+        </Grid.Col>
+      </Grid>
+      {dirty && !cur.selfSave && (
+        <div className="set-savebar">
+          <Text size="sm" fw={600}>You have unsaved changes</Text>
+          <Group gap="xs"><Button variant="default" onClick={() => setV(data)}>Discard</Button><Button onClick={save}>Save changes</Button></Group>
+        </div>
+      )}
     </>
   );
 }

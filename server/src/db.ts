@@ -261,6 +261,34 @@ const migrations: Migration[] = [
       await k.schema.alterTable('users', (t) => { t.boolean('password_set').defaultTo(true); t.string('email_verified_at', 32).nullable(); });
     },
   },
+  {
+    id: '008_sharing_favorites',
+    up: async (k) => {
+      // Safe to re-run: MySQL cannot roll back schema changes if a later step fails.
+      if (!(await k.schema.hasColumn('clients', 'owner_id'))) await k.schema.alterTable('clients', (t) => { t.integer('owner_id').unsigned().nullable(); });
+      if (!(await k.schema.hasColumn('documents', 'owner_id'))) await k.schema.alterTable('documents', (t) => { t.integer('owner_id').unsigned().nullable(); });
+      // Owner of existing clients = whoever created them (from the audit trail); documents = their creator.
+      const made = await k('audit_log').where({ entity: 'client' }).andWhere('action', 'like', 'created%').select('entity_id', 'user_id');
+      for (const m of made) if (m.user_id) await k('clients').where({ id: m.entity_id }).whereNull('owner_id').update({ owner_id: m.user_id });
+      // Anything left (seeded or very old records) belongs to the company's Owner / first administrator.
+      for (const c of await k('companies').select('id')) {
+        const boss = await k('users').where({ company_id: c.id, active: true }).whereIn('role', ['owner', 'admin']).orderByRaw("CASE WHEN role = 'owner' THEN 0 ELSE 1 END").orderBy('id').first('id');
+        if (boss) { await k('clients').where({ company_id: c.id }).whereNull('owner_id').update({ owner_id: boss.id }); await k('documents').where({ company_id: c.id }).whereNull('owner_id').update({ owner_id: boss.id }); }
+      }
+      await k('documents').whereNull('owner_id').update({ owner_id: k.ref('created_by') });
+      if (!(await k.schema.hasTable('record_shares'))) await k.schema.createTable('record_shares', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('object', 20).notNullable(); t.integer('record_id').unsigned().notNullable();
+        t.integer('user_id').unsigned().nullable(); t.string('role', 40).nullable(); t.string('access', 6).notNullable().defaultTo('read');
+        t.integer('created_by').unsigned().nullable(); t.string('created_at', 32);
+        t.index(['company_id', 'object', 'record_id']); t.index(['company_id', 'object', 'user_id']);
+      });
+      if (!(await k.schema.hasTable('favorites'))) await k.schema.createTable('favorites', (t) => {
+        t.increments('id'); t.integer('user_id').unsigned().notNullable(); t.string('kind', 20).notNullable(); t.string('ref', 200).notNullable();
+        t.string('label', 200); t.string('sub', 200); t.integer('position').defaultTo(0); t.string('created_at', 32);
+        t.unique(['user_id', 'kind', 'ref']);
+      });
+    },
+  },
 ];
 
 export async function migrate(k: Knex = db) {
@@ -299,6 +327,7 @@ export function row<T extends Record<string, unknown>>(r: T | undefined, jsonCol
 
 /** Insert and return the new id (works on SQLite and MySQL). */
 export async function insert(k: Knex, table: string, values: Record<string, unknown>): Promise<number> {
+  if (table === 'documents' && values.owner_id === undefined && values.created_by) values = { ...values, owner_id: values.created_by };
   const res = await k(table).insert(values);
   return Number(Array.isArray(res) ? res[0] : res);
 }

@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { trackRecent } from '../favorites';
+import { SharingButton, SharingModal } from '../components/Sharing';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ClientActivity } from './FollowUps';
 import { Button, Group, Modal, Paper, Stack, Tabs, Text, Badge, Timeline, MultiSelect, Select, Anchor, SimpleGrid, ActionIcon, Menu } from '@mantine/core';
@@ -120,6 +122,8 @@ export function ClientDetail() {
   const [site, setSite] = useState<any>(null);
   const [contact, setContact] = useState<any>(null);
   const [wa, setWa] = useState<null | { phone?: string; name?: string }>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  useEffect(() => { if (c?.id) trackRecent({ to: `/clients/${c.id}`, label: c.name, sub: 'Client', kind: 'client' }); }, [c?.id]);
   if (!c) return <Loading />;
   const openInv = c.documents.filter((d: any) => d.kind === 'invoice' && ['issued', 'partly_paid'].includes(d.status));
   const docs = (k: string) => c.documents.filter((d: any) => d.kind === k && d.status !== 'cancelled');
@@ -127,9 +131,10 @@ export function ClientDetail() {
   const show = (f: any) => { const v = f.custom ? c.custom?.[f.key] : c[f.key]; if (f.type === 'state') return INDIAN_STATES.find((s) => s.code === v)?.name; if (f.type === 'currency') return v !== null && v !== undefined ? `₹${money(v)}` : ''; if (f.type === 'checkbox') return v ? 'Yes' : 'No'; return v; };
   return (
     <>
-      <PageHeader eyebrow="Client" title={c.name} subtitle={c.address}
+      <PageHeader eyebrow="Client" title={c.name} subtitle={<>{c.address}{c.owner_name ? <Text span size="xs" c="dimmed">{c.address ? ' · ' : ''}Owner: {c.owner_name}</Text> : null}</>}
         actions={<>
-          {can('client.edit') && <Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>Edit</Button>}
+          <SharingButton access={c.access} onClick={() => setShareOpen(true)} />
+          {can('client.edit') && c.access !== 'read' && <Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>Edit</Button>}
           <WhatsAppButton variant="light" onClick={() => setWa({})} />
           {can('sample.create') && <Button variant="default" onClick={() => nav(`/samples?new=1&client=${c.id}`)}>Register sample</Button>}
           {can('quote.create') && <Button onClick={() => nav(`/quotes/new?client=${c.id}`)}>New quotation</Button>}
@@ -148,6 +153,7 @@ export function ClientDetail() {
         <Kpi label="Samples" value={c.samples.length} />
         <Kpi label="Invoiced (all time)" value={`₹${money(docs('invoice').filter((d: any) => d.status !== 'draft').reduce((a: number, d: any) => a + d.total, 0))}`} />
       </SimpleGrid>
+      {shareOpen && <SharingModal object="client" id={c.id} title={c.name} onClose={(ch) => { setShareOpen(false); if (ch) reload(); }} />}
       {wa && <WhatsAppModal context={c.ledger.balance > 0 ? 'reminder' : 'client'} clientId={c.id} preferred={wa} title={`WhatsApp ${c.name}`}
         vars={{ client: c.name, balance: money(c.ledger.balance, 2), number: openInv.map((d: any) => d.number).slice(0, 5).join(', ') }} onClose={(sent) => { setWa(null); if (sent) reload(); }} />}
       <Tabs defaultValue={new URLSearchParams(window.location.search).get('tab') ?? 'sites'} keepMounted={false}>

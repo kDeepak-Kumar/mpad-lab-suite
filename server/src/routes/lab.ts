@@ -62,7 +62,7 @@ lab.get('/samples', allow('sample.read'), h(async (req) => {
   const cid = req.user.company_id;
   const q = String(req.query.q ?? '').trim();
   const rows = await db('samples as s').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('sites as st', 'st.id', 's.site_id')
-    .where('s.company_id', cid).modify((b) => { if (q) b.andWhere((w) => w.whereLike('s.code', `%${q}%`).orWhereLike('c.name', `%${q}%`).orWhereLike('s.ulr', `%${q}%`)); })
+    .where('s.company_id', cid).modify((b) => { if (q) b.andWhere((w) => w.where('s.code', 'like', `%${q}%`).orWhere('c.name', 'like', `%${q}%`).orWhere('s.ulr', 'like', `%${q}%`)); })
     .orderBy('s.id', 'desc').limit(500).select('s.*', 'c.name as client_name', 'st.name as site_name') as Record<string, any>[];
   const tests = rows.length ? await db('tests as t').leftJoin('catalog as k', 'k.id', 't.catalog_id').whereIn('t.sample_id', rows.map((r) => r.id)).select('t.sample_id', 't.status', 'k.report_name', 'k.billing_name') : [];
   return rows.map((r) => ({ ...r, tests: tests.filter((t) => t.sample_id === r.id) }));

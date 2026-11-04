@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Badge, Button, Grid, Group, Menu, Modal, NumberInput, Paper, SegmentedControl, Select, SimpleGrid, Stack, Switch, Tabs, Text, TextInput, Tooltip, Loader } from '@mantine/core';
-import { IconSparkles, IconTrash, IconPlus, IconDownload, IconDots, IconArrowUpRight, IconArrowDownRight, IconAlertTriangle } from '@tabler/icons-react';
-import { DATE_PRESETS, REPORT_OBJECTS, timeLabel, type ReportResult, type ReportSpec } from '@suite/shared';
+import { IconSparkles, IconTrash, IconPlus, IconDownload, IconDots, IconArrowUpRight, IconArrowDownRight, IconAlertTriangle, IconChartBar, IconChartBarPopular, IconChartLine, IconChartArea, IconChartDonut, IconChartPie, IconChartFunnel, IconTable, IconNumber } from '@tabler/icons-react';
+import { useLocalStorage } from '@mantine/hooks';
+import { CHART_KINDS, chartsFor, DATE_PRESETS, REPORT_OBJECTS, timeLabel, type ReportResult, type ReportSpec } from '@suite/shared';
 import { api, compact, downloadCsv, ok, useApi } from '../api';
 import { useCan, useMeta } from '../ctx';
 import { PageHeader, Kpi } from '../components/ui';
@@ -14,10 +15,10 @@ export const DEFAULT_WIDGETS: ReportSpec[] = [
   W('Revenue by client (this financial year)', { object: 'invoices', measure: { agg: 'sum', field: 'total' }, groupBy: ['client'], dateRange: { preset: 'this_fy' }, chart: 'hbar', limit: 10 }),
   W('Most requested tests (last 90 days)', { object: 'tests', measure: { agg: 'count' }, groupBy: ['test'], dateRange: { preset: 'last_90' }, chart: 'hbar', limit: 10 }),
   W('Samples by material (this financial year)', { object: 'samples', measure: { agg: 'count' }, groupBy: ['material'], dateRange: { preset: 'this_fy' }, chart: 'bar' }),
-  W('NABL vs Non-NABL revenue (this financial year)', { object: 'invoices', measure: { agg: 'sum', field: 'total' }, groupBy: ['accreditation'], dateRange: { preset: 'this_fy' }, chart: 'pie' }),
+  W('NABL vs Non-NABL revenue (this financial year)', { object: 'invoices', measure: { agg: 'sum', field: 'total' }, groupBy: ['accreditation'], dateRange: { preset: 'this_fy' }, chart: 'donut' }),
   W('Outstanding by ageing', { object: 'outstanding', measure: { agg: 'sum', field: 'balance' }, groupBy: ['ageing'], chart: 'bar', sort: 'label' }),
   W('Revenue by test (this financial year)', { object: 'invoice_lines', measure: { agg: 'sum', field: 'amount' }, groupBy: ['test'], dateRange: { preset: 'this_fy' }, chart: 'hbar', limit: 10 }),
-  W('Quotations by status (last 90 days)', { object: 'quotes', measure: { agg: 'count' }, groupBy: ['status'], dateRange: { preset: 'last_90' }, chart: 'pie' }),
+  W('Quotations by status (last 90 days)', { object: 'quotes', measure: { agg: 'count' }, groupBy: ['status'], dateRange: { preset: 'last_90' }, chart: 'donut' }),
 ];
 const EXAMPLES = ['How much revenue from Sunrise Infra this year?', 'Revenue by month with forecast', 'Which tests are most requested this quarter?', 'Outstanding by client', 'NABL vs Non-NABL revenue', 'Samples by material last 30 days'];
 
@@ -26,12 +27,18 @@ export function AnalyticsWidget(p: { spec: ReportSpec }) { return <Widget spec={
 function Widget({ spec, onRemove, onOpen, period }: { spec: ReportSpec; onRemove?: () => void; onOpen?: (s: ReportSpec) => void; period?: string }) {
   const [res, setRes] = useState<ReportResult | null>(null);
   const [err, setErr] = useState('');
+  const [chartPref, setChartPref] = useLocalStorage<string | null>({ key: `chart:${spec.title ?? JSON.stringify(spec.groupBy)}`, defaultValue: null });
+  const options = chartsFor(spec);
+  const chart = chartPref && options.includes(chartPref as never) ? chartPref : spec.chart;
   const eff = useMemo(() => (period && !spec.forecast ? { ...spec, dateRange: { preset: period as never } } : spec), [spec, period]);
+  const shownRes = res ? { ...res, spec: { ...res.spec, chart: chart as never } } : null;
   useEffect(() => { setRes(null); api<ReportResult>('/analytics/run', { body: eff, quiet: true }).then(setRes).catch((e) => setErr(e.message)); }, [JSON.stringify(eff)]);
   return (
-    <Paper withBorder p="md" h="100%">
+    <Paper withBorder p="md" h="100%" className="widget">
       <Group justify="space-between" mb={6} wrap="nowrap">
         <Text fw={600} size="sm" lineClamp={1}>{spec.title ?? res?.title}</Text>
+        <Group gap={2} wrap="nowrap">
+        {options.length > 1 && <ChartPicker value={chart ?? options[0]} options={options} onChange={setChartPref} />}
         <Menu position="bottom-end" shadow="lg">
           <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm"><IconDots size={16} /></ActionIcon></Menu.Target>
           <Menu.Dropdown>
@@ -40,8 +47,9 @@ function Widget({ spec, onRemove, onOpen, period }: { spec: ReportSpec; onRemove
             {onRemove && <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={onRemove}>Remove from dashboard</Menu.Item>}
           </Menu.Dropdown>
         </Menu>
+        </Group>
       </Group>
-      {err ? <Text size="sm" c="red">{err}</Text> : !res ? <Group justify="center" h={220}><Loader size="sm" /></Group> : <ReportChart result={res} height={240} />}
+      {err ? <Text size="sm" c="red">{err}</Text> : !shownRes ? <Group justify="center" h={220}><Loader size="sm" /></Group> : <ReportChart result={shownRes} height={240} />}
     </Paper>
   );
 }
@@ -151,7 +159,7 @@ function Builder({ initial, onSaved, onAdd }: { initial?: ReportSpec | null; onS
               </Group>
             ))}
             <Button size="xs" variant="light" onClick={() => set({ filters: [...(spec.filters ?? []), { field: filterFields[0].value, op: 'eq', value: '' }] })}>Add filter</Button>
-            <SegmentedControl size="xs" value={spec.chart ?? 'bar'} onChange={(v) => set({ chart: v as never })} data={[{ value: 'bar', label: 'Bar' }, { value: 'hbar', label: 'H-bar' }, { value: 'line', label: 'Line' }, { value: 'pie', label: 'Donut' }, { value: 'table', label: 'Table' }, { value: 'number', label: 'Number' }]} />
+            <ChartPicker value={spec.chart ?? chartsFor(spec)[0]} options={chartsFor(spec)} onChange={(v) => set({ chart: v as never })} labels />
             <Group grow>
               <NumberInput size="xs" label="Top N" min={0} value={spec.limit ?? ''} onChange={(v) => set({ limit: v === '' ? undefined : Number(v) })} />
               <NumberInput size="xs" label="Forecast periods" min={0} max={12} disabled={!['month', 'week', 'quarter'].includes(spec.groupBy?.[0] ?? '')} value={spec.forecast ?? 0} onChange={(v) => set({ forecast: Number(v) || undefined })} />
@@ -222,5 +230,15 @@ export function AnalyticsPage() {
         <Tabs.Panel value="builder"><Builder initial={builderSpec} onSaved={() => { reload(); setTab('reports'); }} onAdd={addWidget} /></Tabs.Panel>
       </Tabs>
     </>
+  );
+}
+
+const CHART_ICON: Record<string, React.ComponentType<{ size?: number | string }>> = { bar: IconChartBar, hbar: IconChartBarPopular, line: IconChartLine, area: IconChartArea, donut: IconChartDonut, pie: IconChartPie, funnel: IconChartFunnel, table: IconTable, number: IconNumber };
+/** Switch how a report is drawn; only the chart types that suit its grouping are offered. */
+function ChartPicker({ value, options, onChange, labels }: { value: string; options: string[]; onChange: (v: string) => void; labels?: boolean }) {
+  return (
+    <SegmentedControl size="xs" className={labels ? undefined : 'chart-pick'} value={options.includes(value) ? value : options[0]} onChange={onChange}
+      data={options.map((o) => { const Ic = CHART_ICON[o]; const label = CHART_KINDS.find((k) => k.value === o)?.label ?? o;
+        return { value: o, label: labels ? <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}><Ic size={14} />{label}</span> : <Tooltip label={label}><span style={{ display: 'flex' }}><Ic size={14} /></span></Tooltip> }; })} />
   );
 }

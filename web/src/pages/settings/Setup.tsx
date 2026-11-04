@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Badge, Button, Checkbox, ColorSwatch, Grid, Group, Modal, NavLink, Paper, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
 import { IconGripVertical, IconEye, IconEyeOff, IconPlus, IconTrash, IconLock } from '@tabler/icons-react';
-import { ACTIONS, OBJECTS, PERM_OBJECTS, TABS, objectDef, type FieldDef, type MetaFieldType, type Picklist, type RoleDef } from '@suite/shared';
+import { OWD_OPTIONS, SHARE_OBJECTS, ACTIONS, OBJECTS, PERM_OBJECTS, TABS, objectDef, type FieldDef, type MetaFieldType, type Picklist, type RoleDef } from '@suite/shared';
 import { moveItem, useDragReorder } from '../../components/useDragReorder';
-import { api, ok } from '../../api';
+import { api, ok, useApi } from '../../api';
 import { useMeta } from '../../ctx';
 import { PageHeader } from '../../components/ui';
 
@@ -22,10 +22,11 @@ export function SetupPage() {
     <>
       <PageHeader title="Setup" subtitle="Customise the application without code: fields, picklists, page layouts, roles and permissions." />
       <Tabs value={tab} onChange={(t) => setSp({ tab: t ?? 'objects' })} keepMounted={false}>
-        <Tabs.List mb="md"><Tabs.Tab value="objects">Objects & fields</Tabs.Tab><Tabs.Tab value="picklists">Picklists</Tabs.Tab><Tabs.Tab value="roles">Roles & permissions</Tabs.Tab></Tabs.List>
+        <Tabs.List mb="md"><Tabs.Tab value="objects">Objects & fields</Tabs.Tab><Tabs.Tab value="picklists">Picklists</Tabs.Tab><Tabs.Tab value="roles">Roles & permissions</Tabs.Tab><Tabs.Tab value="sharing">Sharing & visibility</Tabs.Tab></Tabs.List>
         <Tabs.Panel value="objects"><ObjectManager /></Tabs.Panel>
         <Tabs.Panel value="picklists"><Picklists /></Tabs.Panel>
         <Tabs.Panel value="roles"><Roles /></Tabs.Panel>
+        <Tabs.Panel value="sharing"><SharingSettings /></Tabs.Panel>
       </Tabs>
     </>
   );
@@ -217,11 +218,12 @@ function Roles() {
             </Tabs.Panel>
             <Tabs.Panel value="objects">
               <Table fz="sm" verticalSpacing={6}>
-                <Table.Thead><Table.Tr><Table.Th>Records</Table.Th>{['read', 'create', 'edit', 'delete'].map((o) => <Table.Th key={o} ta="center" tt="capitalize">{o}</Table.Th>)}</Table.Tr></Table.Thead>
+                <Table.Thead><Table.Tr><Table.Th>Records</Table.Th>{['Read', 'Create', 'Edit', 'Delete', 'View all', 'Modify all'].map((o) => <Table.Th key={o} ta="center">{o}</Table.Th>)}</Table.Tr></Table.Thead>
                 <Table.Tbody>{PERM_OBJECTS.map((o) => (
-                  <Table.Tr key={o}><Table.Td>{OBJ_LABEL[o]}</Table.Td>{(['read', 'create', 'edit', 'delete'] as const).map((op) => (
-                    <Table.Td key={op} ta="center"><Checkbox disabled={locked} style={{ display: 'inline-block' }} checked={locked || Boolean(r.objects[o]?.[op])}
-                      onChange={(e) => { const cur = Object.assign({ read: false, create: false, edit: false, delete: false }, r.objects[o]); cur[op] = e.currentTarget.checked; if (op !== 'read' && cur[op]) cur.read = true; if (op === 'read' && !cur.read) { cur.create = cur.edit = cur.delete = false; } setR({ ...r, objects: { ...r.objects, [o]: cur } }); }} /></Table.Td>))}</Table.Tr>
+                  <Table.Tr key={o}><Table.Td>{OBJ_LABEL[o]}</Table.Td>{(['read', 'create', 'edit', 'delete', 'viewAll', 'modifyAll'] as const).map((op) => (
+                    <Table.Td key={op} ta="center">{(op === 'viewAll' || op === 'modifyAll') && !SHARE_OBJECTS.some((x) => x.key === o) ? <Text size="xs" c="dimmed">—</Text> :
+                      <Checkbox disabled={locked} style={{ display: 'inline-block' }} checked={locked || Boolean(r.objects[o]?.[op])}
+                      onChange={(e) => { const cur: any = Object.assign({ read: false, create: false, edit: false, delete: false }, r.objects[o]); cur[op] = e.currentTarget.checked; if (op !== 'read' && cur[op]) cur.read = true; if (op === 'modifyAll' && cur[op]) { cur.viewAll = true; cur.edit = true; } if (op === 'read' && !cur.read) { cur.create = cur.edit = cur.delete = cur.viewAll = cur.modifyAll = false; } setR({ ...r, objects: { ...r.objects, [o]: cur } }); }} />}</Table.Td>))}</Table.Tr>
                 ))}</Table.Tbody>
               </Table>
             </Tabs.Panel>
@@ -245,5 +247,37 @@ function Roles() {
         </Paper>
       </Grid.Col>
     </Grid>
+  );
+}
+
+/** Organisation-wide defaults: how visible a client / quotation / invoice is to people who do not own it. */
+function SharingSettings() {
+  const { data, reload } = useApi<Record<string, string>>('/sharing/defaults', []);
+  const [v, setV] = useState<Record<string, string> | null>(null);
+  useEffect(() => { if (data) setV(data); }, [data]);
+  if (!v) return null;
+  return (
+    <Stack maw={980}>
+      <Alert variant="light" title="How visibility works">
+        <Text size="sm">1. <b>Object access</b> – whether a role can open clients, quotations or invoices at all (Roles & permissions → Records).<br />
+          2. <b>Organisation-wide default</b> – below: what people see of records they do not own.<br />
+          3. <b>Owner and sharing</b> – the owner (the creator, changeable) can share a record with a user or a role, view-only or edit, using the Sharing button on the record.<br />
+          4. <b>View all / Modify all</b> – roles that see or edit every record regardless (e.g. Owner/Director, Accountant for invoices).<br />
+          5. <b>Field access</b> – hides or locks individual fields per role.</Text>
+      </Alert>
+      <Table verticalSpacing="sm" withTableBorder>
+        <Table.Thead><Table.Tr><Table.Th>Object</Table.Th><Table.Th>Default access for records you don’t own</Table.Th></Table.Tr></Table.Thead>
+        <Table.Tbody>{SHARE_OBJECTS.map((o) => (
+          <Table.Tr key={o.key}>
+            <Table.Td fw={600} w={160}>{o.label}</Table.Td>
+            <Table.Td>
+              <Select w={260} data={OWD_OPTIONS.map((x) => ({ value: x.value, label: x.label }))} value={v[o.key] ?? 'edit'} allowDeselect={false} onChange={(x) => x && setV({ ...v, [o.key]: x })} />
+              <Text size="xs" c="dimmed" mt={4}>{OWD_OPTIONS.find((x) => x.value === (v[o.key] ?? 'edit'))?.hint}</Text>
+            </Table.Td>
+          </Table.Tr>))}</Table.Tbody>
+      </Table>
+      <Group><Button onClick={async () => { await api('/sharing/defaults', { method: 'PUT', body: v }); ok('Sharing defaults saved'); reload(); }}>Save sharing defaults</Button>
+        <Text size="xs" c="dimmed">Lab work (samples, tests, reports) stays visible to every role that has the tab, so the lab can work as a team.</Text></Group>
+    </Stack>
   );
 }

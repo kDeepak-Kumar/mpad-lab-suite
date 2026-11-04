@@ -7,12 +7,15 @@ import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
 import { audit, clientSnapshot, getCompany, getDocTemplate, ledger, nextNumber, paidAgainst, refreshInvoiceStatus, sha256 } from '../services';
+import { guardDocument, recordAccess, restrictDocuments, isShareObject } from '../sharing';
 import { followUpsDue, scheduleQuoteFollowUp, shareable, shareToken, verifyToken } from './crm';
 import { createWorkOrder } from './lab';
 import { isIsoDate } from '@suite/shared';
 const isoDate = z.string().refine(isIsoDate, 'Enter a valid date (YYYY-MM-DD)');
 
 export const finance = Router();
+/** Private quotations / invoices: owner, shared users and View all roles only (see sharing.ts). */
+finance.use('/documents/:id', guardDocument);
 
 const JSON_COLS = ['data', 'overrides', 'totals'];
 const permFor = (kind: string) => (kind === 'quote' ? 'quotes' : kind === 'invoice' ? 'invoices' : 'reportPrepare') as 'quotes' | 'invoices' | 'reportPrepare';
@@ -74,10 +77,12 @@ finance.get('/documents', h(async (req) => {
   const q = db('documents as d').leftJoin('clients as c', 'c.id', 'd.client_id').leftJoin('sites as s', 's.id', 'd.site_id')
     .where('d.company_id', cid).select('d.id', 'd.kind', 'd.number', 'd.status', 'd.date', 'd.total', 'd.client_id', 'd.site_id', 'd.work_order_id', 'd.revision', 'd.issued_at', 'd.accreditation', 'c.name as client_name', 's.name as site_name');
   q.whereIn('d.kind', readable);
+  await restrictDocuments(req.user, q);
+  q.leftJoin('users as o', 'o.id', 'd.owner_id').select('d.owner_id', 'o.name as owner_name');
   if (req.query.kind) q.andWhere('d.kind', String(req.query.kind));
   if (req.query.status) q.whereIn('d.status', String(req.query.status).split(','));
   if (req.query.client_id) q.andWhere('d.client_id', Number(req.query.client_id));
-  if (req.query.q) q.andWhere((w) => w.whereLike('d.number', `%${req.query.q}%`).orWhereLike('c.name', `%${req.query.q}%`));
+  if (req.query.q) q.andWhere((w) => w.where('d.number', 'like', `%${req.query.q}%`).orWhere('c.name', 'like', `%${req.query.q}%`));
   const rows = await q.orderBy('d.id', 'desc').limit(5000);
   const paid = await paidAgainst(cid);
   return rows.map((r) => ({ ...r, total: Number(r.total), paid: r.kind === 'invoice' ? paid.get(r.id) ?? 0 : undefined }));
@@ -99,7 +104,9 @@ finance.get('/documents/:id', h(async (req) => {
   const revisions = await db('documents').where({ company_id: cid }).andWhere((w) => w.where('parent_id', d.id).orWhere('id', d.parent_id ?? -1)).select('id', 'number', 'status', 'revision');
   const verify = d.kind === 'report' && d.hash && ['issued', 'cancelled'].includes(d.status as string) ? verifyToken(d.id as number, d.hash as string) : null;
   const share = shareable(d as never) ? shareToken(d.id, String(d.created_at)) : null;
-  return { ...d, company, template: tpl, issuer, paid, revisions, verify, share, history: history.map((x) => ({ ...row(x, ['detail']), user: users.get(x.user_id) })) };
+  const access = isShareObject(d.kind) ? await recordAccess(req.user, d.kind, d as never) : 'edit';
+  const owner_name = d.owner_id ? (await db('users').where({ id: d.owner_id as number }).first('name'))?.name ?? null : null;
+  return { ...d, company, template: tpl, issuer, paid, revisions, verify, share, access, owner_name, history: history.map((x) => ({ ...row(x, ['detail']), user: users.get(x.user_id) })) };
 }));
 
 // ---------- create / update ----------

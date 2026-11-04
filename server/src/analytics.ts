@@ -72,7 +72,7 @@ export const specSchema = z.object({
   filters: z.array(filterSchema).optional(), groupBy: z.array(z.string()).max(2).optional(),
   measure: z.object({ agg: z.enum(['count', 'sum', 'avg', 'min', 'max']), field: z.string().optional() }),
   sort: z.enum(['value_desc', 'value_asc', 'label']).optional(), limit: z.number().optional(),
-  chart: z.enum(['bar', 'hbar', 'line', 'pie', 'table', 'number']).optional(), forecast: z.number().max(12).optional(),
+  chart: z.enum(['bar', 'hbar', 'line', 'area', 'pie', 'donut', 'funnel', 'table', 'number']).optional(), forecast: z.number().max(12).optional(),
 });
 
 export async function run(cid: number, spec: ReportSpec) {
@@ -259,7 +259,7 @@ async function aiSpec(cid: number, ai: AiSettings, question: string) {
   const sites = (await db('sites').where({ company_id: cid }).select('name').limit(200)).map((c) => c.name);
   const tests = (await db('catalog').where({ company_id: cid }).select('report_name', 'material')).map((c) => `${c.report_name} (${c.material})`);
   const system = `You turn business questions for a testing-laboratory management app into a JSON report spec. Reply with ONLY a JSON object: {"spec": ReportSpec, "explanation": "one short sentence"}.
-ReportSpec = { "title": string, "object": one of ${JSON.stringify(REPORT_OBJECTS.map((o) => o.key))}, "dateRange"?: {"preset": one of ${JSON.stringify(DATE_PRESETS.map((d) => d.value))}} or {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}, "filters"?: [{"field","op":"eq|neq|in|contains|gt|gte|lt|lte","value"}], "groupBy"?: [field] (max 2), "measure": {"agg":"count|sum|avg|min|max","field"?: measure field}, "sort"?: "value_desc|value_asc|label", "limit"?: number, "chart": "bar|hbar|line|pie|table|number", "forecast"?: number of future periods (only with a time groupBy) }
+ReportSpec = { "title": string, "object": one of ${JSON.stringify(REPORT_OBJECTS.map((o) => o.key))}, "dateRange"?: {"preset": one of ${JSON.stringify(DATE_PRESETS.map((d) => d.value))}} or {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}, "filters"?: [{"field","op":"eq|neq|in|contains|gt|gte|lt|lte","value"}], "groupBy"?: [field] (max 2), "measure": {"agg":"count|sum|avg|min|max","field"?: measure field}, "sort"?: "value_desc|value_asc|label", "limit"?: number, "chart": "bar|hbar|line|area|pie|donut|funnel|table|number", "forecast"?: number of future periods (only with a time groupBy) }
 Objects and fields: ${REPORT_OBJECTS.map((o) => `${o.key}: ${o.fields.map((f) => `${f.key}${f.measure ? '(measure)' : ''}`).join(', ')}`).join(' | ')}
 Revenue means invoices sum total. Use "contains" for name filters unless the exact name is in the lists. Time grouping fields: month, week, day, quarter, fy. Today is ${today()}. Indian financial year runs April–March.
 Known clients: ${clients.join('; ')}

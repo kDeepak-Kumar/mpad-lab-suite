@@ -4,15 +4,17 @@ import { ActionIcon, AppShell, Avatar, Burger, Button, Center, Group, Indicator,
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
-  IconLayoutDashboard, IconUsers, IconFileDollar, IconClipboardList, IconFlask, IconFileCertificate, IconReceipt, IconCash,
-  IconBook, IconListDetails, IconSettings, IconLogout, IconPlus, IconBox, IconTool, IconTemplate, IconUserCog, IconChecklist,
-  IconSearch, IconChartBar, IconAdjustments, IconPhoneCall, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
+  IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
+  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt,
+  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, useApi } from './api';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
 import { Loading } from './components/ui';
+import { SideNav, type NavItem } from './components/SideNav';
+import { FavProvider } from './favorites';
 
 // Pages load on demand, so the app opens fast and only fetches what a screen needs.
 const page = <K extends string>(loader: () => Promise<Record<K, ComponentType<any>>>, name: K) => lazy(() => loader().then((m) => ({ default: m[name] })));
@@ -49,29 +51,28 @@ const Required2fa = page(() => import('./pages/Account'), 'Required2fa');
 export { useMe };
 export const hasRole = (me: Me, ...roles: string[]) => Boolean(me.role?.admin || me.user.role === 'owner' || roles.includes(me.user.role));
 
-type NavItem = { label: string; to: string; tab: string; icon: ComponentType<{ size?: number | string; stroke?: number | string }>; section?: string };
 const NAV: NavItem[] = [
-  { label: 'Home', to: '/', tab: 'home', icon: IconLayoutDashboard },
-  { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartBar },
-  { label: 'Clients', to: '/clients', tab: 'clients', icon: IconUsers, section: 'Sales' },
-  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar, section: 'Sales' },
-  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardList, section: 'Sales' },
-  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconPhoneCall, section: 'Sales' },
-  { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconBox, section: 'Laboratory' },
-  { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask, section: 'Laboratory' },
-  { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconChecklist, section: 'Laboratory' },
-  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconFileCertificate, section: 'Laboratory' },
-  { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconTool, section: 'Laboratory' },
-  { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconReceipt, section: 'Accounts' },
-  { label: 'Payments', to: '/payments', tab: 'payments', icon: IconCash, section: 'Accounts' },
-  { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook, section: 'Accounts' },
+  { label: 'Home', to: '/', tab: 'home', icon: IconSmartHome },
+  { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartDonut3 },
+  { label: 'Clients', to: '/clients', tab: 'clients', icon: IconBuildingSkyscraper, section: 'Sales & CRM' },
+  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar, section: 'Sales & CRM' },
+  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardCheck, section: 'Sales & CRM' },
+  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconCalendarEvent, section: 'Sales & CRM' },
+  { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconTestPipe, section: 'Laboratory' },
+  { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask2, section: 'Laboratory' },
+  { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconFileAnalytics, section: 'Laboratory' },
+  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconCertificate, section: 'Laboratory' },
+  { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconRuler2, section: 'Laboratory' },
+  { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconFileInvoice, section: 'Accounts' },
+  { label: 'Payments', to: '/payments', tab: 'payments', icon: IconWallet, section: 'Accounts' },
+  { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook2, section: 'Accounts' },
   { label: 'GST returns', to: '/gst', tab: 'gst', icon: IconReceiptTax, section: 'Accounts' },
-  { label: 'Registers', to: '/registers', tab: 'registers', icon: IconListDetails, section: 'Accounts' },
-  { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconSettings, section: 'Settings' },
-  { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconFileDollar, section: 'Settings' },
-  { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate, section: 'Settings' },
-  { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog, section: 'Settings' },
-  { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustments, section: 'Settings' },
+  { label: 'Registers', to: '/registers', tab: 'registers', icon: IconTable, section: 'Accounts' },
+  { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconBuilding, section: 'Administration' },
+  { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconTags, section: 'Administration' },
+  { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate, section: 'Administration' },
+  { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog, section: 'Administration' },
+  { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustmentsAlt, section: 'Administration' },
 ];
 
 export function App() {
@@ -93,7 +94,7 @@ export function App() {
 function MetaLoader() {
   const { data, reload } = useApi<Meta>('/meta');
   if (!data) return <Center h="100vh"><Loader /></Center>;
-  return <MetaCtx.Provider value={{ meta: data, reload }}><Shell /></MetaCtx.Provider>;
+  return <MetaCtx.Provider value={{ meta: data, reload }}><FavProvider><Shell /></FavProvider></MetaCtx.Provider>;
 }
 
 function Shell() {
@@ -136,7 +137,7 @@ function Shell() {
     ...items.map((n) => ({ id: `go${n.to}`, label: n.label, group: 'Go to', leftSection: <n.icon size={18} />, onClick: () => nav(n.to) })),
   ];
 
-  const width = mini ? 72 : 244;
+  const width = mini ? 68 : 252;
   return (
     <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' }, navbar: { borderRight: '1px solid var(--line)' }, header: { borderBottom: '1px solid var(--line)' } }}>
       <AppShell.Header className="no-print">
@@ -165,8 +166,15 @@ function Shell() {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar className="no-print" p={6}>
-        <ScrollArea><SideNav items={items} mini={mini} /></ScrollArea>
+      <AppShell.Navbar className="no-print sn-shell">
+        <AppShell.Section grow component={ScrollArea} px={8} pt={8}><SideNav items={items} mini={mini} all={NAV} /></AppShell.Section>
+        <AppShell.Section className="sn-foot">
+          <UnstyledButton className={`sn-user${mini ? ' mini' : ''}`} onClick={() => nav('/account')}>
+            <Avatar color="brand" radius="xl" size={30}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar>
+            {!mini && <div style={{ minWidth: 0, flex: 1 }}><Text size="sm" fw={600} truncate>{me.user.name}</Text><Text size="xs" c="dimmed" truncate>{me.role.label}</Text></div>}
+          </UnstyledButton>
+          {!mini && <Tooltip label="Collapse sidebar"><ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={() => setMini(true)}><IconLayoutSidebarLeftCollapse size={18} /></ActionIcon></Tooltip>}
+        </AppShell.Section>
       </AppShell.Navbar>
       <AppShell.Main>
         <Suspense fallback={<Loading />}>
@@ -234,41 +242,6 @@ function BottomNav({ items, onMore }: { items: NavItem[]; onMore: () => void }) 
  * Sidebar: Home and Analytics always visible; Sales, Laboratory, Accounts and Settings fold open/closed.
  * The group of the screen you are on opens automatically; your choices are remembered on this device.
  */
-function SideNav({ items, mini }: { items: NavItem[]; mini: boolean }) {
-  const loc = useLocation();
-  const [open, setOpen] = useLocalStorage<Record<string, boolean>>({ key: 'nav-groups', defaultValue: { Sales: true, Laboratory: true, Accounts: true, Settings: false } });
-  const isActive = (n: NavItem) => (n.to === '/' ? loc.pathname === '/' : loc.pathname === n.to || (loc.pathname.startsWith(n.to + '/') && !NAV.some((o) => o.to !== n.to && o.to.startsWith(n.to) && loc.pathname.startsWith(o.to))));
-  const top = items.filter((n) => !n.section);
-  const groups = [...new Set(items.filter((n) => n.section).map((n) => n.section!))];
-  const link = (n: NavItem) => (
-    <Tooltip key={n.to} label={n.label} position="right" disabled={!mini}>
-      <NavLink component={RLink} to={n.to} className="nav-link" label={mini ? null : n.label} leftSection={<n.icon size={19} stroke={1.7} />} active={isActive(n)} py={7} />
-    </Tooltip>
-  );
-  return (
-    <>
-      {top.map(link)}
-      {groups.map((g) => {
-        const list = items.filter((n) => n.section === g);
-        const here = list.some(isActive);
-        const shown = mini || here || open[g] !== false;
-        return (
-          <div key={g}>
-            {mini ? <div style={{ height: 10, borderTop: '1px solid var(--line)', margin: '8px 10px 0' }} /> : (
-              <UnstyledButton className={`nav-group${here ? ' here' : ''}`} onClick={() => setOpen({ ...open, [g]: !shown })} aria-expanded={shown}>
-                <span>{g}</span>
-                {!shown && <span className="nav-group-count">{list.length}</span>}
-                <IconChevronRight size={14} style={{ transform: shown ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
-              </UnstyledButton>
-            )}
-            {shown && list.map(link)}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
 /** Bell: unread notifications first; click one to open it (marks it read); "Mark all as read" clears the count. */
 function NotificationBell({ reminders }: { reminders: any[] }) {
   const nav = useNavigate();

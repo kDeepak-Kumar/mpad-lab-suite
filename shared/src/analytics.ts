@@ -35,6 +35,18 @@ export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 export interface ReportFilter { field: string; op: 'eq' | 'neq' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown }
+export type ChartKind = 'bar' | 'hbar' | 'line' | 'area' | 'pie' | 'donut' | 'funnel' | 'table' | 'number';
+export const CHART_KINDS: { value: ChartKind; label: string }[] = [
+  { value: 'bar', label: 'Column' }, { value: 'hbar', label: 'Bar' }, { value: 'line', label: 'Line' }, { value: 'area', label: 'Area' },
+  { value: 'donut', label: 'Donut' }, { value: 'pie', label: 'Pie' }, { value: 'funnel', label: 'Funnel' }, { value: 'table', label: 'Table' }, { value: 'number', label: 'Number' },
+];
+/** Chart types that make sense for a report: trends over time vs. shares of a whole vs. rankings. */
+export function chartsFor(spec: { groupBy?: string[] }): ChartKind[] {
+  const g = spec.groupBy ?? [];
+  if (!g.length) return ['number'];
+  if (g.length > 1) return ['bar', 'table'];
+  return ['day', 'week', 'month', 'quarter', 'fy', 'year'].includes(g[0]) ? ['line', 'area', 'bar', 'table'] : ['hbar', 'bar', 'donut', 'pie', 'funnel', 'table'];
+}
 export interface ReportSpec {
   title?: string;
   object: string;
@@ -44,7 +56,7 @@ export interface ReportSpec {
   measure: { agg: 'count' | 'sum' | 'avg' | 'min' | 'max'; field?: string };
   sort?: 'value_desc' | 'value_asc' | 'label';
   limit?: number;
-  chart?: 'bar' | 'hbar' | 'line' | 'pie' | 'table' | 'number';
+  chart?: ChartKind;
   forecast?: number;
 }
 export interface ReportResult {

@@ -84,7 +84,16 @@ export const TABS: { key: string; label: string }[] = [
   { key: 'templates', label: 'Templates' }, { key: 'users', label: 'Users' }, { key: 'setup', label: 'Setup (customise)' },
 ];
 export const PERM_OBJECTS = ['client', 'quote', 'workorder', 'sample', 'test', 'report', 'invoice', 'payment', 'catalog', 'equipment'] as const;
-export type Crud = { read: boolean; create: boolean; edit: boolean; delete: boolean };
+export type Crud = { read: boolean; create: boolean; edit: boolean; delete: boolean; viewAll?: boolean; modifyAll?: boolean };
+/** Objects whose individual records can be private to their owner and shared one by one. */
+export const SHARE_OBJECTS = [{ key: 'client', label: 'Clients' }, { key: 'quote', label: 'Quotations' }, { key: 'invoice', label: 'Invoices' }] as const;
+/** Organisation-wide default: who sees a record they do not own. */
+export type Owd = 'edit' | 'read' | 'private';
+export const OWD_OPTIONS: { value: Owd; label: string; hint: string }[] = [
+  { value: 'edit', label: 'Public read/write', hint: 'Everyone whose role can open the object sees and edits every record' },
+  { value: 'read', label: 'Public read only', hint: 'Everyone sees every record; only the owner (and people it is shared with) edit' },
+  { value: 'private', label: 'Private', hint: 'Only the owner, people it is shared with, and roles with View all see a record' },
+];
 export const ACTIONS: { key: string; label: string }[] = [
   { key: 'enterObservations', label: 'Enter observation sheets' }, { key: 'reviewTests', label: 'Review (accept/return) observations' },
   { key: 'prepareReports', label: 'Prepare test reports' }, { key: 'signReports', label: 'Verify, sign and issue reports' },
@@ -104,7 +113,7 @@ export interface RoleDef {
   fields: Record<string, 'hidden' | 'read'>;
 }
 
-const all: Crud = { read: true, create: true, edit: true, delete: true };
+const all: Crud = { read: true, create: true, edit: true, delete: true, viewAll: true, modifyAll: true };
 const ro: Crud = { read: true, create: false, edit: false, delete: false };
 const ce: Crud = { read: true, create: true, edit: true, delete: false };
 const none: Crud = { read: false, create: false, edit: false, delete: false };
@@ -123,7 +132,7 @@ export const BUILTIN_ROLES: RoleDef[] = [
   { key: 'signatory', label: 'Authorised signatory', system: true, tabs: ['home', 'samples', 'tests', 'prepare', 'reports', 'equipment', 'templates', 'analytics'],
     objects: objs({ sample: ce, test: ce, report: ce, catalog: ro, equipment: ce, client: ro }), actions: acts(['enterObservations', 'reviewTests', 'prepareReports', 'signReports', 'manageTemplates', 'viewAnalytics', 'useAI']), fields: {} },
   { key: 'accountant', label: 'Accountant', system: true, tabs: ['home', 'clients', 'followups', 'quotes', 'invoices', 'payments', 'ledger', 'gst', 'registers', 'analytics'],
-    objects: objs({ client: ce, quote: ro, workorder: ro, invoice: ce, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'manageGst', 'viewAnalytics', 'useAI']), fields: {} },
+    objects: objs({ client: { ...ce, viewAll: true }, quote: { ...ro, viewAll: true }, workorder: ro, invoice: { ...ce, viewAll: true, modifyAll: true }, payment: ce, catalog: ro, report: ro }), actions: acts(['issueInvoices', 'recordPayments', 'manageGst', 'viewAnalytics', 'useAI']), fields: {} },
 ];
 
 /** Does a role allow an action or object operation, e.g. "reviewTests" or "invoice.edit"? */

@@ -3,6 +3,7 @@ import { storageInfo } from '../storage';
 import { collectAlerts, runAlerts, type AlertSettings } from '../alerts';
 import { Router } from 'express';
 import { passwordRule, sendAccessLink } from './onboarding';
+import { docVisibility, recordAccess, restrictList } from '../sharing';
 import { z } from 'zod';
 import { DEFAULT_TEMPLATES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
@@ -76,6 +77,10 @@ core.put('/meta/:kind/:key', h(async (req) => {
   if (!PERSONAL.includes(kind) || shared) if (!can(req.user, 'manageCustomization')) throw new HttpError(403, 'Only administrators can change this');
   if (kind === 'role' && req.params.key === 'admin') throw new HttpError(400, 'The System Administrator role cannot be changed');
   if (kind === 'field' && !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(req.params.key)) throw new HttpError(400, 'Field key must look like object.field_name (lowercase)');
+  if (PERSONAL.includes(kind)) {
+    const ex = await db('meta').where({ company_id: req.user.company_id, kind, key: req.params.key }).first('owner_id');
+    if (ex && ex.owner_id !== req.user.id && !can(req.user, 'manageCustomization')) throw new HttpError(403, 'This view belongs to someone else. Save it under a new name.');
+  }
   const { shared: _s, ...data } = req.body ?? {};
   await saveMeta(req.user.company_id, kind, req.params.key, data, PERSONAL.includes(kind) && !shared ? req.user.id : null);
   await audit(db, req.user, 'meta', 0, `${kind} ${req.params.key} saved`);
@@ -164,9 +169,10 @@ const split = (c: Record<string, any>) => { const { custom: cu, ...rest } = c; r
 
 core.get('/clients', allow('client.read'), h(async (req) => {
   const q = String(req.query.q ?? '').trim();
-  const rows = await db('clients').where({ company_id: req.user.company_id })
-    .modify((b) => { if (q) b.andWhere((w) => w.whereLike('name', `%${q}%`).orWhereLike('gstin', `%${q}%`).orWhereLike('short_code', `%${q}%`)); })
-    .orderBy('name').limit(5000);
+  const qb = db('clients as c').leftJoin('users as o', 'o.id', 'c.owner_id').where('c.company_id', req.user.company_id).select('c.*', 'o.name as owner_name')
+    .modify((b) => { if (q) b.andWhere((w) => w.where('c.name', 'like', `%${q}%`).orWhere('c.gstin', 'like', `%${q}%`).orWhere('c.short_code', 'like', `%${q}%`)); });
+  await restrictList(req.user, 'client', qb, 'c.id', 'c.owner_id');
+  const rows = await qb.orderBy('c.name').limit(5000);
   const sites = await db('sites').where({ company_id: req.user.company_id }).select('client_id').count({ n: 'id' }).groupBy('client_id');
   const sc = new Map((sites as { client_id: number; n: number }[]).map((s) => [s.client_id, Number(s.n)]));
   return rows.map((r: Record<string, any>) => stripHidden(req.user.roleDef, 'client', { ...withCustom(r), sites: sc.get(r.id) ?? 0 }));
@@ -178,7 +184,7 @@ core.post('/clients', allow('client.create'), h(async (req) => {
   }).first();
   if (dup && !req.query.force) throw new HttpError(409, `A client "${dup.name}" with the same name or GSTIN already exists`);
   const { rest, cu } = split(c);
-  const id = await insert(db, 'clients', { ...rest, data: toJson(mergeCustom(null, cu)), company_id: req.user.company_id, created_at: now() });
+  const id = await insert(db, 'clients', { ...rest, data: toJson(mergeCustom(null, cu)), company_id: req.user.company_id, owner_id: req.user.id, created_at: now() });
   await audit(db, req.user, 'client', id, 'created', { name: c.name });
   return { id };
 }));
@@ -240,7 +246,7 @@ core.post('/clients/import', allow('client.create'), h(async (req) => {
         const c = normaliseClient(await cleanWrite(cid, role, 'client', body, { creating: true }));
         if (!c.state_code) throw new Error('Give a GSTIN or a State so GST can be worked out');
         if (dryRun) clientId = 'new';
-        else { const { rest } = split(c); clientId = await insert(db, 'clients', { ...rest, data: toJson({}), company_id: cid, created_at: now() }); await audit(db, req.user, 'client', clientId, 'created (import)', { name }); }
+        else { const { rest } = split(c); clientId = await insert(db, 'clients', { ...rest, data: toJson({}), company_id: cid, owner_id: req.user.id, created_at: now() }); await audit(db, req.user, 'client', clientId, 'created (import)', { name }); }
         created.set(key, clientId); if (gst) byGstin.set(gst, clientId as number);
         status = 'new client'; newClients++;
       } else if (created.has(key) && !byName.has(key)) status = 'new client';
@@ -271,11 +277,13 @@ core.get('/clients/:id', allow('client.read'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id), role = req.user.roleDef;
   const raw = await db('clients').where({ id, company_id: cid }).first();
   if (!raw) throw new HttpError(404, 'Client not found');
-  const c = stripHidden(role, 'client', withCustom(raw));
+  const access = await recordAccess(req.user, 'client', raw);
+  if (access === 'none') throw new HttpError(404, 'Client not found or not shared with you');
+  const c = { ...stripHidden(role, 'client', withCustom(raw)), access, owner_name: raw.owner_id ? (await db('users').where({ id: raw.owner_id }).first('name'))?.name ?? null : null };
   const [sites, contacts, docs, workOrders, samples, led] = await Promise.all([
     db('sites').where({ client_id: id, company_id: cid }).orderBy('name'),
     db('contacts').where({ client_id: id, company_id: cid }).orderBy('name'),
-    db('documents').where({ client_id: id, company_id: cid }).orderBy('id', 'desc').select('id', 'kind', 'number', 'status', 'date', 'total', 'site_id', 'accreditation'),
+    db('documents as d').where({ 'd.client_id': id, 'd.company_id': cid }).orderBy('d.id', 'desc').select('d.id', 'd.kind', 'd.number', 'd.status', 'd.date', 'd.total', 'd.site_id', 'd.accreditation', 'd.owner_id'),
     db('work_orders').where({ client_id: id, company_id: cid }).orderBy('id', 'desc'),
     db('samples').where({ client_id: id, company_id: cid }).orderBy('id', 'desc').select('id', 'code', 'material', 'received_date', 'status', 'site_id', 'accreditation'),
     ledger(cid, id),
@@ -287,13 +295,14 @@ core.get('/clients/:id', allow('client.read'), h(async (req) => {
   }).orderBy('id', 'desc').limit(50);
   const users = new Map((await db('users').where({ company_id: cid }).select('id', 'name')).map((u) => [u.id, u.name]));
   return { ...c, sites: sites.map((x) => stripHidden(role, 'site', withCustom(x))), contacts: contacts.map((x) => stripHidden(role, 'contact', withCustom(x, ['data', 'receives']))),
-    documents: docs.map((d) => ({ ...d, total: Number(d.total) })), workOrders, samples, ledger: led,
+    documents: docs.filter(await docVisibility(req.user)).map((d) => ({ ...d, total: Number(d.total) })), workOrders, samples, ledger: led,
     timeline: timeline.map((t) => ({ ...row(t, ['detail']), user: users.get(t.user_id) })) };
 }));
 core.put('/clients/:id', allow('client.edit'), h(async (req) => {
   const id = Number(req.params.id);
   const ex = await db('clients').where({ id, company_id: req.user.company_id }).first();
   if (!ex) throw new HttpError(404, 'Client not found');
+  if ((await recordAccess(req.user, 'client', ex)) !== 'edit') throw new HttpError(403, 'This client is read-only for you. Ask its owner to share it with edit access.');
   const c = normaliseClient(await cleanWrite(req.user.company_id, req.user.roleDef, 'client', clientSchema.partial().parse(req.body), { creating: false }));
   const { rest, cu } = split(c);
   await db('clients').where({ id }).update({ ...rest, data: toJson(mergeCustom(ex.data, cu)) });
@@ -302,6 +311,8 @@ core.put('/clients/:id', allow('client.edit'), h(async (req) => {
 }));
 core.delete('/clients/:id', allow('client.delete'), h(async (req) => {
   const id = Number(req.params.id), cid = req.user.company_id;
+  const ex = await db('clients').where({ id, company_id: cid }).first('id', 'owner_id');
+  if (ex && (await recordAccess(req.user, 'client', ex)) !== 'edit') throw new HttpError(403, 'You can only delete clients you own or can edit');
   const used = await db('documents').where({ client_id: id, company_id: cid }).first() || await db('samples').where({ client_id: id, company_id: cid }).first();
   if (used) throw new HttpError(409, 'This client has quotations, samples or invoices and cannot be deleted');
   await db('contacts').where({ client_id: id, company_id: cid }).delete();
