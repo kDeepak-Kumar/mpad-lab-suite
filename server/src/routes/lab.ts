@@ -80,12 +80,12 @@ lab.post('/samples', allow('samples'), h(async (req) => {
   const outOfScope = cats.filter((c) => !c.nabl);
   if (accreditation === 'NABL' && outOfScope.length && !isAdmin(req.user))
     throw new HttpError(400, `Not in NABL scope: ${outOfScope.map((c) => c.report_name || c.billing_name).join(', ')}. Register those as a separate Non-NABL sample.`);
+  const keep = s.retention_days ?? await defaultRetention(cid, s.material); // read before the transaction (SQLite has one connection)
   return db.transaction(async (trx) => {
     const ctx = { date: s.received_date, client: client.short_code || client.name.replace(/[^A-Za-z]/g, '').slice(0, 4), material: s.material };
     const { seq, number: code } = await nextNumber(trx, cid, 'sample', ctx);
     const ulr = accreditation === 'NABL' ? await formatWithSeq(cid, 'ulr', seq, ctx, trx) : null;
     const { tests, custom, ...sample } = s;
-    const keep = s.retention_days ?? await defaultRetention(cid, s.material);
     const id = await insert(trx, 'samples', { ...sample, retention_days: keep, dispose_after: addDays(s.received_date, keep), accreditation, data: toJson(mergeCustom(null, custom)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
     for (const t of tests) {
       const cat = cats.find((c) => c.id === t.catalog_id)!;
