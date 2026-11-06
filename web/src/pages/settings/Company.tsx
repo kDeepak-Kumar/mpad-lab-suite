@@ -178,10 +178,12 @@ export function CompanySettings() {
                           <div key={f}>
                             <Text size="sm" fw={500}>{f === 'headerImage' ? 'Header image (full width)' : 'Footer image (full width)'}</Text>
                             {lh[f] ? <Image src={lh[f]} mah={80} fit="contain" my={4} /> : <Text size="xs" c="dimmed">Not uploaded</Text>}
-                            <Group gap="xs"><FileButton accept="image/png,image/jpeg" onChange={async (file) => file && setLh({ [f]: await fileToDataUrl(file, 1800) })}>{(p) => <Button size="xs" variant="light" {...p}>Upload</Button>}</FileButton>
+                            {lh[f] && <LetterheadQuality src={lh[f]} />}
+                            <Group gap="xs"><FileButton accept="image/png,image/jpeg" onChange={async (file) => file && setLh({ [f]: await letterheadImage(file) })}>{(p) => <Button size="xs" variant="light" {...p}>Upload</Button>}</FileButton>
                               {lh[f] && <Button size="xs" variant="subtle" color="red" onClick={() => setLh({ [f]: null })}>Remove</Button>}</Group>
                           </div>
                         ))}
+                        <NumberInput size="xs" label="Distance from the paper edge (mm)" description="Header at the top and footer at the bottom of the sheet, full printable width. Most printers need 4–6 mm." min={0} max={20} step={1} value={lh.edgeMm ?? 5} onChange={(x) => setLh({ edgeMm: Number(x) })} w={260} />
                       </Stack>}
                 </Paper>
               );
@@ -294,6 +296,39 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
       <AiGuide opened={guide} onClose={() => setGuide(false)} onUse={use} />
     </Stack>
   );
+}
+
+/** Letterhead upload: keep up to 300 dpi across A4 (2480 px), trim blank borders, keep PNG sharpness. */
+async function letterheadImage(file: File): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new window.Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d')!; g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  const blank = (x: number, y: number) => { const k = (y * c.width + x) * 4; return d[k + 3] < 10 || (d[k] > 245 && d[k + 1] > 245 && d[k + 2] > 245); };
+  let top = 0, bottom = c.height - 1, left = 0, right = c.width - 1;
+  const rowBlank = (y: number) => { for (let x = 0; x < c.width; x += 2) if (!blank(x, y)) return false; return true; };
+  const colBlank = (x: number) => { for (let y = top; y <= bottom; y += 2) if (!blank(x, y)) return false; return true; };
+  while (top < bottom && rowBlank(top)) top++;
+  while (bottom > top && rowBlank(bottom)) bottom--;
+  while (left < right && colBlank(left)) left++;
+  while (right > left && colBlank(right)) right--;
+  const w = right - left + 1, h = bottom - top + 1;
+  const scale = Math.min(1, 2480 / w);
+  const out = document.createElement('canvas'); out.width = Math.round(w * scale); out.height = Math.round(h * scale);
+  const o = out.getContext('2d')!; o.imageSmoothingQuality = 'high'; o.drawImage(c, left, top, w, h, 0, 0, out.width, out.height);
+  let url = out.toDataURL('image/png');
+  if (url.length * 0.75 > 1.6 * 1024 * 1024) { const j = document.createElement('canvas'); j.width = out.width; j.height = out.height; const jg = j.getContext('2d')!; jg.fillStyle = '#fff'; jg.fillRect(0, 0, j.width, j.height); jg.drawImage(out, 0, 0); url = j.toDataURL('image/jpeg', 0.92); }
+  URL.revokeObjectURL(img.src);
+  return url;
+}
+
+/** How sharp the letterhead will print across an A4 sheet. */
+function LetterheadQuality({ src }: { src: string }) {
+  const [w, setW] = useState(0);
+  useEffect(() => { const i = new window.Image(); i.onload = () => setW(i.naturalWidth); i.src = src; }, [src]);
+  if (!w) return null;
+  const dpi = Math.round(w / (200 / 25.4));
+  return <Text size="xs" c={dpi >= 250 ? 'teal' : dpi >= 150 ? 'orange.8' : 'red'}>{w} px wide → about {dpi} dpi on A4 {dpi >= 250 ? '(print quality)' : `– for sharp printing upload at least 2400 px wide (300 dpi), e.g. export the letterhead design as a high-resolution PNG`}</Text>;
 }
 
 /** Daily email digest: tests past due date (SLA) and calibration due / expired. */

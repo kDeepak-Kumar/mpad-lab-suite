@@ -54,6 +54,8 @@ const letterhead = (c: any, d: any) => {
   if (!key) return null;
   return c.letterheads?.[key] ?? { mode: 'designed', showAccreditation: key === 'nabl' };
 };
+/** Distance of uploaded header / footer images from the paper edge (printers need a few mm). */
+const edgeMm = (prof: any) => (Number.isFinite(Number(prof?.edgeMm)) ? Math.min(20, Math.max(0, Number(prof.edgeMm))) : 5);
 const get = (o: any, path: string) => path.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
 const nl = (s: string) => s.split('\n').map((line, i, arr) => <span key={i}>{line}{i < arr.length - 1 && <br />}</span>);
 
@@ -76,7 +78,7 @@ export function DocRenderer(p: RenderInput) {
         const el = renderBlock(b, p, ctx);
         if (!el) return null;
         return (
-          <div key={b.id} className={`doc-block${p.onSelect ? ' selectable' : ''}${p.selected === b.id ? ' selected' : ''}`}
+          <div key={b.id} data-block={b.type} className={`doc-block${p.onSelect ? ' selectable' : ''}${p.selected === b.id ? ' selected' : ''}`}
             style={b.type === 'footer' ? { marginTop: 'auto' } : undefined} onClick={p.onSelect ? (e) => { e.stopPropagation(); p.onSelect!(b.id); } : undefined}>
             {el}
           </div>
@@ -96,7 +98,8 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     case 'letterhead': {
       if (lh) return <div style={{ height: '32mm' }} />;
       const prof = letterhead(c, d);
-      if (prof?.mode === 'image' && prof.headerImage) return <img src={prof.headerImage} alt="" style={{ width: '100%', display: 'block', marginBottom: 8 }} />;
+      // uploaded letterhead: placed from the paper edge (not inside the page margin), full printable width
+      if (prof?.mode === 'image' && prof.headerImage) { const out = Math.max(0, p.template.page.marginMm - edgeMm(prof)); return <img src={prof.headerImage} alt="" className="doc-lh-img" style={{ width: `calc(100% + ${2 * out}mm)`, margin: `-${out}mm -${out}mm 3mm`, display: 'block', maxWidth: 'none' }} />; }
       const showAcc = prof ? prof.showAccreditation !== false && d.accreditation === 'NABL' : pr.showAccreditation;
       return (
         <div style={{ borderBottom: `2px solid ${accent}`, paddingBottom: 6, marginBottom: 8 }}>
@@ -248,7 +251,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     case 'footer': {
       if (lh) return <div style={{ height: '18mm' }} />;
       const prof = letterhead(c, d);
-      if (prof?.mode === 'image' && prof.footerImage) return <img src={prof.footerImage} alt="" style={{ width: '100%', display: 'block', marginTop: 10 }} />;
+      if (prof?.mode === 'image' && prof.footerImage) { const out = Math.max(0, p.template.page.marginMm - edgeMm(prof)); return <img src={prof.footerImage} alt="" className="doc-lh-img" style={{ width: `calc(100% + ${2 * out}mm)`, margin: `3mm -${out}mm -${out}mm`, display: 'block', maxWidth: 'none' }} />; }
       return (
         <div style={{ borderTop: `1px solid ${accent}`, marginTop: 10, paddingTop: 4, textAlign: 'center', fontSize: '9pt', color: accent }}>
           <div>Contact : {c.phone} | Email: {c.email}{c.website ? `, Website: ${c.website}` : ''}</div>

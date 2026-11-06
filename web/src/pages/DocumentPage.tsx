@@ -177,7 +177,8 @@ function DocumentView({ id }: { id: number }) {
           <AdminDelete object={doc.kind} id={doc.id} compact onDeleted={() => nav(({ quote: '/quotes', invoice: '/invoices', report: '/reports' } as Record<string, string>)[doc.kind] ?? '/')} />
           {['quote', 'invoice'].includes(doc.kind) && <SharingButton access={doc.access} onClick={() => setShareOpen(true)} />}
           <Menu shadow="lg"><Menu.Target><Button variant="default" leftSection={<IconDownload size={16} />}>Export</Button></Menu.Target><Menu.Dropdown>
-            <Menu.Item leftSection={<IconPrinter size={14} />} onClick={() => { setSelected(null); setTimeout(() => window.print(), 50); }}>Print / Save as PDF (best quality)</Menu.Item>
+            <Menu.Item leftSection={<IconPrinter size={14} />} onClick={async () => { setSelected(null); const m = await exportLib(); await m.printDocument(printRef.current!); }}>Print (A4, 300 dpi)</Menu.Item>
+            <Menu.Item onClick={() => { setSelected(null); setTimeout(() => window.print(), 50); }}>Print from the browser (text stays selectable)</Menu.Item>
             <Menu.Item onClick={() => exp('downloadPdf')}>Download PDF</Menu.Item>
             <Menu.Item onClick={() => exp('downloadPng')}>Download PNG image</Menu.Item>
             <Menu.Item onClick={() => exp('downloadDoc')}>Download Word (.doc)</Menu.Item>
