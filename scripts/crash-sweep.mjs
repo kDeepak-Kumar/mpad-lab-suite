@@ -77,10 +77,10 @@ for (const path of ['/clients', '/quotes', '/invoices', '/samples', '/equipment'
   try {
     await o.locator('button:has(.tabler-icon-columns-3)').first().click(); await o.waitForTimeout(300);
     await o.locator('.lv-field.on button').first().click(); await o.getByRole('button', { name: 'Apply' }).click(); await check(o, `${path} fields changed`);
-    await o.getByRole('button', { name: 'Save as…' }).click(); await o.getByLabel('List name').fill(`Sweep ${path}`); await o.getByRole('button', { name: 'Save', exact: true }).click();
+    await o.getByRole('button', { name: 'Save…' }).click(); await o.getByLabel('List name').fill(`Sweep ${path} ${Date.now() % 100000}`); await o.getByRole('button', { name: 'Save', exact: true }).click();
     await o.waitForTimeout(900); await check(o, `${path} view saved`);
     const kan = o.locator('.mantine-SegmentedControl-root label').nth(1);
-    if (await kan.count()) { await kan.click(); await check(o, `${path} kanban`); await o.getByRole('button', { name: 'Save', exact: true }).first().click().catch(() => {}); await o.waitForTimeout(800); await check(o, `${path} kanban saved`); }
+    if (await kan.count()) { await kan.click(); await check(o, `${path} kanban`); await o.getByRole('button', { name: 'Save…' }).click().catch(() => {}); await o.getByRole('button', { name: /^Update “/ }).click().catch(() => {}); await o.waitForTimeout(800); await check(o, `${path} kanban saved`); }
     await o.reload(); await check(o, `${path} reload with saved view`);
     await o.locator('button:has(.tabler-icon-settings-2)').first().click(); await o.getByRole('menuitem', { name: 'Delete view' }).click().catch(() => {});
     o.once('dialog', (d) => d.accept()); await o.waitForTimeout(900); await check(o, `${path} view deleted`);
