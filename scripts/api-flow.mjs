@@ -464,6 +464,34 @@ console.log('21. Home dashboard insights');
   expect(o.months.length === 12 && o.money.invoiced.length === 12 && o.money.topClients.length > 0 && o.lab.intake.length === 14, 'owner sees 12-month money trend, top clients and sample intake');
   expect(!t.money && t.lab, 'technician sees lab figures but no money');
 }
+console.log('22. Assistant, invoice analytics, AI diagnostics');
+{
+  const ask = (u, q) => api(u, 'POST', '/assistant/chat', { messages: [{ role: 'user', content: q }] });
+  let a = await ask('owner', 'how do I record a payment with TDS?');
+  expect(a.mode === 'builtin' && /\[Record a payment received \(with TDS\)\]\(\/payments\?new=1\)/.test(a.answer), 'assistant answers how-to questions with a link, without any AI provider');
+  a = await ask('owner', `what does ${client.name.split(' ')[0]} owe us?`);
+  expect(a.results[0].tool === 'client_summary' && /Outstanding ₹/.test(a.answer) && a.answer.includes(`/clients/${client.id}`), 'assistant summarises a client with outstanding amount and record links');
+  a = await ask('tech', 'revenue by client this year');
+  expect(/does not have access/.test(a.answer) && !/₹/.test(a.answer), 'assistant respects role permissions (technician gets no money figures)');
+  const ia = await api('owner', 'GET', '/invoices/analytics');
+  expect(ia.monthly.length === 12 && ia.years.length === 5 && ia.kpis.fyToDate > 0 && ia.topClients[0].share > 0, 'invoice analytics: 12 FY months, 5 years, KPIs, customer contribution');
+  const ia2 = await api('owner', 'GET', `/invoices/analytics?client=${client.id}&accreditation=NABL`);
+  expect(ia2.topClients.every((t) => t.client_id === client.id), 'invoice analytics filters by customer and NABL / Non-NABL');
+  let m = await fail(() => api('tech', 'GET', '/invoices/analytics'));
+  expect(m, 'invoice analytics needs invoice access');
+  const bad = await api('owner', 'POST', '/ai/test', { provider: 'openai', baseUrl: 'http://127.0.0.1:9', model: 'x', apiKey: 'k' });
+  expect(bad.ok === false && /reach the API address/.test(bad.problem) && bad.fix.length, 'AI connection test explains the problem and the fix');
+  if (process.env.MOCK_AI) {
+    await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });
+    const ml = await api('owner', 'POST', '/ai/models', {});
+    expect(ml.ok && ml.models.includes('mock-large'), 'List models reads the models the key can use');
+    a = await ask('owner', 'which invoices does Deccan have');
+    expect(a.mode === 'ai' && !a.results.some((r) => r.tool === 'run_sql') && !a.answer.includes('/evil') && /\]\(\/documents\/\d+\)/.test(a.answer), 'AI can only use the fixed lookups; links it invents are removed');
+    const co = await api('owner', 'GET', '/company');
+    expect(!JSON.stringify(co).includes('"apiKey":"x"'), 'API key is never sent back to the browser');
+    await api('owner', 'PUT', '/company', { ai: { enabled: false } });
+  }
+}
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

@@ -147,7 +147,7 @@ export async function chat(ai: AiSettings, system: string, user: string, opts: {
         body: JSON.stringify({ model: ai.model, max_tokens: opts.maxTokens ?? 1500, system, messages: [{ role: 'user', content: user }] }),
       });
       const j: any = await r.json();
-      if (!r.ok) throw new Error(j?.error?.message || `AI request failed (${r.status})`);
+      if (!r.ok) throw Object.assign(new Error(j?.error?.message || `AI request failed (${r.status})`), { status: r.status });
       return j.content?.map((c: any) => c.text ?? '').join('') ?? '';
     }
     const r = await fetch(`${(ai.baseUrl || '').replace(/\/$/, '')}/chat/completions`, {
@@ -156,7 +156,7 @@ export async function chat(ai: AiSettings, system: string, user: string, opts: {
       body: JSON.stringify({ model: ai.model, temperature: 0, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
     });
     const j: any = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error?.message || (Array.isArray(j) ? j[0]?.error?.message : '') || `AI request failed (${r.status})`);
+    if (!r.ok) throw Object.assign(new Error(j?.error?.message || (Array.isArray(j) ? j[0]?.error?.message : '') || `AI request failed (${r.status})`), { status: r.status });
     return j.choices?.[0]?.message?.content ?? '';
   } finally { clearTimeout(timer); }
 }
@@ -254,7 +254,7 @@ export async function heuristicSpec(cid: number, question: string): Promise<{ sp
   return { spec, explanation: `Built-in assistant: ${REPORT_OBJECTS.find((o) => o.key === object)?.label.toLowerCase()}${notes.length ? ` for ${notes.join(', ')}` : ''}${groupBy ? ` grouped by ${groupBy[0]}` : ''}.` };
 }
 
-async function aiSpec(cid: number, ai: AiSettings, question: string) {
+export async function aiSpec(cid: number, ai: AiSettings, question: string) {
   const clients = (await db('clients').where({ company_id: cid }).select('name').limit(300)).map((c) => c.name);
   const sites = (await db('sites').where({ company_id: cid }).select('name').limit(200)).map((c) => c.name);
   const tests = (await db('catalog').where({ company_id: cid }).select('report_name', 'material')).map((c) => `${c.report_name} (${c.material})`);
@@ -283,12 +283,49 @@ analytics.post('/ai/ask', allow('viewAnalytics'), h(async (req) => {
   return { ...result, explanation: res.explanation, source, aiError };
 }));
 
+/** Plain-language cause and fix for a failed AI connection. */
+function diagnose(e: any, ai: AiSettings): { problem: string; fix: string[] } {
+  const m = String(e?.message ?? e), st = Number(e?.status ?? 0), base = String(ai.baseUrl ?? '');
+  if (e?.name === 'AbortError' || /abort|timed? ?out/i.test(m)) return { problem: 'The provider did not answer in time.', fix: ['Check the server has internet access.', 'Try again – free tiers are sometimes busy.', 'For Ollama, check the computer running it is on and reachable from the server.'] };
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|certificate/i.test(m)) return { problem: 'The server could not reach the API address.', fix: [`Check the API base URL: ${base || '(empty)'}.`, 'It must start with https:// (http:// only for a local Ollama).', 'Ollama on "localhost" means the server itself – use the computer\'s network address instead if Ollama runs elsewhere.'] };
+  if (st === 401 || st === 403 || /api key|unauthori[sz]ed|permission|invalid.*key|authentication/i.test(m)) return { problem: 'The provider rejected the API key.', fix: ['Paste the key again (no spaces before or after).', 'Check the key belongs to this provider and is not deleted or restricted.', 'Some providers need billing or an accepted terms page before the key works.'] };
+  if (st === 404 || /model.*(not found|does not exist|unknown)|no such model|not supported/i.test(m)) return { problem: 'The model name or API address is not recognised.', fix: ['Click “List models” and pick one from the list.', 'Model names change; copy the exact current name from the provider\'s models page.', 'Check the base URL ends where the guide shows (e.g. …/v1 or …/openai).'] };
+  if (st === 429 || /rate|quota|exceeded|too many|resource.?exhausted|billing|credit/i.test(m)) return { problem: 'The free quota or rate limit is used up, or billing is needed.', fix: ['Wait a minute and test again.', 'Check the usage / limits page of the provider.', 'Choose a smaller model, another free provider, or add billing.'] };
+  if (st >= 500) return { problem: 'The provider is having a temporary problem.', fix: ['Try again in a few minutes.', 'Check the provider\'s status page.'] };
+  if (/not configured/i.test(m)) return { problem: 'Enter a model name first.', fix: ['Pick a provider, paste the key and choose a model.'] };
+  return { problem: m.slice(0, 300), fix: ['Check the base URL, model name and key against the setup guide.'] };
+}
+const aiFrom = async (cid: number, body: any): Promise<AiSettings> => {
+  const company = await getCompany(cid);
+  const saved = (company.ai ?? {}) as AiSettings;
+  return { ...saved, ...(body ?? {}), apiKey: body?.apiKey || saved.apiKey, enabled: true };
+};
+
+/** Connection test with a plain-language diagnosis. The key never comes back to the browser. */
 analytics.post('/ai/test', allow('manageSettings'), h(async (req) => {
-  const company = await getCompany(req.user.company_id);
-  const ai = { ...(company.ai as AiSettings), ...(req.body ?? {}), apiKey: req.body?.apiKey || (company.ai as AiSettings)?.apiKey, enabled: true };
+  const ai = await aiFrom(req.user.company_id, req.body);
   const t0 = Date.now();
-  const reply = await chat(ai, 'Reply with the single word OK.', 'Say OK');
-  return { ok: true, reply: reply.slice(0, 60), ms: Date.now() - t0 };
+  try {
+    const reply = await chat(ai, 'Reply with the single word OK.', 'Say OK', { maxTokens: 20, timeoutMs: 30000 });
+    return { ok: true, reply: reply.slice(0, 60), ms: Date.now() - t0 };
+  } catch (e) { return { ok: false, ms: Date.now() - t0, error: String((e as Error).message).slice(0, 300), ...diagnose(e, ai) }; }
+}));
+
+/** Models the provider offers to this key (so nobody has to type a model name). */
+analytics.post('/ai/models', allow('manageSettings'), h(async (req) => {
+  const ai = await aiFrom(req.user.company_id, req.body);
+  const base = String(ai.baseUrl ?? '').replace(/\/$/, '');
+  if (!base && ai.provider !== 'anthropic') throw new HttpError(400, 'Enter the API base URL first');
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const anth = ai.provider === 'anthropic';
+    const r = await fetch(anth ? `${base || 'https://api.anthropic.com'}/v1/models?limit=100` : `${base}/models`, { signal: ctl.signal,
+      headers: anth ? { 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' } : ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {} });
+    const j: any = await r.json().catch(() => ({}));
+    if (!r.ok) { const d = diagnose(Object.assign(new Error(j?.error?.message || `HTTP ${r.status}`), { status: r.status }), ai); return { ok: false, models: [], ...d }; }
+    const list = (j.data ?? j.models ?? []).map((m: any) => String(m.id ?? m.name ?? '').replace(/^models\//, '')).filter(Boolean);
+    return { ok: true, models: [...new Set<string>(list)].sort().slice(0, 400) };
+  } catch (e) { return { ok: false, models: [], ...diagnose(e, ai) }; } finally { clearTimeout(timer); }
 }));
 
 /** Small AI helpers used inside forms. Each has a non-AI fallback in the UI. */

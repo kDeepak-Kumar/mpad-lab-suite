@@ -19,6 +19,7 @@ import { share } from './routes/share';
 import { purchasing } from './routes/purchasing';
 import { startArchiveScheduler } from './archive';
 import { recycle, startRecyclePurge } from './recycle';
+import { assistant } from './assistant';
 import { account } from './routes/account';
 import { gst } from './routes/gst';
 import { files } from './routes/files';
@@ -41,7 +42,7 @@ app.post('/api/client-error', express.json({ limit: '20kb' }), (req, res) => {
   console.error(`[client-error] ${String(b.url ?? '').slice(0, 200)} :: ${String(b.message ?? '').slice(0, 300)}\n${String(b.stack ?? '').slice(0, 3000)}`);
   res.json({ ok: true });
 });
-app.use('/api', publicApi, account, onboarding, share, purchasing, gst, recycle, core, lab, finance, analytics, crm, files);
+app.use('/api', publicApi, account, onboarding, share, purchasing, gst, recycle, assistant, core, lab, finance, analytics, crm, files);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built web app (single deployment for cPanel / any Node host)

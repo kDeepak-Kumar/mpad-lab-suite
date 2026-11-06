@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge } from '@mantine/core';
+import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge, List } from '@mantine/core';
 import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles, IconFileText } from '@tabler/icons-react';
 import { TermsSettings } from '../../components/Terms';
 import { LabSpinner } from '../../components/LabSpinner';
@@ -10,6 +10,7 @@ import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
 import { BrandColours } from '../../components/BrandColours';
 import { applyBrand } from '../../brand';
+import { AI_PROVIDERS, AiGuide, type AiProvider } from '../../components/AiGuide';
 
 const NUM_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Invoice', workorder: 'Work order', sample: 'Sample job code', ulr: 'ULR number', report: 'Test report', receipt: 'Payment receipt' };
 
@@ -218,38 +219,44 @@ export function CompanySettings() {
   );
 }
 
-const PROVIDERS: { value: string; label: string; baseUrl: string; model: string; note: string; key: boolean }[] = [
-  { value: 'gemini', label: 'Google Gemini (free tier)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-flash-latest', note: 'Free API key from aistudio.google.com. “-latest” model names follow Google’s newest release.', key: true },
-  { value: 'groq', label: 'Groq (free tier)', baseUrl: 'https://api.groq.com/openai/v1', model: '', note: 'Free key at console.groq.com; copy a current model name from its Models page.', key: true },
-  { value: 'openrouter', label: 'OpenRouter (free models)', baseUrl: 'https://openrouter.ai/api/v1', model: '', note: 'Key at openrouter.ai; pick any model ending in “:free”.', key: true },
-  { value: 'ollama', label: 'Ollama on this computer (free, private)', baseUrl: 'http://localhost:11434/v1', model: '', note: 'Install Ollama, run e.g. “ollama pull <model>”, then enter that model name. No key, nothing leaves your network.', key: false },
-  { value: 'anthropic', label: 'Anthropic Claude', baseUrl: 'https://api.anthropic.com', model: 'claude-haiku-5-5', note: 'Paid API key from console.anthropic.com.', key: true },
-  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: '', note: 'Paid API key from platform.openai.com.', key: true },
-  { value: 'custom', label: 'Other (OpenAI-compatible)', baseUrl: '', model: '', note: 'Any service with an OpenAI-compatible /chat/completions endpoint.', key: true },
-];
-
 function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void }) {
   const ai = v.ai ?? {};
-  const prov = PROVIDERS.find((p) => p.value === ai.provider);
-  const [test, setTest] = useState<string>('');
+  const prov = AI_PROVIDERS.find((p) => p.value === ai.provider);
+  const [test, setTest] = useState<any>(null);
   const [busy, setBusy] = useState(false);
-  const runTest = async () => {
-    setBusy(true); setTest('');
-    try { const r = await api<any>('/ai/test', { body: { provider: ai.provider === 'anthropic' ? 'anthropic' : 'openai', baseUrl: ai.baseUrl, model: ai.model, apiKey: ai.apiKey } , quiet: true }); setTest(`✓ Connected in ${r.ms} ms`); }
-    catch (e: any) { setTest(`✗ ${e.message}`); } finally { setBusy(false); }
-  };
+  const [guide, setGuide] = useState(false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [mBusy, setMBusy] = useState(false);
+  const body = () => ({ provider: ai.provider === 'anthropic' ? 'anthropic' : 'openai', baseUrl: ai.baseUrl, model: ai.model, apiKey: ai.apiKey || undefined });
+  const runTest = async () => { setBusy(true); setTest(null); try { setTest(await api<any>('/ai/test', { body: body(), quiet: true })); } catch (e: any) { setTest({ ok: false, problem: e.message, fix: [] }); } finally { setBusy(false); } };
+  const listModels = async () => { setMBusy(true); try { const r = await api<any>('/ai/models', { body: body(), quiet: true }); if (r.ok) setModels(r.models); else { setModels(null); setTest(r); } } catch (e: any) { setTest({ ok: false, problem: e.message, fix: [] }); } finally { setMBusy(false); } };
+  const use = (p: AiProvider) => { set('ai', { ...ai, provider: p.value, baseUrl: p.baseUrl, model: p.model || '' }); setModels(null); setTest(null); };
   return (
-    <Stack maw={720}>
-      <Alert variant="light">The AI assistant answers business questions (“revenue from DAMAC Hills this year”), drafts report remarks and turns client enquiries into quotation lines. Without a model it still answers common questions with the built-in assistant. Questions are sent to the provider you choose; for full privacy use Ollama on your own computer.</Alert>
+    <Stack maw={760}>
+      <Alert variant="light" title="AI assistant">The assistant (bottom-right on every screen), AI report questions, contract review and remark drafting use this model. Without one, the built-in assistant still finds records and answers common questions. <Anchor component="button" size="sm" fw={600} onClick={() => setGuide(true)}>Open the setup guide →</Anchor></Alert>
       <Switch label="Use an AI model" checked={!!ai.enabled} onChange={(e) => set('ai', { ...ai, enabled: e.currentTarget.checked })} />
-      <Select label="Provider" data={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))} value={ai.provider ?? null}
-        onChange={(x) => { const p = PROVIDERS.find((q) => q.value === x)!; set('ai', { ...ai, provider: x, baseUrl: p.baseUrl, model: p.model || ai.model || '' }); }} />
-      {prov && <Text size="xs" c="dimmed">{prov.note}</Text>}
-      <TextInput label="API base URL" value={ai.baseUrl ?? ''} onChange={(e) => set('ai', { ...ai, baseUrl: e.currentTarget.value })} />
-      <TextInput label="Model name" description="Change this whenever the provider releases a newer model – no update to the app needed." value={ai.model ?? ''} onChange={(e) => set('ai', { ...ai, model: e.currentTarget.value })} />
-      {(!prov || prov.key) && <PasswordInput label="API key" placeholder={ai.hasKey ? 'Saved – leave blank to keep' : 'Paste the key'} value={ai.apiKey ?? ''} onChange={(e) => set('ai', { ...ai, apiKey: e.currentTarget.value })} />}
-      <Group><Button variant="default" loading={busy} onClick={runTest} disabled={!ai.model}>Test connection</Button><Text size="sm" c={test.startsWith('✓') ? 'teal' : 'red'}>{test}</Text></Group>
-      <Text size="xs" c="dimmed">Remember to click “Save settings” at the top. The key is stored on your server and never shown again in the browser. <Anchor href="https://aistudio.google.com/apikey" target="_blank" size="xs">Get a free Gemini key</Anchor></Text>
+      <Group align="flex-end" gap="xs">
+        <Select style={{ flex: 1 }} label="Provider" data={AI_PROVIDERS.map((p) => ({ value: p.value, label: `${p.label} · ${p.cost}` }))} value={ai.provider ?? null} onChange={(x) => { const p = AI_PROVIDERS.find((q) => q.value === x); if (p) use(p); }} />
+        <Button variant="light" onClick={() => setGuide(true)}>Setup guide</Button>
+      </Group>
+      {prov && <Text size="xs" c="dimmed">{prov.note} {prov.keyUrl && <Anchor size="xs" href={prov.keyUrl} target="_blank" rel="noreferrer">Get a key ↗</Anchor>}</Text>}
+      <TextInput label="API base URL" value={ai.baseUrl ?? ''} onChange={(e) => set('ai', { ...ai, baseUrl: e.currentTarget.value.trim() })} />
+      {(!prov || prov.key) && <PasswordInput label="API key" description="Stored on your server only; never shown again after saving." placeholder={ai.hasKey ? 'Saved – leave blank to keep' : 'Paste the key'} value={ai.apiKey ?? ''} onChange={(e) => set('ai', { ...ai, apiKey: e.currentTarget.value.trim() })} />}
+      <Group align="flex-end" gap="xs">
+        {models?.length ? <Select style={{ flex: 1 }} label="Model" searchable data={[...new Set([...(ai.model ? [ai.model] : []), ...models])]} value={ai.model ?? null} onChange={(x) => set('ai', { ...ai, model: x ?? '' })} nothingFoundMessage="No such model" />
+          : <TextInput style={{ flex: 1 }} label="Model" description="Use “List models” to pick from what your key can use." value={ai.model ?? ''} onChange={(e) => set('ai', { ...ai, model: e.currentTarget.value.trim() })} />}
+        <Button variant="default" loading={mBusy} onClick={listModels} disabled={!ai.baseUrl && ai.provider !== 'anthropic'}>List models</Button>
+      </Group>
+      <Group><Button variant="default" loading={busy} onClick={runTest} disabled={!ai.model}>Test connection</Button>
+        {test?.ok && <Text size="sm" c="teal" fw={600}>✓ Connected – replied in {test.ms} ms</Text>}</Group>
+      {test && !test.ok && (
+        <Alert color="red" variant="light" title={test.problem ?? 'Connection failed'}>
+          {test.fix?.length > 0 && <><Text size="sm" fw={600} mt={2}>How to fix it</Text><List size="sm">{test.fix.map((f: string) => <List.Item key={f}>{f}</List.Item>)}</List></>}
+          {test.error && test.error !== test.problem && <Text size="xs" c="dimmed" mt={6}>Provider said: {test.error}</Text>}
+        </Alert>
+      )}
+      <Text size="xs" c="dimmed">Press “Save changes” after a successful test.</Text>
+      <AiGuide opened={guide} onClose={() => setGuide(false)} onUse={use} />
     </Stack>
   );
 }

@@ -30,7 +30,7 @@ const owner = await session('owner');
 const docs = await api(owner, '/documents');
 const tests = await api(owner, '/tests');
 const rep = docs.find((d) => d.kind === 'report'); const inv = docs.find((d) => d.kind === 'invoice'); const quote = docs.find((d) => d.kind === 'quote');
-const pages = [['dashboard', '/'], ['clients', '/clients'], ['client-detail', '/clients/2'], ['quotes', '/quotes'], ['quote', `/documents/${quote.id}`], ['workorders', '/workorders'], ['workorder', '/workorders/1'], ['recycle', '/settings/recycle-bin'],
+const pages = [['dashboard', '/'], ['clients', '/clients'], ['client-detail', '/clients/2'], ['quotes', '/quotes'], ['quote', `/documents/${quote.id}`], ['workorders', '/workorders'], ['workorder', '/workorders/1'], ['recycle', '/settings/recycle-bin'], ['invoice-analytics', '/invoices/analytics'],
   ['samples', '/samples'], ['tests', '/tests?tab=all'], ['test-cbr', `/tests/${tests.find((t) => t.template_code === 'CBR-LAB').id}`], ['reports', '/reports'], ['report', `/documents/${rep.id}`],
   ['invoices', '/invoices'], ['invoice', `/documents/${inv.id}`], ['payments', '/payments'], ['ledger', '/ledger'], ['statement', '/ledger/2'], ['registers', '/registers'],
   ['settings-company', '/settings/company'], ['rate-card', '/settings/catalog'], ['equipment', '/equipment'], ['templates', '/settings/templates'], ['template-designer', '/settings/templates/1'], ['users', '/settings/users'], ['prepare-report', '/reports/prepare'], ['new-quote', '/quotes/new?client=1'], ['analytics', '/analytics'], ['setup', '/setup'], ['setup-roles', '/setup?tab=roles'], ['setup-picklists', '/setup?tab=picklists'], ['followups', '/followups'], ['client-followups', '/clients/2?tab=activity'], ['template-library', '/settings/templates']];

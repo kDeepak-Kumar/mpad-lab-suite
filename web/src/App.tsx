@@ -5,11 +5,12 @@ import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
-  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle,
+  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle, IconChartBar,
   IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
 import { applyBrand } from './brand';
+import { Assistant } from './components/Assistant';
 import { MeCtx, MetaCtx, hasTab, useCan, useMe, type Me, type Meta } from './ctx';
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
@@ -46,6 +47,7 @@ const TemplatesPage = page(() => import('./pages/settings/Templates'), 'Template
 const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'TemplateDesigner');
 const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'), 'ObsTemplateEditor');
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
+const InvoiceAnalyticsPage = page(() => import('./pages/InvoiceAnalytics'), 'InvoiceAnalyticsPage');
 const RecycleBinPage = page(() => import('./pages/settings/RecycleBin'), 'RecycleBinPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
@@ -73,6 +75,7 @@ const NAV: NavItem[] = [
   { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconCertificate, section: 'Laboratory' },
   { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconRuler2, section: 'Laboratory' },
   { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconFileInvoice, section: 'Accounts' },
+  { label: 'Invoice analytics', to: '/invoices/analytics', tab: 'invoices', icon: IconChartBar, section: 'Accounts' },
   { label: 'Payments', to: '/payments', tab: 'payments', icon: IconWallet, section: 'Accounts' },
   { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook2, section: 'Accounts' },
   { label: 'Purchases', to: '/purchases', tab: 'purchases', icon: IconShoppingCart, section: 'Accounts' },
@@ -152,6 +155,7 @@ function Shell() {
   const width = mini ? 68 : 252;
   return (
     <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' },  header: { borderBottom: '1px solid var(--line)' } }}>
+      <Assistant />
       <IdleGuard minutes={me.security?.idleMinutes ?? 10} warnAfter={me.security?.idleWarnAfter ?? 7} />
       <AppShell.Header className="no-print">
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
@@ -206,6 +210,7 @@ function Shell() {
             <Route path="/quotes/new" element={<DocumentPage kind="quote" />} />
             <Route path="/invoices" element={<DocumentsList kind="invoice" />} />
             <Route path="/invoices/new" element={<DocumentPage kind="invoice" />} />
+            <Route path="/invoices/analytics" element={<InvoiceAnalyticsPage />} />
             <Route path="/reports" element={<DocumentsList kind="report" />} />
             <Route path="/reports/prepare" element={<PrepareReport />} />
             <Route path="/documents/:id" element={<DocumentPage />} />

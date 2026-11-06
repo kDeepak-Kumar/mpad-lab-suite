@@ -523,6 +523,66 @@ finance.post('/notifications/unread', h(async (req) => {
   return { ok: true };
 }));
 
+/** Invoice analytics: month-on-month, FY vs last FY, top customers, paid vs unpaid, ageing. Filters: fy, client, accreditation. */
+finance.get('/invoices/analytics', allow('invoice.read'), h(async (req) => {
+  const cid = req.user.company_id, td = today();
+  const curFy = Number(td.slice(5, 7)) >= 4 ? Number(td.slice(0, 4)) : Number(td.slice(0, 4)) - 1;
+  const q = z.object({ fy: z.coerce.number().int().min(2000).max(2100).optional(), client: z.coerce.number().int().optional(), accreditation: z.string().max(30).optional() }).parse(req.query);
+  const fy = q.fy ?? curFy;
+  const fyOf = (d: string) => (Number(d.slice(5, 7)) >= 4 ? Number(d.slice(0, 4)) : Number(d.slice(0, 4)) - 1);
+  const iq = db('documents as d').leftJoin('clients as c', 'c.id', 'd.client_id').where({ 'd.company_id': cid, 'd.kind': 'invoice' }).whereIn('d.status', ['issued', 'paid', 'partly_paid'])
+    .select('d.id', 'd.date', 'd.total', 'd.number', 'd.client_id', 'd.status', 'd.accreditation', 'c.name as client_name');
+  if (q.client) iq.andWhere('d.client_id', q.client);
+  if (q.accreditation) iq.andWhere('d.accreditation', q.accreditation);
+  await restrictDocuments(req.user, iq);
+  const inv: { id: number; date: string; total: number; number: string; client_id: number; status: string; accreditation: string | null; client_name: string | null }[] = await iq;
+  const pays = await db('payments').where({ company_id: cid }).select('date', 'amount', 'tds', 'allocations', 'client_id');
+  const paid = await paidAgainst(cid);
+  const ids = new Set(inv.map((i) => i.id));
+  const byId = new Map(inv.map((i) => [i.id, i]));
+  // collections allocated to the invoices in scope (respects the client / accreditation filters)
+  const coll: { date: string; amount: number; days: number }[] = [];
+  for (const p of pays) for (const a of parseJson<{ invoiceId: number; amount: number }[]>(p.allocations, [])) if (ids.has(a.invoiceId)) {
+    const i = byId.get(a.invoiceId)!; coll.push({ date: p.date, amount: Number(a.amount), days: Math.max(0, Math.round((Date.parse(p.date) - Date.parse(i.date)) / 86400000)) });
+  }
+  const FYM = Array.from({ length: 12 }, (_, k) => { const m = ((k + 3) % 12) + 1; return { m, label: new Date(Date.UTC(2000, m - 1, 1)).toLocaleDateString('en-IN', { month: 'short', timeZone: 'UTC' }) }; });
+  const ym = (y: number, m: number) => `${m >= 4 ? y : y + 1}-${String(m).padStart(2, '0')}`;
+  const sumIn = (rows: { date: string }[], val: (r: any) => number, pred: (d: string) => boolean) => Math.round(rows.filter((r) => pred(r.date)).reduce((s, r) => s + val(r), 0));
+  const T = (r: any) => Number(r.total), A = (r: any) => Number(r.amount);
+  const monthly = FYM.map(({ m, label }) => ({ label, current: sumIn(inv, T, (d) => d.startsWith(ym(fy, m))), previous: sumIn(inv, T, (d) => d.startsWith(ym(fy - 1, m))), collected: sumIn(coll, A, (d) => d.startsWith(ym(fy, m))) }));
+  const years = Array.from({ length: 5 }, (_, k) => fy - 4 + k).map((y) => ({ label: `FY ${y}-${String((y + 1) % 100).padStart(2, '0')}`, invoiced: sumIn(inv, T, (d) => fyOf(d) === y), collected: sumIn(coll, A, (d) => fyOf(d) === y) }));
+  const inFy = inv.filter((i) => fyOf(i.date) === fy);
+  // same period last year: up to the same date last year (or the whole year when looking at a past FY)
+  const lyCut = `${Number(td.slice(0, 4)) - 1}-${td.slice(5)}`;
+  const lastFyToDate = Math.round(inv.filter((i) => fyOf(i.date) === fy - 1 && (fy !== curFy || i.date <= lyCut)).reduce((s, i) => s + T(i), 0));
+  const thisM = td.slice(0, 7), lastMDate = new Date(Date.UTC(Number(td.slice(0, 4)), Number(td.slice(5, 7)) - 2, 1)).toISOString().slice(0, 7);
+  const bal = (i: { id: number; total: number }) => Math.max(0, Number(i.total) - (paid.get(i.id) ?? 0));
+  const status = { paid: { count: 0, amount: 0 }, partly: { count: 0, amount: 0, due: 0 }, unpaid: { count: 0, amount: 0 } };
+  for (const i of inFy) { const b = bal(i); if (b <= 0.5) { status.paid.count++; status.paid.amount += T(i); } else if (b < T(i) - 0.5) { status.partly.count++; status.partly.amount += T(i); status.partly.due += b; } else { status.unpaid.count++; status.unpaid.amount += T(i); } }
+  const top = new Map<string, { name: string; client_id: number; total: number; due: number; count: number }>();
+  for (const i of inFy) { const k = String(i.client_id); const t = top.get(k) ?? { name: i.client_name ?? '—', client_id: i.client_id, total: 0, due: 0, count: 0 }; t.total += T(i); t.due += bal(i); t.count++; top.set(k, t); }
+  const fyTotal = inFy.reduce((s, i) => s + T(i), 0);
+  const open = inv.filter((i) => bal(i) > 0.5);
+  const age = (d: string) => Math.floor((Date.now() - Date.parse(d + 'T00:00:00')) / 86400000);
+  const fyColl = coll.filter((c) => fyOf(c.date) === fy);
+  return {
+    fy, currentFy: curFy, filters: q,
+    kpis: {
+      thisMonth: sumIn(inv, T, (d) => d.startsWith(thisM)), lastMonth: sumIn(inv, T, (d) => d.startsWith(lastMDate)),
+      fyToDate: Math.round(fyTotal), lastFyToDate, collectedFy: Math.round(fyColl.reduce((s, c) => s + c.amount, 0)),
+      outstanding: Math.round(open.reduce((s, i) => s + bal(i), 0)), overdue: Math.round(open.filter((i) => age(i.date) > 30).reduce((s, i) => s + bal(i), 0)),
+      invoices: inFy.length, avgInvoice: inFy.length ? Math.round(fyTotal / inFy.length) : 0,
+      avgDaysToPay: fyColl.length ? Math.round(fyColl.reduce((s, c) => s + c.days * c.amount, 0) / Math.max(1, fyColl.reduce((s, c) => s + c.amount, 0))) : null,
+    },
+    monthly, years,
+    status: { paid: { ...status.paid, amount: Math.round(status.paid.amount) }, partly: { count: status.partly.count, amount: Math.round(status.partly.amount), due: Math.round(status.partly.due) }, unpaid: { ...status.unpaid, amount: Math.round(status.unpaid.amount) } },
+    topClients: [...top.values()].sort((a, b) => b.total - a.total).slice(0, 10).map((t) => ({ ...t, total: Math.round(t.total), due: Math.round(t.due), share: fyTotal ? Math.round((t.total / fyTotal) * 1000) / 10 : 0 })),
+    accreditation: ['NABL', 'Non-NABL'].map((k) => ({ label: k, amount: Math.round(inFy.filter((i) => (i.accreditation ?? 'Non-NABL') === k).reduce((s, i) => s + T(i), 0)) })),
+    ageing: [['0–30 days', 0, 30], ['31–60 days', 31, 60], ['61–90 days', 61, 90], ['Over 90 days', 91, 1e9]].map(([label, a, b]) => ({ label: String(label), amount: Math.round(open.filter((i) => age(i.date) >= Number(a) && age(i.date) <= Number(b)).reduce((s, i) => s + bal(i), 0)) })),
+    clients: [...new Map(inv.map((i) => [i.client_id, i.client_name ?? '—'])).entries()].map(([id, name]) => ({ value: String(id), label: name })).sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}));
+
 /** Home dashboard charts and KPIs: money for those who may see invoices, lab workload for those who may see samples. */
 finance.get('/dashboard/insights', h(async (req) => {
   const cid = req.user.company_id, td = today();

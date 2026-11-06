@@ -12,7 +12,7 @@ import { Loading } from '../components/ui';
 import { AskAI } from './Analytics';
 
 // Fixed, validated chart colours (categorical order never changes; brand colours stay for the interface).
-const S1 = '#2a78d6', S2 = '#eb6834';
+export const S1 = '#2a78d6', S2 = '#eb6834';
 const UP = '#067647', DOWN = '#b42318';
 const MONTH = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short' });
 const rupees = (n: number) => `₹${money(n)}`;
@@ -92,8 +92,8 @@ export function Dashboard() {
                     <YAxis tickLine={false} axisLine={false} width={56} tick={{ fontSize: 12, fill: '#667085' }} tickFormatter={(v) => `₹${compact(v)}`} />
                     <RTooltip formatter={(v: number) => rupees(v)} contentStyle={{ borderRadius: 10, border: '1px solid #e4e8ee', fontSize: 13 }} cursor={{ stroke: '#d0d5dd' }} />
                     <Legend iconType="plainline" wrapperStyle={{ fontSize: 13, color: '#344054' }} />
-                    <Line type="monotone" dataKey="Invoiced" stroke={S1} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
-                    <Line type="monotone" dataKey="Collected" stroke={S2} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+                    <Line type="linear" dataKey="Invoiced" stroke={S1} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+                    <Line type="linear" dataKey="Collected" stroke={S2} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -147,7 +147,7 @@ const STAGES = [
   { key: 'submitted', label: 'Awaiting review', to: '/tests?tab=review' }, { key: 'accepted', label: 'Accepted', to: '/reports/prepare' }, { key: 'reported', label: 'Reported', to: '/reports' },
 ];
 
-function Card({ title, sub, action, children }: { title: string; sub?: string; action?: ReactNode; children: ReactNode }) {
+export function Card({ title, sub, action, children }: { title: string; sub?: string; action?: ReactNode; children: ReactNode }) {
   return (
     <Paper withBorder radius="lg" p="md" h="100%" className="dash-card">
       <Group justify="space-between" mb="sm" wrap="nowrap" align="flex-start">
@@ -158,7 +158,7 @@ function Card({ title, sub, action, children }: { title: string; sub?: string; a
   );
 }
 
-function Stat({ icon: Icon, label, value, now, before, spark, sub, onClick }: { icon: ComponentType<{ size?: number | string }>; label: string; value: string; now?: number; before?: number; spark?: number[]; sub?: ReactNode; onClick?: () => void }) {
+export function Stat({ icon: Icon, label, value, now, before, spark, sub, onClick, vs = 'vs last month' }: { icon: ComponentType<{ size?: number | string }>; label: string; value: string; now?: number; before?: number; spark?: number[]; sub?: ReactNode; onClick?: () => void; vs?: string }) {
   const p = now !== undefined && before !== undefined ? pct(now, before) : undefined;
   return (
     <UnstyledButton className="dash-stat" onClick={onClick}>
@@ -168,10 +168,10 @@ function Stat({ icon: Icon, label, value, now, before, spark, sub, onClick }: { 
       </Group>
       <Text size="sm" c="dimmed" mt="sm" fw={550}>{label}</Text>
       <Text className="dash-stat-value">{value}</Text>
-      {sub ?? (p === undefined ? null : p === null ? <Text size="xs" c="dimmed">New this month</Text> : (
+      {sub ?? (p === undefined ? null : p === null ? <Text size="xs" c="dimmed">Nothing to compare yet</Text> : (
         <Group gap={4}>
           <Badge size="sm" variant="light" color={p >= 0 ? 'green' : 'red'} leftSection={p >= 0 ? <IconArrowUpRight size={12} /> : <IconArrowDownRight size={12} />} style={{ textTransform: 'none' }}>{Math.abs(p)}%</Badge>
-          <Text size="xs" c="dimmed">vs last month</Text>
+          <Text size="xs" c="dimmed">{vs}</Text>
         </Group>
       ))}
     </UnstyledButton>
@@ -186,7 +186,7 @@ function Spark({ values }: { values: number[] }) {
   return <svg width={w} height={h} aria-hidden><polyline points={pts} fill="none" stroke={S1} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" /><circle cx={last[0]} cy={last[1]} r={3} fill={S1} stroke="#fff" strokeWidth={1.5} /></svg>;
 }
 
-function BarList({ rows, empty }: { rows: { label: string; value: number; display?: string; warn?: boolean; onClick?: () => void }[]; empty: string }) {
+export function BarList({ rows, empty }: { rows: { label: string; value: number; display?: string; warn?: boolean; onClick?: () => void }[]; empty: string }) {
   const max = Math.max(...rows.map((r) => r.value), 1);
   if (!rows.some((r) => r.value)) return <Text size="sm" c="dimmed">{empty}</Text>;
   return (

@@ -80,7 +80,7 @@ function Insights() {
   );
 }
 
-export function AskAI({ initial, onOpen, onAdd }: { initial?: string; onOpen?: (s: ReportSpec) => void; onAdd?: (s: ReportSpec) => void }) {
+export function AskAI({ initial, onOpen, onAdd, examples = EXAMPLES, title = 'Ask about your business', placeholder = 'e.g. How much revenue from DAMAC Hills this year?' }: { initial?: string; onOpen?: (s: ReportSpec) => void; onAdd?: (s: ReportSpec) => void; examples?: string[]; title?: string; placeholder?: string }) {
   const [q, setQ] = useState(initial ?? '');
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<(ReportResult & { explanation: string; source: string; aiError?: string }) | null>(null);
@@ -92,12 +92,12 @@ export function AskAI({ initial, onOpen, onAdd }: { initial?: string; onOpen?: (
   useEffect(() => { if (initial) ask(initial); }, [initial]);
   return (
     <Paper withBorder p="md" mb="md" style={{ background: 'linear-gradient(180deg,#f5f9ff,#fff)' }}>
-      <Group gap="xs" mb="xs"><IconSparkles size={18} color="#2a78d6" /><Text fw={650}>Ask about your business</Text></Group>
+      <Group gap="xs" mb="xs"><IconSparkles size={18} color="#2a78d6" /><Text fw={650}>{title}</Text></Group>
       <Group gap="xs" wrap="nowrap">
-        <TextInput style={{ flex: 1 }} size="md" placeholder="e.g. How much revenue from DAMAC Hills this year?" value={q} onChange={(e) => setQ(e.currentTarget.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} />
+        <TextInput style={{ flex: 1 }} size="md" placeholder={placeholder} value={q} onChange={(e) => setQ(e.currentTarget.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} />
         <Button size="md" loading={busy} onClick={() => ask()} leftSection={<IconSparkles size={16} />}>Ask</Button>
       </Group>
-      {!res && <Group gap={6} mt="xs">{EXAMPLES.map((e) => <Badge key={e} variant="outline" color="gray" style={{ textTransform: 'none', cursor: 'pointer', fontWeight: 500 }} onClick={() => ask(e)}>{e}</Badge>)}</Group>}
+      {!res && <Group gap={6} mt="xs">{examples.map((e) => <Badge key={e} variant="outline" color="gray" style={{ textTransform: 'none', cursor: 'pointer', fontWeight: 500 }} onClick={() => ask(e)}>{e}</Badge>)}</Group>}
       {res && (
         <Paper withBorder p="md" mt="sm">
           <Group justify="space-between" mb={4} wrap="nowrap">
@@ -118,7 +118,7 @@ export function AskAI({ initial, onOpen, onAdd }: { initial?: string; onOpen?: (
   );
 }
 
-function Builder({ initial, onSaved, onAdd }: { initial?: ReportSpec | null; onSaved: () => void; onAdd: (s: ReportSpec) => void }) {
+export function Builder({ initial, onSaved, onAdd }: { initial?: ReportSpec | null; onSaved: () => void; onAdd: (s: ReportSpec) => void }) {
   const can = useCan();
   const [spec, setSpec] = useState<ReportSpec>(initial ?? { object: 'invoices', measure: { agg: 'sum', field: 'total' }, groupBy: ['month'], dateRange: { preset: 'last_12_months' }, chart: 'line' });
   const [res, setRes] = useState<ReportResult | null>(null);
