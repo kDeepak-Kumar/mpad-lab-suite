@@ -179,7 +179,7 @@ const split = (c: Record<string, any>) => { const { custom: cu, ...rest } = c; r
 
 core.get('/clients', allow('client.read'), h(async (req) => {
   const q = String(req.query.q ?? '').trim();
-  const qb = db('clients as c').leftJoin('users as o', 'o.id', 'c.owner_id').where('c.company_id', req.user.company_id).select('c.*', 'o.name as owner_name')
+  const qb = db('clients as c').leftJoin('users as o', 'o.id', 'c.owner_id').where('c.company_id', req.user.company_id).andWhere((w) => w.whereNull('c.type').orWhereNot('c.type', 'system')).select('c.*', 'o.name as owner_name')
     .modify((b) => { if (q) b.andWhere((w) => w.where('c.name', 'like', `%${q}%`).orWhere('c.gstin', 'like', `%${q}%`).orWhere('c.short_code', 'like', `%${q}%`)); });
   await restrictList(req.user, 'client', qb, 'c.id', 'c.owner_id');
   const rows = await qb.orderBy('c.name').limit(5000);

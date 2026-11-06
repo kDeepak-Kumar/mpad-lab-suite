@@ -360,6 +360,12 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '011_quick_reports',
+    up: async (k) => {
+      if (!(await k.schema.hasColumn('samples', 'quick'))) await k.schema.alterTable('samples', (t) => { t.boolean('quick').defaultTo(false); });
+    },
+  },
 ];
 
 /** Tables whose records show Created / Last modified dates (and that admins may correct). */

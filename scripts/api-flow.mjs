@@ -492,6 +492,40 @@ console.log('22. Assistant, invoice analytics, AI diagnostics');
     await api('owner', 'PUT', '/company', { ai: { enabled: false } });
   }
 }
+console.log('23. Quick test report without registration, register later');
+{
+  const mp = byCode('SOIL-MP');
+  let m = await fail(() => api('accounts', 'POST', '/quick-reports', { customer: { name: 'Walk-in' }, material: 'Soil', received_date: today, tests: [mp.id] }));
+  expect(m, 'roles without lab work cannot start a quick report');
+  const qr = await api('reviewer', 'POST', '/quick-reports', { customer: { name: 'Ramesh Builders (walk-in)', address: 'Plot 4, Kukatpally', phone: '9000000000' }, material: 'Soil', received_date: today, description: 'Soil from footing', tests: [mp.id] });
+  expect(/^QR\//.test(qr.code), `quick report ${qr.code} numbered separately, no sample registration needed`);
+  expect(!(await api('owner', 'GET', '/samples')).some((x) => x.id === qr.id) && !(await api('owner', 'GET', '/clients')).some((c) => c.type === 'system'), 'quick reports stay out of the sample register and client list until registered');
+  const qd = await api('reviewer', 'GET', `/quick-reports/${qr.id}`);
+  const qt = qd.tests[0];
+  const full = await api('reviewer', 'GET', `/tests/${qt.id}`);
+  expect(full.client.name.includes('Ramesh Builders'), 'observation sheet shows the typed customer');
+  m = await fail(() => api('reviewer', 'POST', `/quick-reports/${qr.id}/report`));
+  expect(/submit the observations/.test(m), 'report waits until observations are submitted');
+  const ex = full.template.example?.input ?? { header: {}, grids: {} };
+  const grids = {}; for (const g of full.template.grids) { const base = g.fixedRows ?? Array.from({ length: g.rows ?? 5 }, () => ({})); const rows = ex.grids?.[g.key] ?? []; grids[g.key] = Array.from({ length: Math.max(base.length, rows.length) }, (_, i) => ({ ...(base[i] ?? {}), ...(rows[i] ?? {}) })); }
+  await api('reviewer', 'PUT', `/tests/${qt.id}/observation`, { observation: { header: { ...(ex.header ?? {}) }, constants: { ...(ex.constants ?? {}) }, grids, equipment: {} }, started_at: today, completed_at: today });
+  await api('reviewer', 'POST', `/tests/${qt.id}/submit`);
+  const qrep = await api('reviewer', 'POST', `/quick-reports/${qr.id}/report`);
+  const qdoc = await api('reviewer', 'GET', `/documents/${qrep.id}`);
+  expect(qdoc.kind === 'report' && qdoc.data.client.name.includes('Ramesh Builders') && qdoc.data.rows.length > 0, 'quick report drafted with the typed customer and the results');
+  expect((await api('reviewer', 'POST', `/quick-reports/${qr.id}/report`)).existing, 'creating the report twice opens the same draft');
+  await api('reviewer', 'POST', `/reports/${qrep.id}/workflow`, { action: 'submit' });
+  await api('owner', 'POST', `/reports/${qrep.id}/workflow`, { action: 'verify' });
+  const qiss = await api('owner', 'POST', `/documents/${qrep.id}/issue`);
+  expect(qiss.number && (await api('reviewer', 'GET', `/documents/${qrep.id}`)).status === 'issued', `quick report signed and issued as ${qiss.number} before any registration`);
+  const reg = await api('frontdesk', 'POST', `/quick-reports/${qr.id}/register`, { client_id: client.id });
+  const smp = await api('owner', 'GET', `/samples/${qr.id}`);
+  const qdoc2 = await api('reviewer', 'GET', `/documents/${qrep.id}`);
+  expect(smp.client.id === client.id && smp.code === reg.code && !/^QR/.test(reg.code) && qdoc2.client_id === client.id && qdoc2.data.client.name.includes('Ramesh Builders'), `registered later as sample ${reg.code}; the issued report is linked to the customer and keeps what was printed`);
+  expect((await api('owner', 'GET', '/samples')).some((x) => x.id === qr.id), 'registered quick report now appears in the sample register');
+  m = await fail(() => api('frontdesk', 'POST', `/quick-reports/${qr.id}/register`, { client_id: client.id }));
+  expect(m, 'cannot register twice');
+}
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

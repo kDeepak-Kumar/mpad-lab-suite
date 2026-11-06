@@ -5,7 +5,7 @@ import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
-  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle, IconChartBar,
+  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle, IconChartBar, IconBolt,
   IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
@@ -48,6 +48,7 @@ const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'Templ
 const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'), 'ObsTemplateEditor');
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const InvoiceAnalyticsPage = page(() => import('./pages/InvoiceAnalytics'), 'InvoiceAnalyticsPage');
+const QuickReportsPage = page(() => import('./pages/QuickReports'), 'QuickReportsPage');
 const RecycleBinPage = page(() => import('./pages/settings/RecycleBin'), 'RecycleBinPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
@@ -71,6 +72,7 @@ const NAV: NavItem[] = [
   { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconTestPipe, section: 'Laboratory' },
   { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask2, section: 'Laboratory' },
   { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconFileAnalytics, section: 'Laboratory' },
+  { label: 'Quick test report', to: '/reports/quick', tab: 'tests', icon: IconBolt, section: 'Laboratory' },
   { label: 'Outsourced tests', to: '/outsourcing', tab: 'outsourcing', icon: IconTruckDelivery, section: 'Laboratory' },
   { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconCertificate, section: 'Laboratory' },
   { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconRuler2, section: 'Laboratory' },
@@ -230,6 +232,7 @@ function Shell() {
             <Route path="/settings/company" element={<CompanySettings />} />
             <Route path="/settings/users" element={<UsersSettings />} />
             <Route path="/settings/recycle-bin" element={<RecycleBinPage />} />
+            <Route path="/reports/quick" element={<QuickReportsPage />} />
             <Route path="/settings/catalog" element={<CatalogSettings />} />
             <Route path="/settings/templates" element={<TemplatesPage />} />
             <Route path="/settings/templates/obs/:code" element={<ObsTemplateEditor />} />

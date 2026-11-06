@@ -30,7 +30,7 @@ const TOOLS: Record<string, { desc: string; perm?: string; run: (u: AuthUser, a:
   find_clients: {
     desc: 'find_clients {q}: clients by name, GSTIN, phone or email', perm: 'client.read',
     run: async (u, a) => {
-      const q = db('clients as c').where('c.company_id', u.company_id).andWhere((w) => w.where('c.name', 'like', like(a.q)).orWhere('c.gstin', 'like', like(a.q)).orWhere('c.phone', 'like', like(a.q)).orWhere('c.email', 'like', like(a.q))).select('c.id', 'c.name', 'c.gstin', 'c.phone').limit(8);
+      const q = db('clients as c').where('c.company_id', u.company_id).andWhere((w) => w.whereNull('c.type').orWhereNot('c.type', 'system')).andWhere((w) => w.where('c.name', 'like', like(a.q)).orWhere('c.gstin', 'like', like(a.q)).orWhere('c.phone', 'like', like(a.q)).orWhere('c.email', 'like', like(a.q))).select('c.id', 'c.name', 'c.gstin', 'c.phone').limit(8);
       await restrictList(u, 'client', q, 'c.id', 'c.owner_id');
       return { tool: 'find_clients', title: 'Clients', items: (await q).map((c) => ({ label: c.name, sub: [c.gstin, c.phone].filter(Boolean).join(' · '), link: `/clients/${c.id}` })) };
     },
@@ -38,7 +38,7 @@ const TOOLS: Record<string, { desc: string; perm?: string; run: (u: AuthUser, a:
   client_summary: {
     desc: 'client_summary {name}: one client\'s contact, outstanding balance, latest invoices, quotations and samples', perm: 'client.read',
     run: async (u, a) => {
-      const q = db('clients as c').where('c.company_id', u.company_id).andWhere('c.name', 'like', like(a.name)).select('c.*').limit(1);
+      const q = db('clients as c').where('c.company_id', u.company_id).andWhere((w) => w.whereNull('c.type').orWhereNot('c.type', 'system')).andWhere('c.name', 'like', like(a.name)).select('c.*').limit(1);
       await restrictList(u, 'client', q, 'c.id', 'c.owner_id');
       const c = (await q)[0];
       if (!c) return { tool: 'client_summary', title: 'Client', items: [], note: `No client matching “${a.name}” that you can see.` };
@@ -144,7 +144,7 @@ async function planWithoutAi(u: AuthUser, q: string): Promise<Call[]> {
   const code = q.match(/[A-Z]{2,}[\/-][A-Z0-9\/-]{3,}/i)?.[0];
   if (has('pending', 'my work', 'my tasks', 'to do', 'todo', 'queue', 'waiting')) calls.push({ tool: 'pending_work' });
   if (has('calibration', 'equipment', 'instrument')) calls.push({ tool: 'find_equipment', args: has('due', 'expire', 'overdue') ? { dueWithinDays: 30 } : { q: '' } });
-  const clientQ = db('clients as c').where('c.company_id', u.company_id).select('c.id', 'c.name');
+  const clientQ = db('clients as c').where('c.company_id', u.company_id).andWhere((w) => w.whereNull('c.type').orWhereNot('c.type', 'system')).select('c.id', 'c.name');
   if (!can(u, 'client.read')) clientQ.whereRaw('1 = 0');
   await restrictList(u, 'client', clientQ, 'c.id', 'c.owner_id');
   const STOP = new Set(['private', 'limited', 'pvt', 'ltd', 'the', 'and', 'company', 'india', 'projects', 'developers', 'construction', 'constructions', 'infra', 'group', 'builders']);

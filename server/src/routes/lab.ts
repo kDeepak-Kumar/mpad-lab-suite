@@ -63,7 +63,7 @@ lab.get('/samples', allow('sample.read'), h(async (req) => {
   const cid = req.user.company_id;
   const q = String(req.query.q ?? '').trim();
   const rows = await db('samples as s').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('sites as st', 'st.id', 's.site_id')
-    .where('s.company_id', cid).modify((b) => { if (q) b.andWhere((w) => w.where('s.code', 'like', `%${q}%`).orWhere('c.name', 'like', `%${q}%`).orWhere('s.ulr', 'like', `%${q}%`)); })
+    .where('s.company_id', cid).andWhere((w) => (req.query.quick === '1' ? w.where('s.quick', true) : w.whereNull('s.quick').orWhere('s.quick', false))).modify((b) => { if (q) b.andWhere((w) => w.where('s.code', 'like', `%${q}%`).orWhere('c.name', 'like', `%${q}%`).orWhere('s.ulr', 'like', `%${q}%`)); })
     .orderBy('s.id', 'desc').limit(500).select('s.*', 'c.name as client_name', 'st.name as site_name') as Record<string, any>[];
   const tests = rows.length ? await db('tests as t').leftJoin('catalog as k', 'k.id', 't.catalog_id').whereIn('t.sample_id', rows.map((r) => r.id)).select('t.sample_id', 't.status', 'k.report_name', 'k.billing_name') : [];
   return rows.map((r) => ({ ...r, tests: tests.filter((t) => t.sample_id === r.id) }));
@@ -181,7 +181,8 @@ lab.get('/tests/:id', allow('test.read'), h(async (req) => {
   const equipment = cats.length ? (await db('equipment').where({ company_id: cid, active: true }).whereIn('category', cats)).map((e) => row(e, ['data'])) : [];
   const history = await db('audit_log').where({ company_id: cid, entity: 'test', entity_id: t.id }).orderBy('id', 'desc');
   const names = new Map(users.map((u) => [u.id, u.name]));
-  return { ...t, sample, client, site, catalog: row(catalog, []), template, equipment, users,
+  const qc = sample.quick ? parseJson<{ quickCustomer?: Record<string, string> }>(sample.data, {}).quickCustomer ?? null : null; // quick report: customer as typed
+  return { ...t, sample, client: qc ? { id: null, name: `${qc.name} (quick report)`, address: qc.address ?? '' } : client, site, catalog: row(catalog, []), template, equipment, users,
     enteredBy: names.get(t.entered_by as number), reviewedBy: names.get(t.reviewed_by as number),
     history: history.map((x) => ({ ...row(x, ['detail']), user: names.get(x.user_id) })) };
 }));
@@ -355,6 +356,7 @@ lab.get('/reports/pending-tests', h(async (req) => {
   return db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('catalog as k', 'k.id', 't.catalog_id')
     .leftJoin('documents as d', 'd.id', 't.report_id')
     .where('t.company_id', cid).andWhere('t.status', 'accepted').andWhere((w) => w.whereNull('t.report_id').orWhere('d.status', 'cancelled'))
+    .andWhere((w) => w.whereNull('s.quick').orWhere('s.quick', false))
     .select('t.id', 't.sample_id', 's.code as sample_code', 's.client_id', 'c.name as client_name', 's.material', 's.accreditation', 'k.report_name', 'k.billing_name', 't.completed_at')
     .orderBy('s.id');
 }));

@@ -1,5 +1,5 @@
 import { type ComponentType } from 'react';
-import { NavLink as RLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link as RLink, useLocation, useNavigate } from 'react-router-dom';
 import { ActionIcon, Popover, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
 import { IconBriefcase, IconChevronRight, IconCoinRupee, IconFlask, IconSettings, IconStarFilled, IconStar, IconClockHour4, IconX, IconUsers, IconFileText, IconLayoutList, IconFile, IconClipboardCheck } from '@tabler/icons-react';

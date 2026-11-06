@@ -41,6 +41,7 @@ export const DEFAULT_NUMBERING: Record<string, string> = {
   invoice: '{SEQ}/{FY}',
   workorder: 'WO/{SEQ:4}/{FY}',
   sample: 'LAB/{CLIENT}/{SEQ:4}/{MM}/{YYYY}',
+  quick: 'QR/{SEQ:4}/{FY}',
   ulr: 'TC00000{YY}{SEQ:8}F',
   report: 'TR/{SEQ:4}/{FY}',
   receipt: 'RCPT/{SEQ:4}/{FY}',
