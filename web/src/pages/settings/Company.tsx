@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge, List } from '@mantine/core';
+import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge, List, CopyButton } from '@mantine/core';
 import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles, IconFileText } from '@tabler/icons-react';
 import { TermsSettings } from '../../components/Terms';
 import { LabSpinner } from '../../components/LabSpinner';
@@ -227,32 +227,64 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
   const [guide, setGuide] = useState(false);
   const [models, setModels] = useState<string[] | null>(null);
   const [mBusy, setMBusy] = useState(false);
-  const body = () => ({ provider: ai.provider === 'anthropic' ? 'anthropic' : 'openai', baseUrl: ai.baseUrl, model: ai.model, apiKey: ai.apiKey || undefined });
-  const runTest = async () => { setBusy(true); setTest(null); try { setTest(await api<any>('/ai/test', { body: body(), quiet: true })); } catch (e: any) { setTest({ ok: false, problem: e.message, fix: [] }); } finally { setBusy(false); } };
-  const listModels = async () => { setMBusy(true); try { const r = await api<any>('/ai/models', { body: body(), quiet: true }); if (r.ok) setModels(r.models); else { setModels(null); setTest(r); } } catch (e: any) { setTest({ ok: false, problem: e.message, fix: [] }); } finally { setMBusy(false); } };
-  const use = (p: AiProvider) => { set('ai', { ...ai, provider: p.value, baseUrl: p.baseUrl, model: p.model || '' }); setModels(null); setTest(null); };
+  const [hint, setHint] = useState<string | null>(null);
+  const body = () => ({ provider: ai.provider, baseUrl: ai.baseUrl, model: ai.model, apiKey: ai.apiKey || undefined });
+  // never leave the button spinning: give up after 70 s with a clear message
+  const timed = <T,>(p: Promise<T>) => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('No answer from the server after 70 seconds. Check the server\'s internet access and try again.')), 70000))]);
+  const runTest = async () => {
+    setHint(null);
+    if (!ai.provider) { setHint('Choose a provider first.'); return; }
+    if (!ai.apiKey && !ai.hasKey && prov?.key !== false) { setHint('Paste the API key first.'); return; }
+    if (!ai.model) { setHint('Choose a model – click “List models”.'); return; }
+    setBusy(true); setTest(null);
+    try { const r = await timed(api<any>('/ai/test', { body: body(), quiet: true })); setTest(r); if (r.models?.length) setModels(r.models); }
+    catch (e: any) { setTest({ ok: false, problem: e.message, fix: [], steps: [] }); } finally { setBusy(false); }
+  };
+  const listModels = async () => {
+    setHint(null); setMBusy(true);
+    try { const r = await timed(api<any>('/ai/models', { body: body(), quiet: true })); if (r.ok) { setModels(r.models); if (!r.models.length) setHint('The provider returned no models for this key.'); } else { setModels(null); setTest(r); } }
+    catch (e: any) { setTest({ ok: false, problem: e.message, fix: [] }); } finally { setMBusy(false); }
+  };
+  const use = (p: AiProvider) => { set('ai', { ...ai, provider: p.value, baseUrl: p.baseUrl, model: p.model || '' }); setModels(null); setTest(null); setHint(null); };
+  const err = test?.error;
   return (
     <Stack maw={760}>
       <Alert variant="light" title="AI assistant">The assistant (bottom-right on every screen), AI report questions, contract review and remark drafting use this model. Without one, the built-in assistant still finds records and answers common questions. <Anchor component="button" size="sm" fw={600} onClick={() => setGuide(true)}>Open the setup guide →</Anchor></Alert>
       <Switch label="Use an AI model" checked={!!ai.enabled} onChange={(e) => set('ai', { ...ai, enabled: e.currentTarget.checked })} />
       <Group align="flex-end" gap="xs">
-        <Select style={{ flex: 1 }} label="Provider" data={AI_PROVIDERS.map((p) => ({ value: p.value, label: `${p.label} · ${p.cost}` }))} value={ai.provider ?? null} onChange={(x) => { const p = AI_PROVIDERS.find((q) => q.value === x); if (p) use(p); }} />
+        <Select style={{ flex: 1 }} label="Provider" data={AI_PROVIDERS.map((p) => ({ value: p.value, label: `${p.label} · ${p.cost}` }))} value={ai.provider ?? null} onChange={(x) => { const p = AI_PROVIDERS.find((q) => q.value === x); if (p) use(p); }} allowDeselect={false} />
         <Button variant="light" onClick={() => setGuide(true)}>Setup guide</Button>
       </Group>
       {prov && <Text size="xs" c="dimmed">{prov.note} {prov.keyUrl && <Anchor size="xs" href={prov.keyUrl} target="_blank" rel="noreferrer">Get a key ↗</Anchor>}</Text>}
-      <TextInput label="API base URL" value={ai.baseUrl ?? ''} onChange={(e) => set('ai', { ...ai, baseUrl: e.currentTarget.value.trim() })} />
+      {ai.provider !== 'gemini' && ai.provider !== 'anthropic' && <TextInput label="API base URL" value={ai.baseUrl ?? ''} onChange={(e) => set('ai', { ...ai, baseUrl: e.currentTarget.value.trim() })} />}
       {(!prov || prov.key) && <PasswordInput label="API key" description="Stored on your server only; never shown again after saving." placeholder={ai.hasKey ? 'Saved – leave blank to keep' : 'Paste the key'} value={ai.apiKey ?? ''} onChange={(e) => set('ai', { ...ai, apiKey: e.currentTarget.value.trim() })} />}
       <Group align="flex-end" gap="xs">
-        {models?.length ? <Select style={{ flex: 1 }} label="Model" searchable data={[...new Set([...(ai.model ? [ai.model] : []), ...models])]} value={ai.model ?? null} onChange={(x) => set('ai', { ...ai, model: x ?? '' })} nothingFoundMessage="No such model" />
+        {models?.length ? <Select style={{ flex: 1 }} label="Model" searchable allowDeselect={false} data={[...new Set([...(ai.model ? [ai.model] : []), ...models])]} value={ai.model || null} onChange={(x) => x && set('ai', { ...ai, model: x })} nothingFoundMessage="No such model" />
           : <TextInput style={{ flex: 1 }} label="Model" description="Use “List models” to pick from what your key can use." value={ai.model ?? ''} onChange={(e) => set('ai', { ...ai, model: e.currentTarget.value.trim() })} />}
-        <Button variant="default" loading={mBusy} onClick={listModels} disabled={!ai.baseUrl && ai.provider !== 'anthropic'}>List models</Button>
+        <Button variant="default" loading={mBusy} onClick={listModels}>List models</Button>
       </Group>
-      <Group><Button variant="default" loading={busy} onClick={runTest} disabled={!ai.model}>Test connection</Button>
-        {test?.ok && <Text size="sm" c="teal" fw={600}>✓ Connected – replied in {test.ms} ms</Text>}</Group>
+      <Group><Button variant="default" loading={busy} onClick={runTest}>Test connection</Button>
+        {test?.ok && <Text size="sm" c="teal" fw={600}>✓ Connected – {prov?.label ?? 'the model'} replied in {(test.ms / 1000).toFixed(1)} s. Press “Save changes”.</Text>}
+        {hint && <Text size="sm" c="orange.8">{hint}</Text>}</Group>
+      {test?.steps?.length > 0 && (
+        <Paper withBorder p="sm" radius="md">
+          <Stack gap={4}>{test.steps.map((st: any) => (
+            <Group key={st.key} gap={8} wrap="nowrap"><Text size="sm" w={18} c={st.ok ? 'teal' : st.ok === false ? 'red' : 'orange'} fw={700}>{st.ok ? '✓' : st.ok === false ? '✗' : '!'}</Text><Text size="sm">{st.label}</Text>{st.note && <Text size="xs" c="dimmed">– {st.note}</Text>}</Group>
+          ))}</Stack>
+        </Paper>
+      )}
       {test && !test.ok && (
         <Alert color="red" variant="light" title={test.problem ?? 'Connection failed'}>
           {test.fix?.length > 0 && <><Text size="sm" fw={600} mt={2}>How to fix it</Text><List size="sm">{test.fix.map((f: string) => <List.Item key={f}>{f}</List.Item>)}</List></>}
-          {test.error && test.error !== test.problem && <Text size="xs" c="dimmed" mt={6}>Provider said: {test.error}</Text>}
+          {test.suggestions?.length > 0 && <Group gap={6} mt="xs"><Text size="sm">Try a model:</Text>{test.suggestions.map((m: string) => <Button key={m} size="compact-xs" variant="light" onClick={() => { set('ai', { ...ai, model: m }); setTest(null); }}>{m}</Button>)}</Group>}
+          {err && (
+            <Paper withBorder p="xs" mt="sm" radius="sm" bg="white">
+              <Text size="xs" fw={600}>What the provider said</Text>
+              <Text size="xs" ff="monospace" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{[err.status ? `HTTP ${err.status}` : null, err.providerStatus, err.message].filter(Boolean).join(' · ')}</Text>
+              {test.endpoint && <Text size="xs" c="dimmed" mt={2}>Address: {test.endpoint}</Text>}
+              <CopyButton value={`AI test failed\nProvider: ${ai.provider}\nModel: ${ai.model}\nAddress: ${test.endpoint ?? ''}\n${[err.status ? `HTTP ${err.status}` : '', err.providerStatus ?? '', err.message].filter(Boolean).join(' · ')}`}>{({ copied, copy }) => <Button mt={4} size="compact-xs" variant="subtle" onClick={copy}>{copied ? 'Copied' : 'Copy details (no key included)'}</Button>}</CopyButton>
+            </Paper>
+          )}
         </Alert>
       )}
       <Text size="xs" c="dimmed">Press “Save changes” after a successful test.</Text>

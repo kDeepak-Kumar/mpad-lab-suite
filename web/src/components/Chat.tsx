@@ -155,7 +155,7 @@ function ChatWindow({ meId, userId, minimised, onMin, onClose }: { meId: number;
       <Group className="chat-head" justify="space-between" wrap="nowrap" onClick={minimised ? onMin : undefined}>
         <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
           <Indicator color={status?.online ? 'teal' : 'gray'} size={9} offset={3} position="bottom-end" withBorder disabled={!status?.online}><Avatar radius="xl" size={30}>{who ? initials(who.name) : ''}</Avatar></Indicator>
-          <div style={{ minWidth: 0 }}><Text size="sm" fw={650} truncate>{who?.name ?? '…'}</Text><Text size="xs" c={status?.online ? 'teal' : 'dimmed'}>{status?.online ? 'online' : `last seen ${ago(status?.last_seen)}`}</Text></div>
+          <div style={{ minWidth: 0 }}><Text size="sm" fw={650} truncate className="chat-name">{who?.name ?? '…'}</Text><Text size="xs" className={`chat-status${status?.online ? ' on' : ''}`}>{status?.online ? 'online' : `last seen ${ago(status?.last_seen)}`}</Text></div>
         </Group>
         <Group gap={2} wrap="nowrap" onClick={(e) => e.stopPropagation()}>
           {!minimised && <Tooltip label="Share a file on WhatsApp (not stored in the app)"><span><label className="chat-wa"><IconBrandWhatsapp size={18} /><input type="file" hidden onChange={(e) => { shareFile(e.currentTarget.files?.[0] ?? null); e.currentTarget.value = ''; }} /></label></span></Tooltip>}

@@ -136,28 +136,57 @@ analytics.get('/analytics/insights', allow('viewAnalytics'), h(async (req) => {
 // ---------------- AI assistant ----------------
 type AiSettings = { enabled?: boolean; provider?: string; baseUrl?: string; model?: string; apiKey?: string };
 
+const GEMINI = (process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com').replace(/\/$/, ''); // overridable for tests
+/** Gemini runs on Google's own API (the most reliable path); old "…/v1beta/openai" addresses are accepted too. */
+export const isGemini = (ai: AiSettings) => ai.provider === 'gemini' || /generativelanguage\.googleapis\.com/.test(ai.baseUrl ?? '');
+const geminiModel = (m: string) => m.replace(/^models\//, '').trim();
+/** The provider's own error text, whatever shape the body has (object, array, plain text, HTML). */
+function providerMessage(j: any, raw: string) {
+  const e = Array.isArray(j) ? j[0]?.error : j?.error;
+  const msg = (typeof e === 'string' ? e : e?.message) || j?.message || j?.detail;
+  if (msg) return String(msg);
+  const text = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.slice(0, 300);
+}
+async function readBody(r: Response) { const raw = await r.text(); let j: any = null; try { j = JSON.parse(raw); } catch { /* not JSON */ } return { raw, j }; }
+const fail = (r: Response, j: any, raw: string) => Object.assign(new Error(providerMessage(j, raw) || `HTTP ${r.status}`), { status: r.status, providerStatus: (Array.isArray(j) ? j[0]?.error?.status : j?.error?.status) ?? null });
+
 export async function chat(ai: AiSettings, system: string, user: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string> {
   if (!ai?.enabled || !ai.model) throw new Error('AI is not configured');
   const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45000);
   try {
+    if (isGemini(ai)) {
+      const r = await fetch(`${GEMINI}/v1beta/models/${encodeURIComponent(geminiModel(ai.model))}:generateContent`, {
+        method: 'POST', signal: ctl.signal,
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': ai.apiKey ?? '' },
+        // thinking models count their reasoning in the output budget, so never cap it too low
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig: { temperature: 0, maxOutputTokens: Math.max(opts.maxTokens ?? 2048, 2048) } }),
+      });
+      const { raw, j } = await readBody(r);
+      if (!r.ok) throw fail(r, j, raw);
+      const c = j?.candidates?.[0];
+      const text = (c?.content?.parts ?? []).map((p: any) => (p.thought ? '' : p.text ?? '')).join('');
+      if (!text && (j?.promptFeedback?.blockReason || c?.finishReason === 'SAFETY')) throw new Error(`Gemini blocked the reply (${j?.promptFeedback?.blockReason ?? c?.finishReason})`);
+      return text;
+    }
     if (ai.provider === 'anthropic') {
       const r = await fetch(`${(ai.baseUrl || 'https://api.anthropic.com').replace(/\/$/, '')}/v1/messages`, {
         method: 'POST', signal: ctl.signal,
         headers: { 'content-type': 'application/json', 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({ model: ai.model, max_tokens: opts.maxTokens ?? 1500, system, messages: [{ role: 'user', content: user }] }),
       });
-      const j: any = await r.json();
-      if (!r.ok) throw Object.assign(new Error(j?.error?.message || `AI request failed (${r.status})`), { status: r.status });
-      return j.content?.map((c: any) => c.text ?? '').join('') ?? '';
+      const { raw, j } = await readBody(r);
+      if (!r.ok) throw fail(r, j, raw);
+      return j?.content?.map((c: any) => c.text ?? '').join('') ?? '';
     }
     const r = await fetch(`${(ai.baseUrl || '').replace(/\/$/, '')}/chat/completions`, {
       method: 'POST', signal: ctl.signal,
       headers: { 'content-type': 'application/json', ...(ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {}) },
       body: JSON.stringify({ model: ai.model, temperature: 0, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
     });
-    const j: any = await r.json().catch(() => ({}));
-    if (!r.ok) throw Object.assign(new Error(j?.error?.message || (Array.isArray(j) ? j[0]?.error?.message : '') || `AI request failed (${r.status})`), { status: r.status });
-    return j.choices?.[0]?.message?.content ?? '';
+    const { raw, j } = await readBody(r);
+    if (!r.ok) throw fail(r, j, raw);
+    return j?.choices?.[0]?.message?.content ?? '';
   } finally { clearTimeout(timer); }
 }
 const extractJson = (s: string) => { const a = s.indexOf('{'), b = s.lastIndexOf('}'); if (a < 0 || b < a) throw new Error('No JSON in AI reply'); return JSON.parse(s.slice(a, b + 1)); };
@@ -283,49 +312,95 @@ analytics.post('/ai/ask', allow('viewAnalytics'), h(async (req) => {
   return { ...result, explanation: res.explanation, source, aiError };
 }));
 
+/** Models this key can use (ids without the "models/" prefix). Throws with the provider's status/message. */
+async function listModels(ai: AiSettings): Promise<string[]> {
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const gem = isGemini(ai), anth = ai.provider === 'anthropic';
+    const base = String(ai.baseUrl ?? '').replace(/\/$/, '');
+    if (!gem && !anth && !base) throw Object.assign(new Error('Enter the API base URL first'), { status: 0 });
+    const r = await fetch(gem ? `${GEMINI}/v1beta/models?pageSize=200` : anth ? `${base || 'https://api.anthropic.com'}/v1/models?limit=100` : `${base}/models`, {
+      signal: ctl.signal,
+      headers: gem ? { 'x-goog-api-key': ai.apiKey ?? '' } : anth ? { 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' } : ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {},
+    });
+    const { raw, j } = await readBody(r);
+    if (!r.ok) throw fail(r, j, raw);
+    const list = gem
+      ? (j?.models ?? []).filter((m: any) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes('generateContent')).map((m: any) => geminiModel(String(m.name ?? '')))
+      : (j?.data ?? j?.models ?? []).map((m: any) => String(m.id ?? m.name ?? '').replace(/^models\//, ''));
+    return [...new Set<string>(list.filter(Boolean))].sort();
+  } finally { clearTimeout(timer); }
+}
+
 /** Plain-language cause and fix for a failed AI connection. */
 function diagnose(e: any, ai: AiSettings): { problem: string; fix: string[] } {
-  const m = String(e?.message ?? e), st = Number(e?.status ?? 0), base = String(ai.baseUrl ?? '');
-  if (e?.name === 'AbortError' || /abort|timed? ?out/i.test(m)) return { problem: 'The provider did not answer in time.', fix: ['Check the server has internet access.', 'Try again – free tiers are sometimes busy.', 'For Ollama, check the computer running it is on and reachable from the server.'] };
-  if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|certificate/i.test(m)) return { problem: 'The server could not reach the API address.', fix: [`Check the API base URL: ${base || '(empty)'}.`, 'It must start with https:// (http:// only for a local Ollama).', 'Ollama on "localhost" means the server itself – use the computer\'s network address instead if Ollama runs elsewhere.'] };
-  if (st === 401 || st === 403 || /api key|unauthori[sz]ed|permission|invalid.*key|authentication/i.test(m)) return { problem: 'The provider rejected the API key.', fix: ['Paste the key again (no spaces before or after).', 'Check the key belongs to this provider and is not deleted or restricted.', 'Some providers need billing or an accepted terms page before the key works.'] };
-  if (st === 404 || /model.*(not found|does not exist|unknown)|no such model|not supported/i.test(m)) return { problem: 'The model name or API address is not recognised.', fix: ['Click “List models” and pick one from the list.', 'Model names change; copy the exact current name from the provider\'s models page.', 'Check the base URL ends where the guide shows (e.g. …/v1 or …/openai).'] };
-  if (st === 429 || /rate|quota|exceeded|too many|resource.?exhausted|billing|credit/i.test(m)) return { problem: 'The free quota or rate limit is used up, or billing is needed.', fix: ['Wait a minute and test again.', 'Check the usage / limits page of the provider.', 'Choose a smaller model, another free provider, or add billing.'] };
+  const m = String(e?.message ?? e), st = Number(e?.status ?? 0), base = isGemini(ai) ? GEMINI : String(ai.baseUrl ?? '');
+  const gem = isGemini(ai);
+  if (e?.name === 'AbortError' || /abort|timed? ?out/i.test(m)) return { problem: 'The provider did not answer in time.', fix: ['Try again – free tiers are sometimes busy.', 'Check the server has internet access.', 'For Ollama, check the computer running it is on and reachable from the server.'] };
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|getaddrinfo|certificate|socket/i.test(m)) return { problem: 'The app server could not reach the provider.', fix: [`Address tried: ${base || '(empty)'}.`, 'The server needs outbound internet (HTTPS) – check the VPS firewall.', 'Ollama on "localhost" means the server itself – use the computer\'s network address instead.'] };
+  if (/location is not supported|region|country/i.test(m)) return { problem: 'The provider does not offer its free API in the server\'s country / region.', fix: ['Use another provider (Groq, OpenRouter, Mistral) or a paid plan.', gem ? 'Google lists the supported regions on ai.google.dev ("available regions").' : 'Check the provider\'s list of supported regions.'] };
+  if (st === 401 || st === 403 || /api key|api_key|unauthori[sz]ed|permission|invalid.*key|authentication|credential/i.test(m)) return { problem: 'The provider rejected the API key.', fix: ['Copy the key again from the provider and paste it (no spaces, the whole key).', gem ? 'For Gemini, create the key at aistudio.google.com/apikey – keys from Google Cloud console need the "Generative Language API" enabled.' : 'Check the key belongs to this provider and is not deleted or restricted.', 'If the key has "application restrictions" (website / IP), remove them or add your server\'s IP.'] };
+  if (st === 404 || /not found|does not exist|unknown model|no such model|not supported for generatecontent/i.test(m)) return { problem: 'The model name is not available to this key.', fix: ['Click “List models” and pick one from the list.', gem ? 'For Gemini choose a “flash” model, e.g. gemini-2.5-flash.' : 'Copy the exact current name from the provider\'s models page.'] };
+  if (st === 429 || /rate|quota|exceeded|too many|resource.?exhausted|billing|credit/i.test(m)) return { problem: 'The free quota or rate limit is used up (or billing is needed).', fix: ['Wait a minute and test again.', gem ? 'Free Gemini keys have a daily limit per model – try another flash model or wait until tomorrow.' : 'Check the usage / limits page of the provider.', 'Choose a smaller model, another free provider, or add billing.'] };
   if (st >= 500) return { problem: 'The provider is having a temporary problem.', fix: ['Try again in a few minutes.', 'Check the provider\'s status page.'] };
-  if (/not configured/i.test(m)) return { problem: 'Enter a model name first.', fix: ['Pick a provider, paste the key and choose a model.'] };
-  return { problem: m.slice(0, 300), fix: ['Check the base URL, model name and key against the setup guide.'] };
+  if (st === 400) return { problem: 'The provider refused the request.', fix: ['Read the provider\'s message below – it says what it did not accept.', 'Pick a model from “List models”.'] };
+  return { problem: m.slice(0, 300) || 'Unknown error', fix: ['Check the provider, key and model against the setup guide.'] };
 }
 const aiFrom = async (cid: number, body: any): Promise<AiSettings> => {
   const company = await getCompany(cid);
   const saved = (company.ai ?? {}) as AiSettings;
-  return { ...saved, ...(body ?? {}), apiKey: body?.apiKey || saved.apiKey, enabled: true };
+  const b = body ?? {};
+  // never let an empty field from the browser wipe the saved key / URL
+  return { ...saved, ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined && v !== null && v !== '')), apiKey: b.apiKey || saved.apiKey, enabled: true };
 };
+const detail = (e: any) => ({ status: Number(e?.status ?? 0) || null, providerStatus: e?.providerStatus ?? null, message: String(e?.message ?? e).slice(0, 500) });
 
-/** Connection test with a plain-language diagnosis. The key never comes back to the browser. */
+/**
+ * Connection test, step by step: reach the provider → key accepted → model available → model replies.
+ * Each step reports its result so the person sees exactly where it fails and what to do. The key never comes back.
+ */
 analytics.post('/ai/test', allow('manageSettings'), h(async (req) => {
   const ai = await aiFrom(req.user.company_id, req.body);
   const t0 = Date.now();
+  const steps: { key: string; label: string; ok: boolean | null; note?: string }[] = [];
+  const out = (ok: boolean, extra: Record<string, unknown> = {}) => ({ ok, ms: Date.now() - t0, steps, endpoint: isGemini(ai) ? `${GEMINI}/v1beta` : ai.baseUrl || (ai.provider === 'anthropic' ? 'https://api.anthropic.com' : ''), ...extra });
+  if (!ai.apiKey && ai.provider !== 'ollama') { steps.push({ key: 'key', label: 'API key entered', ok: false }); return out(false, { problem: 'Paste the API key first.', fix: ['Get it from the provider (see the setup guide), paste it, then test.'] }); }
+  // 1–2: list models = reachability + key check
+  let models: string[] | null = null;
   try {
-    const reply = await chat(ai, 'Reply with the single word OK.', 'Say OK', { maxTokens: 20, timeoutMs: 30000 });
-    return { ok: true, reply: reply.slice(0, 60), ms: Date.now() - t0 };
-  } catch (e) { return { ok: false, ms: Date.now() - t0, error: String((e as Error).message).slice(0, 300), ...diagnose(e, ai) }; }
+    models = await listModels(ai);
+    steps.push({ key: 'reach', label: 'Server reached the provider', ok: true }, { key: 'key', label: 'API key accepted', ok: true, note: `${models.length} models available` });
+  } catch (e: any) {
+    const d = diagnose(e, ai);
+    const reached = Boolean(e?.status);
+    steps.push({ key: 'reach', label: 'Server reached the provider', ok: reached });
+    if (reached) steps.push({ key: 'key', label: 'API key accepted', ok: !(e.status === 401 || e.status === 403 || e.status === 400) ? null : false });
+    // some OpenAI-compatible services have no model list – carry on to the real call in that case
+    if (!reached || [400, 401, 403].includes(e.status) || isGemini(ai)) return out(false, { ...d, error: detail(e) });
+  }
+  // 3: model
+  if (!ai.model) { steps.push({ key: 'model', label: 'Model chosen', ok: false }); return out(false, { problem: 'Choose a model.', fix: ['Click “List models” and pick one.'], models: models?.slice(0, 400) }); }
+  if (models?.length) {
+    const has = models.includes(String(ai.model).replace(/^models\//, ''));
+    steps.push({ key: 'model', label: `Model “${ai.model}” available to this key`, ok: has || null, note: has ? undefined : 'not in the list – trying anyway' });
+  }
+  // 4: real reply
+  try {
+    const reply = await chat(ai, 'Reply with the single word OK.', 'Say OK', { maxTokens: 64, timeoutMs: 40000 });
+    steps.push({ key: 'reply', label: 'Model replied', ok: true, note: reply.trim().slice(0, 40) || '(empty reply)' });
+    return out(true, { reply: reply.slice(0, 60) });
+  } catch (e: any) {
+    steps.push({ key: 'reply', label: 'Model replied', ok: false });
+    const sugg = models?.filter((m) => /flash|mini|haiku|instant|small|8b|lite/i.test(m)).slice(0, 6) ?? [];
+    return out(false, { ...diagnose(e, ai), error: detail(e), suggestions: sugg });
+  }
 }));
 
 /** Models the provider offers to this key (so nobody has to type a model name). */
 analytics.post('/ai/models', allow('manageSettings'), h(async (req) => {
   const ai = await aiFrom(req.user.company_id, req.body);
-  const base = String(ai.baseUrl ?? '').replace(/\/$/, '');
-  if (!base && ai.provider !== 'anthropic') throw new HttpError(400, 'Enter the API base URL first');
-  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 20000);
-  try {
-    const anth = ai.provider === 'anthropic';
-    const r = await fetch(anth ? `${base || 'https://api.anthropic.com'}/v1/models?limit=100` : `${base}/models`, { signal: ctl.signal,
-      headers: anth ? { 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' } : ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {} });
-    const j: any = await r.json().catch(() => ({}));
-    if (!r.ok) { const d = diagnose(Object.assign(new Error(j?.error?.message || `HTTP ${r.status}`), { status: r.status }), ai); return { ok: false, models: [], ...d }; }
-    const list = (j.data ?? j.models ?? []).map((m: any) => String(m.id ?? m.name ?? '').replace(/^models\//, '')).filter(Boolean);
-    return { ok: true, models: [...new Set<string>(list)].sort().slice(0, 400) };
-  } catch (e) { return { ok: false, models: [], ...diagnose(e, ai) }; } finally { clearTimeout(timer); }
+  try { return { ok: true, models: (await listModels(ai)).slice(0, 400) }; }
+  catch (e: any) { return { ok: false, models: [], ...diagnose(e, ai), error: detail(e) }; }
 }));
 
 /** Small AI helpers used inside forms. Each has a non-AI fallback in the UI. */

@@ -480,7 +480,7 @@ console.log('22. Assistant, invoice analytics, AI diagnostics');
   let m = await fail(() => api('tech', 'GET', '/invoices/analytics'));
   expect(m, 'invoice analytics needs invoice access');
   const bad = await api('owner', 'POST', '/ai/test', { provider: 'openai', baseUrl: 'http://127.0.0.1:9', model: 'x', apiKey: 'k' });
-  expect(bad.ok === false && /reach the API address/.test(bad.problem) && bad.fix.length, 'AI connection test explains the problem and the fix');
+  expect(bad.ok === false && /could not reach the provider/.test(bad.problem) && bad.fix.length, 'AI connection test explains the problem and the fix');
   if (process.env.MOCK_AI) {
     await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });
     const ml = await api('owner', 'POST', '/ai/models', {});
@@ -490,6 +490,16 @@ console.log('22. Assistant, invoice analytics, AI diagnostics');
     const co = await api('owner', 'GET', '/company');
     expect(!JSON.stringify(co).includes('"apiKey":"x"'), 'API key is never sent back to the browser');
     await api('owner', 'PUT', '/company', { ai: { enabled: false } });
+  }
+  if (process.env.MOCK_GEMINI) { // server started with GEMINI_BASE pointing at the mock
+    let t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: 'bad-key' });
+    expect(!t.ok && /rejected the API key/.test(t.problem) && t.steps.find((x) => x.key === 'reach').ok && t.steps.find((x) => x.key === 'key').ok === false && /API key not valid/.test(t.error.message), 'Gemini: wrong key – says the key was rejected and shows Google\'s message');
+    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', model: 'gemini-flash-old', apiKey: 'good-key' });
+    expect(!t.ok && /model name is not available/.test(t.problem) && t.suggestions.includes('gemini-2.5-flash'), 'Gemini: unknown model – suggests models the key can use');
+    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'models/gemini-2.5-flash', apiKey: 'good-key' });
+    expect(t.ok && t.reply === 'OK' && t.steps.every((x) => x.ok), 'Gemini: connected through Google\'s own API (old address and "models/" prefix accepted; thinking text ignored)');
+    const ml = await api('owner', 'POST', '/ai/models', { provider: 'gemini', apiKey: 'good-key' });
+    expect(ml.models.join() === 'gemini-2.5-flash', 'Gemini: List models shows only chat models');
   }
 }
 console.log('23. Quick test report without registration, register later');

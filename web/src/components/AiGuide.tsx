@@ -9,11 +9,11 @@ export interface AiProvider {
 
 /** Provider catalogue. Model names change often, so the guide points to "List models" rather than hard-coding them. */
 export const AI_PROVIDERS: AiProvider[] = [
-  { value: 'gemini', label: 'Google Gemini', cost: 'Free tier', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-flash-latest', key: true,
+  { value: 'gemini', label: 'Google Gemini', cost: 'Free tier', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-flash', key: true,
     keyUrl: 'https://aistudio.google.com/apikey', modelsUrl: 'https://ai.google.dev/gemini-api/docs/models', good: 'Best free starting point: strong, fast, large free daily quota.',
     limits: 'Free quota per minute and per day; see your limits in Google AI Studio. On the free tier Google may use prompts to improve its products.',
-    note: 'Free key from Google AI Studio. “gemini-flash-latest” always points to Google\'s current Flash model.',
-    steps: ['Sign in at aistudio.google.com with a Google account.', 'Open **Get API key → Create API key**; copy it.', 'Here: Provider = Google Gemini; the base URL fills in.', 'Paste the key, click **List models** (or keep gemini-flash-latest).', 'Click **Test connection**, then **Save changes**.'] },
+    note: 'Free key from Google AI Studio (aistudio.google.com/apikey). Uses Google\'s own Gemini API.',
+    steps: ['Sign in at aistudio.google.com with a Google account.', 'Open **Get API key → Create API key**; copy it.', 'Here: Provider = Google Gemini; the base URL fills in.', 'Paste the key, click **List models** and pick a “flash” model (e.g. gemini-2.5-flash).', 'Click **Test connection**, then **Save changes**.'] },
   { value: 'groq', label: 'Groq', cost: 'Free tier', baseUrl: 'https://api.groq.com/openai/v1', model: '', key: true,
     keyUrl: 'https://console.groq.com/keys', modelsUrl: 'https://console.groq.com/docs/models', good: 'Very fast open models; no card needed.', limits: 'Free tier has requests-per-minute and tokens-per-day caps.',
     note: 'Free key at console.groq.com; pick a model with “List models”.',
