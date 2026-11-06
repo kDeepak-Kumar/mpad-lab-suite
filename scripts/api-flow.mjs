@@ -494,12 +494,12 @@ console.log('22. Assistant, invoice analytics, AI diagnostics');
   if (process.env.MOCK_GEMINI) { // server started with GEMINI_BASE pointing at the mock
     let t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: 'bad-key' });
     expect(!t.ok && /rejected the API key/.test(t.problem) && t.steps.find((x) => x.key === 'reach').ok && t.steps.find((x) => x.key === 'key').ok === false && /API key not valid/.test(t.error.message), 'Gemini: wrong key – says the key was rejected and shows Google\'s message');
-    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', model: 'gemini-flash-old', apiKey: 'good-key' });
-    expect(!t.ok && /model name is not available/.test(t.problem) && t.suggestions.includes('gemini-2.5-flash'), 'Gemini: unknown model – suggests models the key can use');
-    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'models/gemini-2.5-flash', apiKey: 'good-key' });
+    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: 'good-key' });
+    expect(!t.ok && /not available/.test(t.problem) && t.suggestions[0] === 'gemini-3.8-flash' && t.suggestions.includes('gemini-flash-latest') && t.steps.find((x) => x.key === 'key').ok, 'Gemini: retired model – key accepted, Google\'s recommended model offered first');
+    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'models/gemini-flash-latest', apiKey: 'good-key' });
     expect(t.ok && t.reply === 'OK' && t.steps.every((x) => x.ok), 'Gemini: connected through Google\'s own API (old address and "models/" prefix accepted; thinking text ignored)');
     const ml = await api('owner', 'POST', '/ai/models', { provider: 'gemini', apiKey: 'good-key' });
-    expect(ml.models.join() === 'gemini-2.5-flash', 'Gemini: List models shows only chat models');
+    expect(ml.models[0] === 'gemini-flash-latest' && ml.models.includes('gemini-3.8-flash') && !ml.models.some((x) => /embedding/.test(x)) && ml.endpoint.endsWith('/v1beta/models'), 'Gemini: List models reads every page, keeps chat models, latest alias first');
   }
 }
 console.log('23. Quick test report without registration, register later');

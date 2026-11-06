@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge, List, CopyButton } from '@mantine/core';
+import { Button, FileButton, Grid, Group, Image, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, Text, UnstyledButton, TextInput, Textarea, Alert, SegmentedControl, PasswordInput, Anchor, ActionIcon, Badge, List, CopyButton, Code } from '@mantine/core';
 import { IconTrash, IconUpload, IconDownload, IconBrandWhatsapp, IconId, IconPalette, IconLayoutNavbar, IconFiles, IconBuildingBank, IconHash, IconListCheck, IconSignature, IconMail, IconShieldLock, IconSparkles, IconFileText } from '@tabler/icons-react';
 import { TermsSettings } from '../../components/Terms';
 import { LabSpinner } from '../../components/LabSpinner';
@@ -228,6 +228,7 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
   const [models, setModels] = useState<string[] | null>(null);
   const [mBusy, setMBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [listInfo, setListInfo] = useState<string | null>(null);
   const body = () => ({ provider: ai.provider, baseUrl: ai.baseUrl, model: ai.model, apiKey: ai.apiKey || undefined });
   // never leave the button spinning: give up after 70 s with a clear message
   const timed = <T,>(p: Promise<T>) => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('No answer from the server after 70 seconds. Check the server\'s internet access and try again.')), 70000))]);
@@ -242,7 +243,7 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
   };
   const listModels = async () => {
     setHint(null); setMBusy(true);
-    try { const r = await timed(api<any>('/ai/models', { body: body(), quiet: true })); if (r.ok) { setModels(r.models); if (!r.models.length) setHint('The provider returned no models for this key.'); } else { setModels(null); setTest(r); } }
+    try { const r = await timed(api<any>('/ai/models', { body: body(), quiet: true })); setListInfo(null); if (r.ok) { setModels(r.models.length ? r.models : null); if (!r.models.length) setListInfo(`The key works, but ${prov?.label ?? 'the provider'} returned no chat models.${r.sample ? ` It answered: ${r.sample}` : ''} You can still type a model name${ai.provider === 'gemini' ? ' – gemini-flash-latest is safe' : ''}.`); else if (!r.models.includes(ai.model)) setListInfo(`${r.models.length} models found – pick one in the Model list.`); } else { setModels(null); setTest(r); } }
     catch (e: any) { setTest({ ok: false, problem: e.message, fix: [] }); } finally { setMBusy(false); }
   };
   const use = (p: AiProvider) => { set('ai', { ...ai, provider: p.value, baseUrl: p.baseUrl, model: p.model || '' }); setModels(null); setTest(null); setHint(null); };
@@ -263,6 +264,8 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
           : <TextInput style={{ flex: 1 }} label="Model" description="Use “List models” to pick from what your key can use." value={ai.model ?? ''} onChange={(e) => set('ai', { ...ai, model: e.currentTarget.value.trim() })} />}
         <Button variant="default" loading={mBusy} onClick={listModels}>List models</Button>
       </Group>
+      {ai.provider && <Text size="xs" c="dimmed">Requests go to <Code fz="xs">{ai.provider === 'gemini' ? `https://generativelanguage.googleapis.com/v1beta/models/${(ai.model || '<model>').replace(/^models\//, '')}:generateContent` : ai.provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : `${(ai.baseUrl || '<base URL>').replace(/\/$/, '')}/chat/completions`}</Code>{ai.provider === 'gemini' ? ' with the key in the x-goog-api-key header' : ai.provider === 'anthropic' ? ' with the key in the x-api-key header' : ' with the key as a Bearer token'} – sent from your server, never from the browser.</Text>}
+      {listInfo && <Alert variant="light" color="orange" p="xs"><Text size="xs">{listInfo}</Text></Alert>}
       <Group><Button variant="default" loading={busy} onClick={runTest}>Test connection</Button>
         {test?.ok && <Text size="sm" c="teal" fw={600}>✓ Connected – {prov?.label ?? 'the model'} replied in {(test.ms / 1000).toFixed(1)} s. Press “Save changes”.</Text>}
         {hint && <Text size="sm" c="orange.8">{hint}</Text>}</Group>

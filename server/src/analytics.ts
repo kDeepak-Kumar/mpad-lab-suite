@@ -151,7 +151,7 @@ function providerMessage(j: any, raw: string) {
 async function readBody(r: Response) { const raw = await r.text(); let j: any = null; try { j = JSON.parse(raw); } catch { /* not JSON */ } return { raw, j }; }
 const fail = (r: Response, j: any, raw: string) => Object.assign(new Error(providerMessage(j, raw) || `HTTP ${r.status}`), { status: r.status, providerStatus: (Array.isArray(j) ? j[0]?.error?.status : j?.error?.status) ?? null });
 
-export async function chat(ai: AiSettings, system: string, user: string, opts: { maxTokens?: number; timeoutMs?: number } = {}): Promise<string> {
+export async function chat(ai: AiSettings, system: string, user: string, opts: { maxTokens?: number; timeoutMs?: number; noFallback?: boolean } = {}): Promise<string> {
   if (!ai?.enabled || !ai.model) throw new Error('AI is not configured');
   const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45000);
   try {
@@ -163,7 +163,15 @@ export async function chat(ai: AiSettings, system: string, user: string, opts: {
         body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig: { temperature: 0, maxOutputTokens: Math.max(opts.maxTokens ?? 2048, 2048) } }),
       });
       const { raw, j } = await readBody(r);
-      if (!r.ok) throw fail(r, j, raw);
+      if (!r.ok) {
+        const err = fail(r, j, raw);
+        // Google retires model names; keep the assistant working with its recommended / latest Flash model
+        if (r.status === 404 && !opts.noFallback) {
+          const next = [...String(err.message).matchAll(/use\s+(?:the\s+)?(?:models\/)?([a-z][a-z0-9.\-]*\d[a-z0-9.\-]*)/gi)].map((m) => m[1].replace(/[.\-]+$/, ''))[0] ?? 'gemini-flash-latest';
+          if (next !== geminiModel(ai.model)) { console.warn(`[ai] Gemini model ${ai.model} unavailable, using ${next}`); return chat({ ...ai, model: next }, system, user, { ...opts, noFallback: true }); }
+        }
+        throw err;
+      }
       const c = j?.candidates?.[0];
       const text = (c?.content?.parts ?? []).map((p: any) => (p.thought ? '' : p.text ?? '')).join('');
       if (!text && (j?.promptFeedback?.blockReason || c?.finishReason === 'SAFETY')) throw new Error(`Gemini blocked the reply (${j?.promptFeedback?.blockReason ?? c?.finishReason})`);
@@ -313,24 +321,38 @@ analytics.post('/ai/ask', allow('viewAnalytics'), h(async (req) => {
 }));
 
 /** Models this key can use (ids without the "models/" prefix). Throws with the provider's status/message. */
+let lastListSample = '';
 async function listModels(ai: AiSettings): Promise<string[]> {
-  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 20000);
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 25000);
   try {
     const gem = isGemini(ai), anth = ai.provider === 'anthropic';
     const base = String(ai.baseUrl ?? '').replace(/\/$/, '');
     if (!gem && !anth && !base) throw Object.assign(new Error('Enter the API base URL first'), { status: 0 });
-    const r = await fetch(gem ? `${GEMINI}/v1beta/models?pageSize=200` : anth ? `${base || 'https://api.anthropic.com'}/v1/models?limit=100` : `${base}/models`, {
-      signal: ctl.signal,
-      headers: gem ? { 'x-goog-api-key': ai.apiKey ?? '' } : anth ? { 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' } : ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {},
-    });
-    const { raw, j } = await readBody(r);
-    if (!r.ok) throw fail(r, j, raw);
-    const list = gem
-      ? (j?.models ?? []).filter((m: any) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes('generateContent')).map((m: any) => geminiModel(String(m.name ?? '')))
-      : (j?.data ?? j?.models ?? []).map((m: any) => String(m.id ?? m.name ?? '').replace(/^models\//, ''));
-    return [...new Set<string>(list.filter(Boolean))].sort();
+    const headers: Record<string, string> = gem ? { 'x-goog-api-key': ai.apiKey ?? '' } : anth ? { 'x-api-key': ai.apiKey ?? '', 'anthropic-version': '2023-06-01' } : ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {};
+    const all: any[] = []; let page = ''; lastListSample = '';
+    for (let i = 0; i < 6; i++) { // Google pages its model list
+      const url = gem ? `${GEMINI}/v1beta/models?pageSize=1000${page ? `&pageToken=${encodeURIComponent(page)}` : ''}` : anth ? `${base || 'https://api.anthropic.com'}/v1/models?limit=100` : `${base}/models`;
+      const r = await fetch(url, { signal: ctl.signal, headers });
+      const { raw, j } = await readBody(r);
+      if (!r.ok) throw fail(r, j, raw);
+      if (!lastListSample) lastListSample = raw.slice(0, 400);
+      const arr = Array.isArray(j) ? j : j?.models ?? j?.data ?? j?.items ?? Object.values(j ?? {}).find((v) => Array.isArray(v)) ?? [];
+      all.push(...(arr as any[]));
+      page = gem ? String(j?.nextPageToken ?? '') : '';
+      if (!page) break;
+    }
+    const name = (m: any) => String(typeof m === 'string' ? m : m?.name ?? m?.id ?? m?.model ?? m?.baseModelId ?? '').replace(/^models\//, '').trim();
+    const methods = (m: any): string[] | null => { const x = m?.supportedGenerationMethods ?? m?.supportedActions ?? m?.supported_methods; return Array.isArray(x) ? x.map(String) : null; };
+    let list = all.filter((m) => { const ms = methods(m); return !ms || ms.some((x) => /generatecontent|generate|chat|interact/i.test(x)); }).map(name);
+    if (!list.length) list = all.map(name);
+    // embedding / image / audio-only models cannot answer questions
+    list = list.filter((n) => n && !/embed|imagen|veo|aqa|tts|audio|image-generation|lyria/i.test(n));
+    const rank = (n: string) => (/latest/.test(n) ? 0 : /flash/.test(n) && !/lite/.test(n) ? 1 : /flash/.test(n) ? 2 : /pro/.test(n) ? 3 : 4);
+    return [...new Set(list)].sort((x, y) => rank(x) - rank(y) || y.localeCompare(x, undefined, { numeric: true }));
   } finally { clearTimeout(timer); }
 }
+/** Model names the provider itself recommends in an error ("…use models/gemini-x-flash…"). */
+const recommended = (msg: string) => [...msg.matchAll(/use\s+(?:the\s+)?(?:models\/)?([a-z][a-z0-9.\-]*\d[a-z0-9.\-]*)/gi)].map((m) => m[1].replace(/[.\-]+$/, ''));
 
 /** Plain-language cause and fix for a failed AI connection. */
 function diagnose(e: any, ai: AiSettings): { problem: string; fix: string[] } {
@@ -340,7 +362,7 @@ function diagnose(e: any, ai: AiSettings): { problem: string; fix: string[] } {
   if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|getaddrinfo|certificate|socket/i.test(m)) return { problem: 'The app server could not reach the provider.', fix: [`Address tried: ${base || '(empty)'}.`, 'The server needs outbound internet (HTTPS) – check the VPS firewall.', 'Ollama on "localhost" means the server itself – use the computer\'s network address instead.'] };
   if (/location is not supported|region|country/i.test(m)) return { problem: 'The provider does not offer its free API in the server\'s country / region.', fix: ['Use another provider (Groq, OpenRouter, Mistral) or a paid plan.', gem ? 'Google lists the supported regions on ai.google.dev ("available regions").' : 'Check the provider\'s list of supported regions.'] };
   if (st === 401 || st === 403 || /api key|api_key|unauthori[sz]ed|permission|invalid.*key|authentication|credential/i.test(m)) return { problem: 'The provider rejected the API key.', fix: ['Copy the key again from the provider and paste it (no spaces, the whole key).', gem ? 'For Gemini, create the key at aistudio.google.com/apikey – keys from Google Cloud console need the "Generative Language API" enabled.' : 'Check the key belongs to this provider and is not deleted or restricted.', 'If the key has "application restrictions" (website / IP), remove them or add your server\'s IP.'] };
-  if (st === 404 || /not found|does not exist|unknown model|no such model|not supported for generatecontent/i.test(m)) return { problem: 'The model name is not available to this key.', fix: ['Click “List models” and pick one from the list.', gem ? 'For Gemini choose a “flash” model, e.g. gemini-2.5-flash.' : 'Copy the exact current name from the provider\'s models page.'] };
+  if (st === 404 || /not found|does not exist|unknown model|no such model|not supported for generatecontent/i.test(m)) return { problem: 'The model name is not available to this key.', fix: ['Click “List models” and pick one from the list.', gem ? 'For Gemini, “gemini-flash-latest” always points to Google\'s current Flash model.' : 'Copy the exact current name from the provider\'s models page.'] };
   if (st === 429 || /rate|quota|exceeded|too many|resource.?exhausted|billing|credit/i.test(m)) return { problem: 'The free quota or rate limit is used up (or billing is needed).', fix: ['Wait a minute and test again.', gem ? 'Free Gemini keys have a daily limit per model – try another flash model or wait until tomorrow.' : 'Check the usage / limits page of the provider.', 'Choose a smaller model, another free provider, or add billing.'] };
   if (st >= 500) return { problem: 'The provider is having a temporary problem.', fix: ['Try again in a few minutes.', 'Check the provider\'s status page.'] };
   if (st === 400) return { problem: 'The provider refused the request.', fix: ['Read the provider\'s message below – it says what it did not accept.', 'Pick a model from “List models”.'] };
@@ -386,12 +408,12 @@ analytics.post('/ai/test', allow('manageSettings'), h(async (req) => {
   }
   // 4: real reply
   try {
-    const reply = await chat(ai, 'Reply with the single word OK.', 'Say OK', { maxTokens: 64, timeoutMs: 40000 });
+    const reply = await chat(ai, 'Reply with the single word OK.', 'Say OK', { maxTokens: 64, timeoutMs: 40000, noFallback: true });
     steps.push({ key: 'reply', label: 'Model replied', ok: true, note: reply.trim().slice(0, 40) || '(empty reply)' });
     return out(true, { reply: reply.slice(0, 60) });
   } catch (e: any) {
     steps.push({ key: 'reply', label: 'Model replied', ok: false });
-    const sugg = models?.filter((m) => /flash|mini|haiku|instant|small|8b|lite/i.test(m)).slice(0, 6) ?? [];
+    const sugg = [...new Set([...recommended(String(e?.message ?? '')), ...(isGemini(ai) ? ['gemini-flash-latest'] : []), ...(models?.filter((m) => /latest|flash|mini|haiku|instant|small|8b|lite/i.test(m)) ?? [])])].filter((m) => m !== ai.model).slice(0, 6);
     return out(false, { ...diagnose(e, ai), error: detail(e), suggestions: sugg });
   }
 }));
@@ -399,7 +421,7 @@ analytics.post('/ai/test', allow('manageSettings'), h(async (req) => {
 /** Models the provider offers to this key (so nobody has to type a model name). */
 analytics.post('/ai/models', allow('manageSettings'), h(async (req) => {
   const ai = await aiFrom(req.user.company_id, req.body);
-  try { return { ok: true, models: (await listModels(ai)).slice(0, 400) }; }
+  try { const models = (await listModels(ai)).slice(0, 400); return { ok: true, models, endpoint: isGemini(ai) ? `${GEMINI}/v1beta/models` : ai.baseUrl, ...(models.length ? {} : { sample: lastListSample }) }; }
   catch (e: any) { return { ok: false, models: [], ...diagnose(e, ai), error: detail(e) }; }
 }));
 
