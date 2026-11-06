@@ -4,7 +4,7 @@ import { objectDef, roleAllows, fieldAccess, DEFAULT_PICKLISTS, type FieldDef, t
 export interface Me {
   user: { id: number; name: string; email: string; role: string };
   role: RoleDef;
-  company: { id: number; name: string; stateCode: string; logo?: string };
+  company: { id: number; name: string; stateCode: string; logo?: string; theme?: { primary?: string; sidebar?: string; accent?: string } };
   security?: { totpEnabled: boolean; required: boolean; idleMinutes?: number; idleWarnAfter?: number };
 }
 export interface Meta {

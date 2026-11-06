@@ -2,14 +2,15 @@ import { type ComponentType } from 'react';
 import { NavLink as RLink, useLocation, useNavigate } from 'react-router-dom';
 import { ActionIcon, Popover, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
-import { IconChevronRight, IconStarFilled, IconStar, IconClockHour4, IconX, IconUsers, IconFileText, IconLayoutList, IconFile, IconClipboardCheck } from '@tabler/icons-react';
+import { IconBriefcase, IconChevronRight, IconCoinRupee, IconFlask, IconSettings, IconStarFilled, IconStar, IconClockHour4, IconX, IconUsers, IconFileText, IconLayoutList, IconFile, IconClipboardCheck } from '@tabler/icons-react';
 import { useFavs, useRecent, type Fav } from '../favorites';
 import { useDragReorder, moveItem } from './useDragReorder';
 
 export type NavItem = { label: string; to: string; tab: string; icon: ComponentType<{ size?: number | string; stroke?: number | string }>; section?: string };
 /** Accent per section: icon tint of the active item and the section marker. */
-export const SECTION_COLOR: Record<string, string> = { 'Sales & CRM': '#7a5af8', Laboratory: '#0e9384', Accounts: '#dc6803', Administration: '#475467' };
+export const SECTION_COLOR: Record<string, string> = { 'Sales & CRM': '#9b8afb', Laboratory: '#2ed3b7', Accounts: '#fdb022', Administration: '#98a2b3' };
 
+export const SECTION_ICON: Record<string, ComponentType<{ size?: number | string; color?: string }>> = { 'Sales & CRM': IconBriefcase, Laboratory: IconFlask, Accounts: IconCoinRupee, Administration: IconSettings };
 const KIND_ICON: Record<string, ComponentType<{ size?: number | string }>> = { client: IconUsers, document: IconFileText, listview: IconLayoutList, workorder: IconClipboardCheck, page: IconFile };
 
 export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean; all: NavItem[] }) {
@@ -27,10 +28,9 @@ export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean;
 
   const link = (n: NavItem) => {
     const active = isActive(n);
-    const color = n.section ? SECTION_COLOR[n.section] : '#2a78d6';
     return (
       <Tooltip key={n.to} label={n.label} position="right" disabled={!mini} withArrow>
-        <RLink to={n.to} className={`sn-link${active ? ' active' : ''}${mini ? ' mini' : ''}`} style={{ ['--acc' as string]: color }} aria-current={active ? 'page' : undefined}>
+        <RLink to={n.to} className={`sn-link${active ? ' active' : ''}${mini ? ' mini' : ''}`} aria-current={active ? 'page' : undefined}>
           <span className="sn-ic"><n.icon size={18} stroke={1.75} /></span>
           {!mini && <span className="sn-label">{n.label}</span>}
         </RLink>
@@ -52,7 +52,7 @@ export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean;
     const active = loc.pathname + loc.search === f.ref || loc.pathname === f.ref;
     return (
       <div key={f.id} {...dnd.rowProps(i)} className={`sn-fav ${dnd.rowProps(i).className ?? ''}`}>
-        <RLink to={f.ref} className={`sn-link${active ? ' active' : ''}`} style={{ ['--acc' as string]: '#d97706' }} title={f.sub ? `${f.label} · ${f.sub}` : f.label}>
+        <RLink to={f.ref} className={`sn-link${active ? ' active' : ''}`} title={f.sub ? `${f.label} · ${f.sub}` : f.label}>
           <span className="sn-ic" {...dnd.handleProps(i)} style={{ ...dnd.handleProps(i).style, cursor: 'grab' }}><Ic size={17} /></span>
           <span className="sn-label">{f.label}{f.sub && <span className="sn-sub">{f.sub}</span>}</span>
         </RLink>
@@ -64,7 +64,7 @@ export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean;
   if (mini) return (
     <div className="sn mini">
       <Popover position="right-start" shadow="lg" width={260} withArrow>
-        <Popover.Target><Tooltip label="Favourites" position="right" withArrow><UnstyledButton className="sn-link mini" style={{ ['--acc' as string]: '#d97706' }}><span className="sn-ic"><IconStarFilled size={18} color="#f5b301" /></span></UnstyledButton></Tooltip></Popover.Target>
+        <Popover.Target><Tooltip label="Favourites" position="right" withArrow><UnstyledButton className="sn-link mini"><span className="sn-ic"><IconStarFilled size={18} color="#f5b301" /></span></UnstyledButton></Tooltip></Popover.Target>
         <Popover.Dropdown p={6}>
           <Text size="xs" fw={650} c="dimmed" px={8} py={4}>FAVOURITES</Text>
           {favList.length ? favList.map((f) => { const Ic = iconFor(f); return <UnstyledButton key={f.id} className="sn-link" onClick={() => nav(f.ref)}><span className="sn-ic"><Ic size={17} /></span><span className="sn-label">{f.label}</span></UnstyledButton>; })
@@ -85,7 +85,7 @@ export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean;
       {recent.length > 0 && <>
         {head('Recent', 'Recently viewed', <IconClockHour4 size={12} />, recent.length)}
         {open.Recent !== false && recent.map((r) => { const Ic = KIND_ICON[r.kind] ?? IconFile; return (
-          <RLink key={r.to} to={r.to} className="sn-link" style={{ ['--acc' as string]: '#2a78d6' }} title={r.sub ? `${r.label} · ${r.sub}` : r.label}>
+          <RLink key={r.to} to={r.to} className="sn-link" title={r.sub ? `${r.label} · ${r.sub}` : r.label}>
             <span className="sn-ic"><Ic size={16} /></span><span className="sn-label">{r.label}{r.sub && <span className="sn-sub">{r.sub}</span>}</span>
           </RLink>); })}
       </>}
@@ -97,7 +97,7 @@ export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean;
         const shown = here || open[g] !== false;
         return (
           <div key={g} className="sn-group">
-            {head(g, g, <span className="sn-dot" style={{ background: SECTION_COLOR[g] }} />, list.length)}
+            {head(g, g, (() => { const Ic = SECTION_ICON[g]; return Ic ? <span className="sn-head-ic"><Ic size={13} color={SECTION_COLOR[g]} /></span> : <span className="sn-dot" style={{ background: SECTION_COLOR[g] }} />; })(), list.length)}
             {shown && list.map(link)}
           </div>
         );

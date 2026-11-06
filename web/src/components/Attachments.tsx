@@ -15,7 +15,7 @@ export function FilePreview({ name, mime, url, blob, onClose, footer, info }: { 
   const src = useMemo(() => (blob ? URL.createObjectURL(blob) : url ?? ''), [blob, url]);
   useEffect(() => () => { if (blob) URL.revokeObjectURL(src); }, [src]);
   return (
-    <Modal opened onClose={onClose} size="80rem" title={<Group gap={8}>{isPdf(mime, name) ? <IconFileTypePdf size={18} color="#d92d20" /> : <IconPhoto size={18} color="#2a78d6" />}<Text fw={600} truncate maw={600}>{name}</Text>{info}</Group>}>
+    <Modal opened onClose={onClose} size="80rem" title={<Group gap={8}>{isPdf(mime, name) ? <IconFileTypePdf size={18} color="#d92d20" /> : <IconPhoto size={18} color="var(--brand)" />}<Text fw={600} truncate maw={600}>{name}</Text>{info}</Group>}>
       <Stack>
         <div className="file-preview">
           {isPdf(mime, name) ? <PdfPages src={src} blob={blob} />
@@ -104,7 +104,7 @@ export function Attachments({ entity, entityId, kind, title, readOnly, emptyText
         {files.map((f) => (
           <Group key={f.id} justify="space-between" wrap="nowrap" className="att-row">
             <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-              {isPdf(f.mime, f.name) ? <IconFileTypePdf size={18} color="#d92d20" /> : isImg(f.mime) ? <IconPhoto size={18} color="#2a78d6" /> : <IconFile size={18} color="#667085" />}
+              {isPdf(f.mime, f.name) ? <IconFileTypePdf size={18} color="#d92d20" /> : isImg(f.mime) ? <IconPhoto size={18} color="var(--brand)" /> : <IconFile size={18} color="#667085" />}
               <div style={{ minWidth: 0 }}>
                 <Anchor size="sm" onClick={() => setView(f)} truncate style={{ display: 'block' }}>{f.name}</Anchor>
                 <Text size="xs" c="dimmed">{kb(f.size)} · {f.uploaded_by_name ? `${f.uploaded_by_name} · ` : ''}{new Date(f.created_at).toLocaleDateString('en-IN')}{f.archived_at ? ' · archived' : ''}</Text>

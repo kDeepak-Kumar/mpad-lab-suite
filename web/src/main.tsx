@@ -11,6 +11,7 @@ import '@mantine/spotlight/styles.css';
 import './styles.css';
 import { App } from './App';
 import { watchVersion } from './version';
+import { applyBrand, shades, storedBrand, useBrand } from './brand';
 
 watchVersion();
 
@@ -23,12 +24,10 @@ const combobox = {
   classNames: { dropdown: 'cbx-dropdown', option: 'cbx-option' },
 };
 
-const theme = createTheme({
+const base = {
   primaryColor: 'brand',
-  colors: {
-    brand: ['#eef5fd', '#dbe9fb', '#b6d2f6', '#8db9f0', '#5f9be6', '#3d86df', '#2a78d6', '#2165b8', '#1d5598', '#18467c'],
-  },
-  primaryShade: 6,
+  autoContrast: true,
+  primaryShade: 6 as const,
   fontFamily: '"Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   headings: { fontFamily: '"Inter Variable", Inter, system-ui, sans-serif', fontWeight: '650' },
   defaultRadius: 'md',
@@ -43,10 +42,14 @@ const theme = createTheme({
     Badge: { defaultProps: { radius: 'sm' } },
     Tooltip: { defaultProps: { withArrow: true, openDelay: 250 } },
   },
-});
+};
+applyBrand(storedBrand(), false); // last known company colours, before the first paint
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+/** Company colours can change at runtime (Settings → Company → Branding colours). */
+function Root() {
+  const b = useBrand();
+  const theme = React.useMemo(() => createTheme({ ...base, colors: { brand: shades(b.primary) } }), [b.primary]);
+  return (
     <MantineProvider theme={theme}>
       <Notifications position="top-right" limit={4} />
       <BrowserRouter>
@@ -55,5 +58,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </ErrorBoundary>
       </BrowserRouter>
     </MantineProvider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <Root />
   </React.StrictMode>,
 );

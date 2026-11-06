@@ -8,6 +8,8 @@ import { useSearchParams } from 'react-router-dom';
 import { DEFAULT_NUMBERING, INDIAN_STATES, formatNumber, isEmailList, WA_TEMPLATES, WA_PLACEHOLDERS, fillWa } from '@suite/shared';
 import { api, fileToDataUrl, ok, useApi, localToday } from '../../api';
 import { PageHeader, Loading } from '../../components/ui';
+import { BrandColours } from '../../components/BrandColours';
+import { applyBrand } from '../../brand';
 
 const NUM_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Invoice', workorder: 'Work order', sample: 'Sample job code', ulr: 'ULR number', report: 'Test report', receipt: 'Payment receipt' };
 
@@ -63,7 +65,7 @@ export function CompanySettings() {
     const changed = Object.fromEntries([...edited].map((k) => [k, v[k] ?? null]));
     if (!Object.keys(changed).length) return;
     setSaving(true);
-    try { await api('/company', { method: 'PUT', body: changed }); setEdited(new Set()); setData(v); ok('Settings saved'); }
+    try { await api('/company', { method: 'PUT', body: changed }); if (changed.theme) applyBrand(changed.theme); setEdited(new Set()); setData(v); ok('Settings saved'); }
     finally { setSaving(false); }
   };
   const img = (label: string, key: string, hint: string) => (
@@ -116,6 +118,7 @@ export function CompanySettings() {
             {img('Accreditation symbol', 'accreditationLogo', 'Printed on reports for accredited tests. Follow the accreditation body’s rules for its use.')}
             {img('Company seal / stamp', 'seal', 'Applied automatically when a document is signed and issued')}
           </SimpleGrid>
+          <BrandColours value={v.theme} logo={v.logo} onChange={(t) => set('theme', t)} />
           <Text size="xs" c="dimmed" mt="sm">Signatures are managed under the Signatories tab (or per user under Users & roles).</Text>
           <Paper withBorder p="sm" mt="md">
             <Text size="sm" fw={600}>Sign-in page</Text>

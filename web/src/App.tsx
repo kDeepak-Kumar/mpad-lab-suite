@@ -9,6 +9,7 @@ import {
   IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
+import { applyBrand } from './brand';
 import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
@@ -114,6 +115,7 @@ function Shell() {
   const nav = useNavigate();
   const loc = useLocation();
   useEffect(close, [loc.pathname]);
+  useEffect(() => { applyBrand(me.company.theme); }, [JSON.stringify(me.company.theme ?? null)]);
   const { data: dash } = useApi<any>('/dashboard');
   const items = NAV.filter((n) => hasTab(me, n.tab));
   const logout = () => signOut();
@@ -149,15 +151,14 @@ function Shell() {
 
   const width = mini ? 68 : 252;
   return (
-    <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' }, navbar: { borderRight: '1px solid var(--line)' }, header: { borderBottom: '1px solid var(--line)' } }}>
+    <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' },  header: { borderBottom: '1px solid var(--line)' } }}>
       <IdleGuard minutes={me.security?.idleMinutes ?? 10} warnAfter={me.security?.idleWarnAfter ?? 7} />
       <AppShell.Header className="no-print">
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
             <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={() => setMini(!mini)}>{mini ? <IconLayoutSidebarLeftExpand size={20} /> : <IconLayoutSidebarLeftCollapse size={20} />}</ActionIcon>
-            {me.company.logo && <img src={me.company.logo} alt="" style={{ height: 30 }} />}
-            <Text fw={700} size="sm" visibleFrom="xs" lineClamp={1}>{me.company.name}</Text>
+            <Group gap="xs" hiddenFrom="sm" wrap="nowrap">{me.company.logo && <img src={me.company.logo} alt="" style={{ height: 28 }} />}<Text fw={700} size="sm" visibleFrom="xs" lineClamp={1}>{me.company.name}</Text></Group>
           </Group>
           <UnstyledButton onClick={() => spotlight.open()} visibleFrom="sm" style={{ border: '1px solid #d0d5dd', borderRadius: 8, padding: '6px 10px', width: 360, background: '#f9fafb' }}>
             <Group justify="space-between"><Group gap={8}><IconSearch size={16} color="#667085" /><Text size="sm" c="dimmed">Search, create or ask AI…</Text></Group><Kbd size="xs">Ctrl K</Kbd></Group>
@@ -178,11 +179,15 @@ function Shell() {
         </Group>
       </AppShell.Header>
       <AppShell.Navbar className="no-print sn-shell">
-        <AppShell.Section grow component={ScrollArea} px={8} pt={8}><SideNav items={items} mini={mini} all={NAV} /></AppShell.Section>
+        <AppShell.Section className={`sn-brand${mini ? ' mini' : ''}`}>
+          {me.company.logo ? <img src={me.company.logo} alt="" /> : null}
+          {!mini && <div style={{ minWidth: 0 }}><div className="sn-brand-name">{me.company.name}</div><div className="sn-brand-sub">Lab Suite</div></div>}
+        </AppShell.Section>
+        <AppShell.Section grow component={ScrollArea} px={8} pt={0}><SideNav items={items} mini={mini} all={NAV} /></AppShell.Section>
         <AppShell.Section className="sn-foot">
           <UnstyledButton className={`sn-user${mini ? ' mini' : ''}`} onClick={() => nav('/account')}>
-            <Avatar color="brand" radius="xl" size={30}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar>
-            {!mini && <div style={{ minWidth: 0, flex: 1 }}><Text size="sm" fw={600} truncate>{me.user.name}</Text><Text size="xs" c="dimmed" truncate>{me.role.label}</Text></div>}
+            <Avatar radius="xl" size={30} styles={{ root: { background: 'var(--sn-acc)' }, placeholder: { background: 'transparent', color: 'var(--sn-acc-ink)', fontWeight: 700 } }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar>
+            {!mini && <div style={{ minWidth: 0, flex: 1 }}><Text size="sm" fw={600} truncate>{me.user.name}</Text><Text size="xs" className="sn-user-role" truncate>{me.role.label}</Text></div>}
           </UnstyledButton>
           {!mini && <Tooltip label="Collapse sidebar"><ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={() => setMini(true)}><IconLayoutSidebarLeftCollapse size={18} /></ActionIcon></Tooltip>}
         </AppShell.Section>

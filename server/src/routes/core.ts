@@ -21,7 +21,7 @@ core.get('/auth/me', h(async (req) => {
   const company = await getCompany(req.user.company_id);
   const { roleDef, ...user } = req.user;
   const u = await db('users').where({ id: req.user.id }).first('totp_enabled');
-  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo }, security: { totpEnabled: Boolean(u?.totp_enabled), required: Boolean((company as any).security?.require2fa), idleMinutes: Number((company as any).security?.idleMinutes ?? 10), idleWarnAfter: Number((company as any).security?.idleWarnAfter ?? 7) } };
+  return { user, role: roleDef, company: { id: company.id, name: company.name, stateCode: company.stateCode, logo: company.logo, theme: (company as any).theme ?? null }, security: { totpEnabled: Boolean(u?.totp_enabled), required: Boolean((company as any).security?.require2fa), idleMinutes: Number((company as any).security?.idleMinutes ?? 10), idleWarnAfter: Number((company as any).security?.idleWarnAfter ?? 7) } };
 }));
 
 // ---------- email alerts (SLA / calibration) ----------

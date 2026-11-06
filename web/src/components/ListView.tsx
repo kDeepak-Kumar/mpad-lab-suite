@@ -301,7 +301,7 @@ function FieldsModal({ columns, visible, defaults, onClose, onApply }: { columns
           <Text size="xs" fw={650} c="dimmed" mb={6}>AVAILABLE FIELDS</Text>
           <TextInput size="xs" placeholder="Search fields" leftSection={<IconSearch size={13} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} mb={6} />
           <ScrollArea h={340} className="lv-fieldbox">
-            {avail.map((c) => <UnstyledButton key={c.key} className="lv-field" onClick={() => setV([...v, c.key])}><Text size="sm" style={{ flex: 1 }}>{c.label}</Text><IconPlus size={14} color="#2a78d6" /></UnstyledButton>)}
+            {avail.map((c) => <UnstyledButton key={c.key} className="lv-field" onClick={() => setV([...v, c.key])}><Text size="sm" style={{ flex: 1 }}>{c.label}</Text><IconPlus size={14} color="var(--brand)" /></UnstyledButton>)}
             {!avail.length && <Text size="xs" c="dimmed" p="sm">All fields are shown.</Text>}
           </ScrollArea>
         </div>
