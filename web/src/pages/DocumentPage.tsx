@@ -19,6 +19,7 @@ import { HeaderFields } from '../doc/HeaderFields';
 import { FitWidth } from '../doc/FitWidth';
 import { ClientForm } from './Clients';
 import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
+import { PagePlanOverlay } from '../doc/PagePlanOverlay';
 
 const KIND_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Tax invoice', report: 'Test report' };
 const PATHS: Record<string, { key: string; label: string }[]> = {
@@ -227,6 +228,7 @@ function DocumentView({ id }: { id: number }) {
               <DocRenderer template={template} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
                 issuer={doc.issuer} onSealMove={!issued && data.sealPos ? (pos) => placeSeal(pos) : undefined} verifyUrl={doc.verify ? `${window.location.origin}/verify/${doc.verify}` : null} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
             </FitWidth></div>
+            <PagePlanOverlay rootRef={printRef} />
           </div>
         </Grid.Col>
       </Grid>

@@ -66,9 +66,14 @@ export function DocRenderer(p: RenderInput) {
     company: { ...p.company, accreditationText: p.company.accreditation?.certNo },
     doc: { ...p.data, number: p.number }, template: { docControl: t.docControl ?? '' },
   };
+  // uploaded letterhead images sit a few mm from the paper edge: the page's own top / bottom padding becomes that distance
+  const lhProf = t.page.letterheadMode ? null : letterhead(p.company, p.data);
+  const imgTop = lhProf?.mode === 'image' && lhProf.headerImage && t.blocks.some((b) => b.type === 'letterhead' && b.visible);
+  const imgBottom = lhProf?.mode === 'image' && lhProf.footerImage && t.blocks.some((b) => b.type === 'footer' && b.visible);
+  const m = t.page.marginMm, edge = edgeMm(lhProf);
   const page: CSSProperties = {
     width: t.page.orientation === 'landscape' ? '297mm' : '210mm', minHeight: t.page.orientation === 'landscape' ? '210mm' : '297mm',
-    padding: `${t.page.marginMm}mm`, fontFamily: t.page.fontFamily, fontSize: `${t.page.fontSize}pt`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
+    padding: `${imgTop ? Math.min(edge, m) : m}mm ${m}mm ${imgBottom ? Math.min(edge, m) : m}mm`, fontFamily: t.page.fontFamily, fontSize: `${t.page.fontSize}pt`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
   };
   return (
     <div className="doc-page" style={{ ...page, position: 'relative' }}>
@@ -99,7 +104,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       if (lh) return <div style={{ height: '32mm' }} />;
       const prof = letterhead(c, d);
       // uploaded letterhead: placed from the paper edge (not inside the page margin), full printable width
-      if (prof?.mode === 'image' && prof.headerImage) { const out = Math.max(0, p.template.page.marginMm - edgeMm(prof)); return <img src={prof.headerImage} alt="" className="doc-lh-img" style={{ width: `calc(100% + ${2 * out}mm)`, margin: `-${out}mm -${out}mm 3mm`, display: 'block', maxWidth: 'none' }} />; }
+      if (prof?.mode === 'image' && prof.headerImage) { const out = Math.max(0, p.template.page.marginMm - edgeMm(prof)); return <img src={prof.headerImage} alt="" className="doc-lh-img" style={{ width: `calc(100% + ${2 * out}mm)`, margin: `0 -${out}mm 3mm`, display: 'block', maxWidth: 'none' }} />; }
       const showAcc = prof ? prof.showAccreditation !== false && d.accreditation === 'NABL' : pr.showAccreditation;
       return (
         <div style={{ borderBottom: `2px solid ${accent}`, paddingBottom: 6, marginBottom: 8 }}>
@@ -215,7 +220,8 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
       if (!p.totals || rateOnly(p.kind, d)) return null;
       return <div style={{ textAlign: 'center', border: '1px solid #333', borderTop: 0, padding: 4 }}><div>{pr.label}</div><div>( {amountInWords(p.totals.total)} )</div></div>;
     case 'notes': {
-      const notes: string[] = Array.isArray(d.notes) ? d.notes : String(d.notes ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+      // the list numbers the notes itself, so drop numbers typed in the text ("1. …", "2) …")
+      const notes: string[] = (Array.isArray(d.notes) ? d.notes : String(d.notes ?? '').split('\n')).map((s: string) => String(s).trim().replace(/^\(?\d{1,2}[.)]\s+/, '')).filter(Boolean);
       if (!notes.length) return null;
       return (
         <div style={{ marginTop: 8, fontSize: p.kind === 'report' ? '8.5pt' : undefined }}>
@@ -251,7 +257,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     case 'footer': {
       if (lh) return <div style={{ height: '18mm' }} />;
       const prof = letterhead(c, d);
-      if (prof?.mode === 'image' && prof.footerImage) { const out = Math.max(0, p.template.page.marginMm - edgeMm(prof)); return <img src={prof.footerImage} alt="" className="doc-lh-img" style={{ width: `calc(100% + ${2 * out}mm)`, margin: `3mm -${out}mm -${out}mm`, display: 'block', maxWidth: 'none' }} />; }
+      if (prof?.mode === 'image' && prof.footerImage) { const out = Math.max(0, p.template.page.marginMm - edgeMm(prof)); return <img src={prof.footerImage} alt="" className="doc-lh-img" style={{ width: `calc(100% + ${2 * out}mm)`, margin: `3mm -${out}mm 0`, display: 'block', maxWidth: 'none' }} />; }
       return (
         <div style={{ borderTop: `1px solid ${accent}`, marginTop: 10, paddingTop: 4, textAlign: 'center', fontSize: '9pt', color: accent }}>
           <div>Contact : {c.phone} | Email: {c.email}{c.website ? `, Website: ${c.website}` : ''}</div>
@@ -364,7 +370,8 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     }
     case 'remarks':
       if (!d.remarks) return null;
-      return <div style={{ border: '1px solid #333', borderTop: 0, padding: '3px 6px', fontWeight: 700 }}>{pr.label} {d.remarks}</div>;
+      // one element per line, so long remarks can continue on the next page between lines
+      return <div style={{ border: '1px solid #333', borderTop: 0, padding: '3px 6px', fontWeight: 700 }}>{String(d.remarks).split('\n').map((line, i) => <div key={i} className="doc-line">{i === 0 ? `${pr.label ?? ''} ${line}` : line}</div>)}</div>;
     case 'charts':
       if (!(d.charts ?? []).length) return null;
       return d.hideCharts || (d.details ?? []).some((x: any) => x.charts?.length) ? null : <ChartList charts={d.charts} />;

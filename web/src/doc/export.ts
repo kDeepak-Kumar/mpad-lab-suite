@@ -1,75 +1,84 @@
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
+import { measureDoc, planPages, type DocLayout } from './paginate';
+export { measureDocTrueSize } from './paginate';
 
 const pageEl = (root: HTMLElement) => (root.querySelector('.doc-page') as HTMLElement) ?? root;
 /** 300 dpi across an A4 page: 210 mm = 8.27 in → 2480 px. */
 const PRINT_WIDTH_PX = 2480;
 const A4 = { w: 210, h: 297 };
 
-interface Layout { width: number; height: number; headerBottom: number; footerTop: number; breaks: number[] }
+/** The page captured in horizontal bands (browsers refuse very tall pictures; iPhones limit picture area too). */
+const BAND_CSS_PX = 1900; // × 3.12 ≈ 5,900 px tall × 2,480 px wide ≈ 14.6 MP per band
+interface Snapshot { layout: DocLayout; scale: number; band: (i: number) => Promise<HTMLImageElement> }
 
-/** Positions (CSS px from the top of the page) used to split long documents into A4 pages at clean points. */
-function measure(el: HTMLElement): Layout {
-  const top = el.getBoundingClientRect().top;
-  const y = (n: Element, edge: 'top' | 'bottom') => n.getBoundingClientRect()[edge] - top;
-  const head = el.querySelector('[data-block="letterhead"]'), foot = el.querySelector('[data-block="footer"]');
-  const height = el.offsetHeight;
-  const headerBottom = head ? Math.ceil(y(head, 'bottom')) : 0;
-  const footerTop = foot ? Math.floor(y(foot, 'top')) : height;
-  const breaks = new Set<number>();
-  // +2 px keeps a table row's bottom border on the page it belongs to
-  el.querySelectorAll('[data-block], tr, li, p, .md-p, h1, h2, h3').forEach((n) => { const b = Math.ceil(y(n, 'bottom')) + 2; if (b > headerBottom && b < footerTop) breaks.add(b); });
-  return { width: el.offsetWidth, height, headerBottom, footerTop, breaks: [...breaks].sort((a, b) => a - b) };
-}
-
-async function snapshot(root: HTMLElement): Promise<{ url: string; layout: Layout; scale: number }> {
+async function snapshot(root: HTMLElement): Promise<{ snap: Snapshot; restore: () => void }> {
   const el = pageEl(root);
   const zoomEl = el.closest('.doc-zoom') as HTMLElement | null;
   const prevZoom = zoomEl?.style.zoom ?? '';
   if (zoomEl) zoomEl.style.zoom = '1';
   el.classList.add('exporting');
+  const restore = () => { el.classList.remove('exporting'); if (zoomEl) zoomEl.style.zoom = prevZoom; };
   try {
     await document.fonts?.ready;
     await Promise.all([...el.querySelectorAll('img')].map((i) => (i.complete ? null : new Promise((r) => { i.onload = r; i.onerror = r; }))));
-    const layout = measure(el);
+    const layout = measureDoc(el);
     const scale = PRINT_WIDTH_PX / layout.width; // HD: 300 dpi on A4
-    const url = await toPng(el, { pixelRatio: scale, backgroundColor: '#ffffff', filter: (n) => !(n instanceof HTMLElement && (n.classList.contains('no-print') || n.classList.contains('doc-watermark-hide'))) });
-    return { url, layout, scale };
-  } finally { el.classList.remove('exporting'); if (zoomEl) zoomEl.style.zoom = prevZoom; }
+    const cache = new Map<number, Promise<HTMLImageElement>>();
+    const filter = (n: Node) => !(n instanceof HTMLElement && (n.classList.contains('no-print') || n.classList.contains('doc-watermark-hide')));
+    const band = (i: number) => {
+      if (!cache.has(i)) {
+        const top = i * BAND_CSS_PX, h = Math.min(BAND_CSS_PX, layout.height - top);
+        cache.set(i, toPng(el, { pixelRatio: scale, backgroundColor: '#ffffff', width: layout.width, height: h, filter,
+          style: { transform: `translateY(-${top}px)`, transformOrigin: 'top left', margin: '0', boxShadow: 'none' } }).then(load)
+          .then((img) => { console.info(`[export] band ${i} ${img.width}x${img.height} expected ${Math.round(layout.width * scale)}x${Math.round(h * scale)}`); return img; }));
+      }
+      return cache.get(i)!;
+    };
+    return { snap: { layout, scale, band }, restore };
+  } catch (e) { restore(); throw e; }
 }
 const load = (src: string) => new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+/** Copy the page region [y0, y1) (CSS px) to the canvas at destination y (canvas px), scaled to width dw. */
+async function drawRegion(g: CanvasRenderingContext2D, s: Snapshot, y0: number, y1: number, dx: number, dy: number, dw: number) {
+  const k = dw / s.layout.width; // canvas px per CSS px for this draw
+  for (let i = Math.floor(y0 / BAND_CSS_PX); i * BAND_CSS_PX < y1; i++) {
+    const bTop = i * BAND_CSS_PX, a = Math.max(y0, bTop), b = Math.min(y1, bTop + BAND_CSS_PX);
+    if (b <= a) continue;
+    const img = await s.band(i);
+    const sx = img.width / s.layout.width; // actual picture px per CSS px (never assume)
+    g.drawImage(img, 0, (a - bTop) * sx, img.width, (b - a) * sx, dx, dy + (a - y0) * k, dw, (b - a) * k);
+  }
+}
 
 /**
  * The document as A4 page images at 300 dpi. A long document is split at row / block boundaries, and the
  * letterhead (header) and footer are repeated on every page, with "Page x of y".
  */
 export async function pageImages(root: HTMLElement): Promise<HTMLCanvasElement[]> {
-  const { url, layout: L, scale } = await snapshot(root);
-  const img = await load(url);
-  const pageH = (L.width * A4.h) / A4.w; // CSS px of one A4 page
-  const px = (v: number) => Math.round(v * scale);
-  const newPage = () => { const c = document.createElement('canvas'); c.width = px(L.width); c.height = px(pageH); const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.imageSmoothingQuality = 'high'; return { c, g }; };
-  if (L.height <= pageH + 2) { // fits on one page
-    const { c, g } = newPage(); g.drawImage(img, 0, 0, img.width, Math.min(img.height, c.height), 0, 0, img.width, Math.min(img.height, c.height)); return [c];
-  }
-  const headH = L.headerBottom, footH = L.height - L.footerTop;
-  const avail = Math.max(pageH * 0.3, pageH - headH - footH - 18); // 18 px for the page number line
-  const slices: [number, number][] = [];
-  for (let start = L.headerBottom; start < L.footerTop - 1;) {
-    const limit = start + avail;
-    let end = L.footerTop;
-    if (limit < L.footerTop) { const ok = L.breaks.filter((b) => b > start + 40 && b <= limit); end = ok.length ? ok[ok.length - 1] : limit; }
-    slices.push([start, end]); start = end;
-  }
-  return slices.map(([a, b], i) => {
-    const { c, g } = newPage();
-    if (headH) g.drawImage(img, 0, 0, img.width, px(headH), 0, 0, img.width, px(headH));
-    g.drawImage(img, 0, px(a), img.width, px(b - a), 0, px(headH), img.width, px(b - a));
-    if (footH) g.drawImage(img, 0, px(L.footerTop), img.width, px(footH), 0, c.height - px(footH), img.width, px(footH));
-    g.fillStyle = '#444'; g.font = `${px(9)}px "Times New Roman", serif`; g.textAlign = 'right';
-    g.fillText(`Page ${i + 1} of ${slices.length}`, c.width - px(L.width * 0.06), c.height - px(footH) - px(5));
-    return c;
-  });
+  const { snap, restore } = await snapshot(root);
+  try {
+    const L = snap.layout, plan = planPages(L), k = snap.scale;
+    const W = Math.round(L.width * k), H = Math.round(plan.pageH * k);
+    const many = plan.slices.length > 1;
+    const out: HTMLCanvasElement[] = [];
+    for (const [i, [a, b]] of plan.slices.entries()) {
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.imageSmoothingQuality = 'high';
+      if (plan.headH) await drawRegion(g, snap, 0, plan.headH, 0, 0, W);
+      let y = plan.headH * k;
+      const rh = plan.repeatHead[i]; // table continued from the previous page: repeat its column headings
+      if (rh) { await drawRegion(g, snap, rh[0], rh[1], 0, y, W); y += (rh[1] - rh[0]) * k; }
+      // body: full size, or very slightly reduced (centred) so that a just-too-long report stays on one page
+      const sw = W * plan.scale;
+      await drawRegion(g, snap, a, b, (W - sw) / 2, y, sw);
+      if (plan.footH) await drawRegion(g, snap, L.footerTop, L.height, 0, H - plan.footH * k, W);
+      if (many) { g.fillStyle = '#444'; g.font = `${Math.round(9 * k)}px "Times New Roman", serif`; g.textAlign = 'right'; g.fillText(`Page ${i + 1} of ${plan.slices.length}`, W - L.width * 0.06 * k, H - (plan.footH + 5) * k); }
+      out.push(c);
+    }
+    return out;
+  } finally { restore(); }
 }
 
 /** A4 PDF at 300 dpi (download, email, WhatsApp, print). */

@@ -61,7 +61,7 @@ table.grid-input th { white-space: normal; min-width: 64px; }
 .lockfield .mantine-Input-section { cursor: pointer; }
 
 /* ---------- printable documents ---------- */
-.doc-stage { background: #e9edf2; padding: 16px; overflow: auto; border-radius: 12px; }
+.doc-stage { background: #e9edf2; padding: 30px 16px 16px; overflow: auto; border-radius: 12px; }
 .doc-page { background: #fff; margin: 0 auto; box-shadow: 0 4px 18px rgba(16,24,40,.12); color: #111; line-height: 1.35; position: relative; }
 .doc-page table { border-collapse: collapse; width: 100%; }
 .doc-page .bx td, .doc-page .bx th { border: 1px solid #333; padding: 3px 6px; vertical-align: middle; }
@@ -351,3 +351,7 @@ body:has(.set-savebar) .asst-fab, body:has(.saving-pill) .asst-fab { bottom: 100
 .chat-compose { padding: 6px 10px 10px; border-top: 1px solid var(--line); background: #fff; }
 @media (max-width: 600px) { .chat-win { right: 12px; bottom: 84px; } }
 @media print { .chat-win { display: none !important; } }
+.doc-pages-badge { position: absolute; top: -24px; right: 0; font: 600 11px/1.6 system-ui, sans-serif; color: #475467; background: #eef2f6; border-radius: 10px; padding: 0 8px; }
+.doc-pages-badge[data-pages="1"] { color: #067647; background: #dcfae6; }
+.doc-page-break { position: absolute; left: -6mm; right: -6mm; border-top: 2px dashed #f79009; pointer-events: none; z-index: 5; }
+.doc-page-break span { position: absolute; right: 0; top: -18px; font: 600 10.5px/1.5 system-ui, sans-serif; color: #b54708; background: #fffaeb; border: 1px solid #fedf89; border-radius: 6px; padding: 0 6px; }
