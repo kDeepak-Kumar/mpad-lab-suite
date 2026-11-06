@@ -9,6 +9,7 @@ import { PageHeader, Kpi } from '../components/ui';
 import { ListView } from '../components/ListView';
 import { compressFile, blobToBase64, type Packed } from '../lib/vendorDocs';
 import { FilePreview, UploadPreview, kb } from '../components/Attachments';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export const CATEGORIES = [
   { value: 'subcontract', label: 'Sub-contracted testing', color: 'grape' }, { value: 'equipment', label: 'Equipment', color: 'blue' },
@@ -121,8 +122,10 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
         {v.id && <PaymentsList bill={v} onChange={() => undefined} />}
         <Group justify="space-between">
           {v.id ? <Button variant="subtle" color="red" onClick={async () => { if (window.confirm('Delete this bill?')) { await api(`/purchases/${v.id}`, { method: 'DELETE' }); onClose(true); } }}>Delete</Button> : <span />}
+          {v.id ? <AdminDelete object="purchase" id={v.id} compact onDeleted={() => onClose(true)} /> : null}
           <Button loading={Boolean(busy)} onClick={save} disabled={!v.vendor_id || !v.bill_no || !v.bill_date || v.taxable === '' || v.taxable === undefined}>{busy || 'Save bill'}</Button>
         </Group>
+        {v.id ? <RecordInfo object="purchase" id={v.id} /> : null}
       </Stack>
       {preview && <UploadPreview packed={preview} onCancel={() => setPreview(null)} onConfirm={() => { setPending(preview); setPreview(null); }} confirmLabel="Use this copy" />}
       {viewing && <FilePreview name={viewing.name} mime={viewing.mime} url={`/api/files/${viewing.id}/download?inline=1`} onClose={() => setViewing(null)} />}
@@ -200,6 +203,7 @@ export function VendorModal({ initial, onClose }: { initial: any; onClose: (id: 
         <Textarea label="Services / tests they do" autosize value={v.services ?? ''} onChange={(e) => setV({ ...v, services: e.currentTarget.value })} placeholder="Cement chemical analysis, water (IS 456 / IS 10500)…" />
         <Textarea label="Address" autosize value={v.address ?? ''} onChange={(e) => setV({ ...v, address: e.currentTarget.value })} />
         {(v.kind ?? 'lab') === 'lab' && !v.nabl_cert && <Alert variant="light" color="orange" p="xs"><Text size="xs">For results that go on your NABL reports, sub-contract only to a laboratory accredited for those tests and record its certificate here.</Text></Alert>}
+        {v.id ? <Group justify="space-between"><RecordInfo object="vendor" id={v.id} /><AdminDelete object="vendor" id={v.id} compact onDeleted={() => onClose(null)} /></Group> : null}
         <Group justify="space-between">{v.id ? <Switch label="Active" checked={v.active !== false && v.active !== 0} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} /> : <span />}<Button onClick={save} disabled={!v.name || v.name.length < 2}>Save vendor</Button></Group>
       </Stack>
     </Modal>

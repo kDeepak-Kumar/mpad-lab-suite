@@ -9,6 +9,7 @@ import { PageHeader, StatusBadge, TypeBadge } from '../components/ui';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
 import { RecordForm, missingRequired } from '../components/RecordForm';
 import { WhatsAppButton, WhatsAppModal } from '../components/WhatsApp';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?: number; client_id?: number; site_id?: number | null; customer_ref?: string; quoteCatalogIds?: number[]; accreditation?: string }; onClose: (saved: boolean) => void }) {
   const me = useMe();
@@ -121,7 +122,9 @@ export function SamplesPage() {
                 ? <Button variant="subtle" color="gray" onClick={async () => { await api(`/samples/${sample.id}/disposal`, { method: 'DELETE' }); reloadSample(); reload(); }}>Undo disposal</Button>
                 : <Button variant="default" onClick={() => setDispose({ date: localToday(), method: 'Discarded as per lab procedure', note: '' })}>Record disposal</Button>)}
               <WhatsAppButton label="Acknowledge on WhatsApp" variant="light" onClick={() => setWaSample(sample)} />
+              <AdminDelete object="sample" id={sample.id} compact onDeleted={() => { setSp({}); reload(); }} />
             </Group>
+            <RecordInfo object="sample" id={sample.id} />
           </Stack>
         )}
       </Modal>

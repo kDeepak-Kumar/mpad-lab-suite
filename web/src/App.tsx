@@ -5,7 +5,7 @@ import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
-  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt,
+  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle,
   IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
@@ -45,6 +45,7 @@ const TemplatesPage = page(() => import('./pages/settings/Templates'), 'Template
 const TemplateDesigner = page(() => import('./pages/settings/Templates'), 'TemplateDesigner');
 const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'), 'ObsTemplateEditor');
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
+const RecycleBinPage = page(() => import('./pages/settings/RecycleBin'), 'RecycleBinPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
 const GstPage = page(() => import('./pages/Gst'), 'GstPage');
@@ -81,6 +82,7 @@ const NAV: NavItem[] = [
   { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate, section: 'Administration' },
   { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog, section: 'Administration' },
   { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustmentsAlt, section: 'Administration' },
+  { label: 'Recycle Bin', to: '/settings/recycle-bin', tab: '__admin', icon: IconRecycle, section: 'Administration' },
 ];
 
 export function App() {
@@ -216,6 +218,7 @@ function Shell() {
             <Route path="/equipment" element={<EquipmentPage />} />
             <Route path="/settings/company" element={<CompanySettings />} />
             <Route path="/settings/users" element={<UsersSettings />} />
+            <Route path="/settings/recycle-bin" element={<RecycleBinPage />} />
             <Route path="/settings/catalog" element={<CatalogSettings />} />
             <Route path="/settings/templates" element={<TemplatesPage />} />
             <Route path="/settings/templates/obs/:code" element={<ObsTemplateEditor />} />

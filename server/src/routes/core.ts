@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { DEFAULT_TEMPLATES, EQUIPMENT_CATEGORIES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
 import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession, zBool } from '../auth';
+import { moveToBin } from '../recycle';
 import { audit, getCompany, ledger } from '../services';
 import { cleanWrite, deleteMeta, getMeta, mergeCustom, saveMeta, stripHidden, type MetaKind } from '../meta';
 
@@ -80,6 +81,15 @@ core.put('/meta/:kind/:key', h(async (req) => {
   if (PERSONAL.includes(kind)) {
     const ex = await db('meta').where({ company_id: req.user.company_id, kind, key: req.params.key }).first('owner_id');
     if (ex && ex.owner_id !== req.user.id && !can(req.user, 'manageCustomization')) throw new HttpError(403, 'This view belongs to someone else. Save it under a new name.');
+  }
+  if (kind === 'listview' && !req.params.key.includes(':__pin')) {
+    // view names are unique per list (among shared views and this user's own views)
+    const name = String(req.body?.name ?? '').trim().toLowerCase();
+    if (!name) throw new HttpError(400, 'Give the view a name');
+    const prefix = req.params.key.split(':')[0] + ':';
+    const others = await db('meta').where({ company_id: req.user.company_id, kind: 'listview' }).where('key', 'like', `${prefix}%`).whereNot('key', req.params.key)
+      .where((q) => q.whereNull('owner_id').orWhere('owner_id', req.user.id)).select('key', 'data');
+    if (others.some((o) => !o.key.includes(':__pin') && String(parseJson<{ name?: string }>(o.data, {}).name ?? '').trim().toLowerCase() === name)) throw new HttpError(409, `A view called “${String(req.body.name).trim()}” already exists for this list. Choose another name.`);
   }
   const { shared: _s, ...data } = req.body ?? {};
   await saveMeta(req.user.company_id, kind, req.params.key, data, PERSONAL.includes(kind) && !shared ? req.user.id : null);
@@ -315,10 +325,7 @@ core.delete('/clients/:id', allow('client.delete'), h(async (req) => {
   if (ex && (await recordAccess(req.user, 'client', ex)) !== 'edit') throw new HttpError(403, 'You can only delete clients you own or can edit');
   const used = await db('documents').where({ client_id: id, company_id: cid }).first() || await db('samples').where({ client_id: id, company_id: cid }).first();
   if (used) throw new HttpError(409, 'This client has quotations, samples or invoices and cannot be deleted');
-  await db('contacts').where({ client_id: id, company_id: cid }).delete();
-  await db('sites').where({ client_id: id, company_id: cid }).delete();
-  await db('clients').where({ id, company_id: cid }).delete();
-  await audit(db, req.user, 'client', id, 'deleted');
+  await moveToBin(req.user, 'client', id);
   return { ok: true };
 }));
 
@@ -393,7 +400,7 @@ core.put('/catalog/:id', allow('catalog.edit'), h(async (req) => {
 core.delete('/catalog/:id', allow('catalog.delete'), h(async (req) => {
   const id = Number(req.params.id), cid = req.user.company_id;
   if (await db('tests').where({ catalog_id: id, company_id: cid }).first()) { await db('catalog').where({ id, company_id: cid }).update({ active: false }); return { ok: true, deactivated: true }; }
-  await db('catalog').where({ id, company_id: cid }).delete();
+  await moveToBin(req.user, 'catalog', id);
   return { ok: true };
 }));
 

@@ -330,7 +330,40 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '010_record_dates_recycle_bin',
+    up: async (k) => {
+      // Last-modified date on every main record, maintained by the database itself (triggers), so no screen can forget it.
+      // A trigger only stamps when the update did not set updated_at itself – that lets System Administrators correct it.
+      const mysql = k.client.config.client === 'mysql2';
+      for (const t of TRACKED_TABLES) {
+        if (!(await k.schema.hasColumn(t, 'updated_at'))) {
+          await k.schema.alterTable(t, (b) => { b.string('updated_at', 32).nullable(); });
+          await k(t).whereNull('updated_at').update({ updated_at: k.ref('created_at') });
+        }
+        try {
+          if (mysql) {
+            await k.raw(`DROP TRIGGER IF EXISTS trg_${t}_upd`);
+            await k.raw(`CREATE TRIGGER trg_${t}_upd BEFORE UPDATE ON ${t} FOR EACH ROW BEGIN IF NEW.updated_at <=> OLD.updated_at THEN SET NEW.updated_at = CONCAT(DATE_FORMAT(UTC_TIMESTAMP(3), '%Y-%m-%dT%H:%i:%s.'), LPAD(FLOOR(MICROSECOND(UTC_TIMESTAMP(3)) / 1000), 3, '0'), 'Z'); END IF; END`);
+          } else {
+            await k.raw(`DROP TRIGGER IF EXISTS trg_${t}_upd`);
+            await k.raw(`CREATE TRIGGER trg_${t}_upd AFTER UPDATE ON ${t} FOR EACH ROW WHEN NEW.updated_at IS OLD.updated_at BEGIN UPDATE ${t} SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = NEW.id; END`);
+          }
+        } catch (e) { console.warn(`[migration] could not create trigger on ${t}: ${(e as Error).message} – last-modified is set by the app instead`); }
+      }
+      if (!(await k.schema.hasTable('recycle_bin'))) await k.schema.createTable('recycle_bin', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('object', 30).notNullable(); t.integer('record_id').unsigned().notNullable();
+        t.string('label', 300); t.text('summary'); t.specificType('snapshot', mysql ? 'longtext' : 'text');
+        t.integer('deleted_by').unsigned().nullable(); t.string('deleted_at', 32); t.string('purge_after', 32); t.string('reason', 500);
+        t.string('restored_at', 32).nullable(); t.integer('restored_by').unsigned().nullable(); t.string('purged_at', 32).nullable();
+        t.index(['company_id', 'deleted_at']);
+      });
+    },
+  },
 ];
+
+/** Tables whose records show Created / Last modified dates (and that admins may correct). */
+export const TRACKED_TABLES = ['clients', 'contacts', 'sites', 'catalog', 'equipment', 'documents', 'samples', 'tests', 'payments', 'work_orders', 'activities', 'vendors', 'outsource_jobs', 'purchases', 'users'];
 
 export async function migrate(k: Knex = db) {
   if (!(await k.schema.hasTable('_migrations'))) {

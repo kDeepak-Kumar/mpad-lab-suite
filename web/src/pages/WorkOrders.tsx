@@ -6,6 +6,7 @@ import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui'
 import { ListView } from '../components/ListView';
 import { useCan } from '../ctx';
 import { NewSampleModal } from './Samples';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export function WorkOrdersPage() {
   const { data, reload } = useApi<any[]>('/workorders');
@@ -60,6 +61,7 @@ export function WorkOrderDetail() {
           {wo.quote && <Button variant="default" onClick={() => nav(`/documents/${wo.quote.id}`)}>Quotation {wo.quote.number}</Button>}
           {can('invoice.create') && <Button variant="default" onClick={invoice}>Invoice tested work</Button>}
           {can('sample.create') && <Button onClick={() => setNewSample(true)}>Register sample</Button>}
+          <AdminDelete object="workorder" id={wo.id} compact onDeleted={() => nav('/workorders')} />
         </>} />
       {quoteLines.length > 0 && (
         <Paper withBorder p="sm" mb="md">
@@ -81,6 +83,7 @@ export function WorkOrderDetail() {
       <SimpleTable head={['Type', 'Number', 'Date', 'Amount', 'Status']} rows={wo.documents.filter((d: any) => d.status !== 'cancelled').map((d: any) => [d.kind, d.number || '(draft)', dmy(d.date), d.total ? `₹${money(d.total)}` : '', <StatusBadge status={d.status} />])}
         onRow={(i) => nav(`/documents/${wo.documents.filter((d: any) => d.status !== 'cancelled')[i].id}`)} />
       {newSample && <NewSampleModal preset={{ work_order_id: wo.id, client_id: wo.client_id, site_id: wo.site_id, customer_ref: wo.customer_ref, quoteCatalogIds: quoteLines.map((l) => l.catalogId).filter(Boolean), accreditation: wo.quote?.data?.accreditation ?? undefined }} onClose={(saved) => { setNewSample(false); if (saved) reload(); }} />}
+      <RecordInfo object="workorder" id={wo.id} />
     </>
   );
 }

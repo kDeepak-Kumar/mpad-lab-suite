@@ -6,6 +6,7 @@ import { api, dmy, money, ok, useApi, localToday } from '../api';
 import { PageHeader } from '../components/ui';
 import { ListView } from '../components/ListView';
 import { useCan, usePicklist } from '../ctx';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export function PaymentsPage() {
   const [sp, setSp] = useSearchParams();
@@ -16,7 +17,8 @@ export function PaymentsPage() {
       <PageHeader title="Payments received" subtitle="Record receipts and TDS against invoices" actions={can('recordPayments') && <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>Record payment</Button>} />
       <ListView id="payments" rows={data} columns={[
         { key: 'number', label: 'Receipt' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'client_name', label: 'Client', filter: 'select' },
-        { key: 'amount', label: 'Amount', type: 'money' }, { key: 'tds', label: 'TDS', type: 'money' }, { key: 'mode', label: 'Mode', filter: 'select' }, { key: 'reference', label: 'Reference' }]} />
+        { key: 'amount', label: 'Amount', type: 'money' }, { key: 'tds', label: 'TDS', type: 'money' }, { key: 'mode', label: 'Mode', filter: 'select' }, { key: 'reference', label: 'Reference' },
+        { key: '_actions', label: '', render: (r) => <AdminDelete object="payment" id={r.id} compact onDeleted={reload} /> }]} />
       {sp.get('new') === '1' && <PaymentModal clientId={sp.get('client')} invoiceId={sp.get('invoice')} onClose={(saved) => { setSp({}); if (saved) reload(); }} />}
     </>
   );

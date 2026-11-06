@@ -4,7 +4,7 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { FavStar } from '../favorites';
 import { moveItem, useDragReorder } from './useDragReorder';
 import { ActionIcon, Badge, Button, Group, Menu, MultiSelect, Pagination, Paper, Popover, ScrollArea, SegmentedControl, Select, SimpleGrid, Stack, Text, TextInput, Tooltip, Modal, UnstyledButton } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconCheck, IconChevronDown, IconColumns3, IconDeviceFloppy, IconDownload, IconFilter, IconGripVertical, IconLayoutKanban, IconLayoutList, IconLayoutRows, IconLock, IconPencil, IconPlus, IconSearch, IconSettings2, IconTable, IconTrash, IconUsersGroup, IconX } from '@tabler/icons-react';
+import { IconArrowDown, IconArrowUp, IconCheck, IconChevronDown, IconColumns3, IconDeviceFloppy, IconDownload, IconFilter, IconGripVertical, IconLayoutKanban, IconLayoutList, IconLayoutRows, IconLock, IconPencil, IconPin, IconPinnedOff, IconPlus, IconSearch, IconSettings2, IconTable, IconTrash, IconUsersGroup, IconX } from '@tabler/icons-react';
 import { api, dmy, downloadCsv, money, ok } from '../api';
 import { useCan, useMe, useMeta } from '../ctx';
 import { StatusBadge } from './ui';
@@ -26,19 +26,33 @@ const getVal = (c: Col, r: any) => (c.value ? c.value(r) : r[c.key]);
  * Salesforce-style list view: search, per-column filters, sorting, column chooser, saved views
  * (personal or shared by admins) and export of exactly what is on screen.
  */
-export function ListView<T extends Record<string, any>>({ id, rows, columns, onRow, loading, actions, empty, pageSize = 50, quickFilters }: {
+const stamp = (v: unknown) => { if (!v) return ''; const d = new Date(String(v)); return Number.isNaN(+d) ? String(v) : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+const workKey = (id: string, view: string) => `lv-work:${id}:${view}`;
+const readWork = (id: string, view: string): ViewDef | null => { try { return JSON.parse(localStorage.getItem(workKey(id, view)) ?? 'null'); } catch { return null; } };
+const writeWork = (id: string, view: string, v: ViewDef | null) => { try { if (v) localStorage.setItem(workKey(id, view), JSON.stringify(v)); else localStorage.removeItem(workKey(id, view)); } catch { /* storage unavailable */ } };
+
+export function ListView<T extends Record<string, any>>({ id, rows, columns: columnsIn, onRow, loading, actions, empty, pageSize = 50, quickFilters }: {
   id: string; rows: T[] | null; columns: Col<T>[]; onRow?: (r: T) => void; loading?: boolean; actions?: ReactNode; empty?: ReactNode; pageSize?: number;
   quickFilters?: { label: string; filters: Filter[] }[];
 }) {
   const { meta, reload: reloadMeta } = useMeta();
   const me = useMe();
+  // Created / Last modified are available on every list whose records carry them (hidden until chosen in "Select fields").
+  const hasCreated = Boolean(rows?.some((r) => r.created_at)), hasUpdated = Boolean(rows?.some((r) => r.updated_at));
+  const columns = useMemo<Col<T>[]>(() => [
+    ...columnsIn,
+    ...(hasCreated && !columnsIn.some((c) => c.key === 'created_at') ? [{ key: 'created_at', label: 'Created', type: 'date' as const, hidden: true, value: (r: T) => String(r.created_at ?? '').slice(0, 10), render: (r: T) => stamp(r.created_at) }] : []),
+    ...(hasUpdated && !columnsIn.some((c) => c.key === 'updated_at') ? [{ key: 'updated_at', label: 'Last modified', type: 'date' as const, hidden: true, value: (r: T) => String(r.updated_at ?? r.created_at ?? '').slice(0, 10), render: (r: T) => stamp(r.updated_at ?? r.created_at) }] : []),
+  ], [columnsIn, hasCreated, hasUpdated]);
   const can = useCan();
   const loc = useLocation();
   const [sp] = useSearchParams();
-  const saved = meta.listviews.filter((v) => v.key.startsWith(`${id}:`));
+  const saved = meta.listviews.filter((v) => v.key.startsWith(`${id}:`) && !v.key.includes(':__pin'));
+  const pinKey = `${id}:__pin-u${me.user.id}`;
+  const pinned = (meta.listviews.find((v) => v.key === pinKey)?.data?.view as string | undefined) ?? null;
   const defaults = columns.filter((c) => !c.hidden).map((c) => c.key);
-  const [lastView, setLastView] = useLocalStorage<string>({ key: `lv-view:${id}`, defaultValue: '__all' });
-  const [view, setViewState] = useState<string>(() => sp.get('view') ?? lastView);
+  const [lastView, setLastView] = useLocalStorage<string>({ key: `lv-view:${id}`, defaultValue: '__all', getInitialValueInEffect: false });
+  const [view, setViewState] = useState<string>(() => sp.get('view') ?? pinned ?? lastView);
   const setView = (v: string) => { setViewState(v); setLastView(v); };
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Filter[]>([]);
@@ -61,6 +75,8 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
     const v = def;
     if (v) { setFilters(v.filters ?? []); setSort(v.sort ?? null); setSearch(v.search ?? ''); setVisible(v.columns?.length ? v.columns.filter((k) => columns.some((c) => c.key === k)) : defaults); setDisplay(v.display ?? 'table'); setGroupBy(v.groupBy ?? null); }
     else { setFilters([]); setSort(null); setSearch(''); setVisible(defaults); setDisplay('table'); setGroupBy(null); }
+    const w = readWork(id, view); // unsaved changes made earlier to this view are kept until saved or reset
+    if (w) { setFilters(w.filters ?? []); setSort(w.sort ?? null); setSearch(w.search ?? ''); if (w.columns?.length) setVisible(w.columns.filter((k) => columns.some((c) => c.key === k))); setDisplay(w.display ?? 'table'); setGroupBy(w.groupBy ?? null); }
     setPage(1);
   }, [view, current?.data]);
 
@@ -68,6 +84,15 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
   const base: ViewDef = def ?? { name: '', filters: [], columns: defaults, search: '', display: 'table', groupBy: null };
   const dirty = JSON.stringify([filters, visible, sort ?? null, search, display, groupBy ?? null]) !== JSON.stringify([base.filters ?? [], base.columns?.length ? base.columns : defaults, base.sort ?? null, base.search ?? '', base.display ?? 'table', base.groupBy ?? null]);
   const mineOrAdmin = Boolean(current && def && (current.owner_id === me.user.id || can('manageCustomization')));
+  useEffect(() => { writeWork(id, view, dirty ? state : null); }, [dirty, JSON.stringify(state)]);
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const takenNames = (except?: string) => saved.filter((v) => v.key !== except).map((v) => String((v.data as ViewDef).name ?? '').trim().toLowerCase());
+  const pin = async (v: string | null) => {
+    if (v) await api(`/meta/listview/${encodeURIComponent(pinKey)}`, { method: 'PUT', body: { view: v, name: '__pin' } });
+    else await api(`/meta/listview/${encodeURIComponent(pinKey)}`, { method: 'DELETE' });
+    await reloadMeta(); ok(v ? 'This view now opens by default' : 'Default view removed');
+  };
+  const resetWork = () => { setFilters(base.filters ?? []); setSort(base.sort ?? null); setSearch(base.search ?? ''); setVisible(base.columns?.length ? base.columns : defaults); setDisplay(base.display ?? 'table'); setGroupBy(base.groupBy ?? null); writeWork(id, view, null); };
 
   const shown = visible.map((k) => columns.find((c) => c.key === k)).filter(Boolean) as Col<T>[];
   const filtered = useMemo(() => {
@@ -125,13 +150,16 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
     await reloadMeta(); // the new view must be in the list before it is selected
   };
   const saveNew = async (name: string, shared: boolean) => {
+    if (takenNames().includes(name.trim().toLowerCase())) { throw new Error(`A view called “${name}” already exists here. Choose another name.`); }
+    writeWork(id, view, null);
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const key = `${id}:${shared ? '' : `u${me.user.id}-`}${slug}`;
     await persist(key, name, shared); ok(`View “${name}” saved`); setView(key); setSaveOpen(null);
   };
-  const saveCurrent = async () => { if (!current || !def) return; await persist(current.key, def.name, current.owner_id === null); ok('View updated'); };
+  const saveCurrent = async () => { if (!current || !def) return; writeWork(id, view, null); await persist(current.key, def.name, current.owner_id === null); ok('View updated'); };
   const rename = async (name: string, shared: boolean) => {
     if (!current) return;
+    if (takenNames(current.key).includes(name.trim().toLowerCase())) throw new Error(`A view called “${name}” already exists here. Choose another name.`);
     await api(`/meta/listview/${encodeURIComponent(current.key)}`, { method: 'PUT', body: { ...(def as object), name, shared } }); await reloadMeta(); ok('View updated'); setSaveOpen(null);
   };
   const viewLabel = view === '__all' ? 'All records' : def?.name ?? 'All records';
@@ -147,6 +175,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
               <UnstyledButton className="lv-viewpick">
                 <IconLayoutList size={16} />
                 <Text fw={650} size="sm" truncate maw={220}>{viewLabel}</Text>
+                {pinned === view && <Tooltip label="Your default view"><IconPin size={13} color="var(--mantine-color-blue-6)" /></Tooltip>}
                 {current && <Badge size="xs" variant="light" color={current.owner_id === null ? 'teal' : 'gray'}>{current.owner_id === null ? 'Shared' : 'Private'}</Badge>}
                 <IconChevronDown size={14} />
               </UnstyledButton>
@@ -154,16 +183,17 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
             <Menu.Dropdown>
               <Menu.Label>List views</Menu.Label>
               <Menu.Item onClick={() => setView('__all')} rightSection={view === '__all' ? <IconCheck size={14} /> : null}>All records</Menu.Item>
-              {saved.map((v) => <Menu.Item key={v.key} onClick={() => setView(v.key)} leftSection={v.owner_id === null ? <IconUsersGroup size={14} /> : <IconLock size={14} />} rightSection={view === v.key ? <IconCheck size={14} /> : null}>{(v.data as ViewDef).name}</Menu.Item>)}
+              {saved.map((v) => <Menu.Item key={v.key} onClick={() => setView(v.key)} leftSection={v.owner_id === null ? <IconUsersGroup size={14} /> : <IconLock size={14} />} rightSection={<Group gap={4}>{pinned === v.key && <IconPin size={13} color="var(--mantine-color-blue-6)" />}{view === v.key && <IconCheck size={14} />}</Group>}>{(v.data as ViewDef).name}</Menu.Item>)}
               <Menu.Divider />
+              {pinned === view ? <Menu.Item leftSection={<IconPinnedOff size={14} />} onClick={() => pin(null)}>Unpin “{viewLabel}” as my default</Menu.Item>
+                : <Menu.Item leftSection={<IconPin size={14} />} onClick={() => pin(view)}>Pin “{viewLabel}” as my default</Menu.Item>}
               <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => setSaveOpen('new')}>New view from current filters…</Menu.Item>
             </Menu.Dropdown>
           </Menu>
           {favRef && def && <FavStar kind="listview" refKey={favRef} label={def.name} sub={document.title.split('·')[0]?.trim() || undefined} />}
           {dirty && <Group gap={4} className="lv-dirty"><Text size="xs" c="orange.7" fw={600}>Unsaved changes</Text>
-            {mineOrAdmin ? <Button size="compact-xs" onClick={saveCurrent}>Save</Button> : null}
-            <Button size="compact-xs" variant="light" onClick={() => setSaveOpen('new')}>Save as…</Button>
-            <Button size="compact-xs" variant="subtle" color="gray" onClick={() => { setFilters(base.filters ?? []); setSort(base.sort ?? null); setSearch(base.search ?? ''); setVisible(base.columns?.length ? base.columns : defaults); setDisplay(base.display ?? 'table'); setGroupBy(base.groupBy ?? null); }}>Reset</Button></Group>}
+            <Button size="compact-xs" onClick={() => (mineOrAdmin ? setChoiceOpen(true) : setSaveOpen('new'))}>Save…</Button>
+            <Button size="compact-xs" variant="subtle" color="gray" onClick={resetWork}>Reset</Button></Group>}
         </Group>
         <Group gap={6}>
           <Text size="xs" c="dimmed">{filtered.length} of {rows?.length ?? 0} items{sort ? ` · sorted by ${columns.find((c) => c.key === sort.key)?.label}` : ''}</Text>
@@ -245,6 +275,13 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns, onR
       {display !== 'kanban' && pages > 1 && <Group justify="center" p="xs" style={{ borderTop: '1px solid var(--line)' }}><Pagination size="sm" total={pages} value={page} onChange={setPage} /></Group>}
       <SaveViewModal mode={saveOpen} onClose={() => setSaveOpen(null)} onSave={saveOpen === 'rename' ? rename : saveNew} canShare={can('manageCustomization')}
         initial={saveOpen === 'rename' && current && def ? { name: def.name, shared: current.owner_id === null } : undefined} />
+      <Modal opened={choiceOpen} onClose={() => setChoiceOpen(false)} title="Save your changes" size="sm">
+        <Stack gap="xs">
+          <Text size="sm" c="dimmed">You changed the filters, fields or sorting of “{def?.name}”.</Text>
+          <Button leftSection={<IconDeviceFloppy size={16} />} onClick={async () => { await saveCurrent(); setChoiceOpen(false); }}>Update “{def?.name}”</Button>
+          <Button variant="light" leftSection={<IconPlus size={16} />} onClick={() => { setChoiceOpen(false); setSaveOpen('new'); }}>Save as a new view…</Button>
+        </Stack>
+      </Modal>
       {fieldsOpen && <FieldsModal columns={columns} visible={visible} onClose={() => setFieldsOpen(false)} onApply={(v) => { setVisible(v); setFieldsOpen(false); }} defaults={defaults} />}
     </Paper>
   );
@@ -323,13 +360,14 @@ function Kanban<T extends Record<string, any>>({ rows, shown, columns, groupBy, 
   );
 }
 
-function SaveViewModal({ mode, onClose, onSave, canShare, initial }: { mode: null | 'new' | 'rename'; onClose: () => void; onSave: (n: string, shared: boolean) => void; canShare: boolean; initial?: { name: string; shared: boolean } }) {
-  const [name, setName] = useState(''); const [shared, setShared] = useState(false);
-  useEffect(() => { if (mode) { setName(initial?.name ?? ''); setShared(initial?.shared ?? false); } }, [mode]);
+function SaveViewModal({ mode, onClose, onSave, canShare, initial }: { mode: null | 'new' | 'rename'; onClose: () => void; onSave: (n: string, shared: boolean) => Promise<void> | void; canShare: boolean; initial?: { name: string; shared: boolean } }) {
+  const [name, setName] = useState(''); const [shared, setShared] = useState(false); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  useEffect(() => { if (mode) { setName(initial?.name ?? ''); setShared(initial?.shared ?? false); setErr(null); } }, [mode]);
+  const submit = async () => { setBusy(true); setErr(null); try { await onSave(name.trim(), shared); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
   return (
     <Modal opened={Boolean(mode)} onClose={onClose} title={mode === 'rename' ? 'Rename list view' : 'New list view'} size="sm">
       <Stack>
-        <TextInput label="List name" placeholder="e.g. Unpaid NABL invoices" value={name} onChange={(e) => setName(e.currentTarget.value)} data-autofocus />
+        <TextInput label="List name" placeholder="e.g. Unpaid NABL invoices" value={name} onChange={(e) => { setName(e.currentTarget.value); setErr(null); }} error={err} data-autofocus onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) submit(); }} />
         {canShare ? (
           <div>
             <Text size="sm" fw={500} mb={4}>Who sees this list view?</Text>
@@ -337,7 +375,7 @@ function SaveViewModal({ mode, onClose, onSave, canShare, initial }: { mode: nul
           </div>
         ) : <Text size="xs" c="dimmed">Only you can see this view. Ask an administrator to share a view with everyone.</Text>}
         {mode === 'new' && <Text size="xs" c="dimmed">Saves the current search, filters, sort, fields and display (table or Kanban).</Text>}
-        <Group justify="flex-end"><Button disabled={!name.trim()} onClick={() => onSave(name.trim(), shared)}>Save</Button></Group>
+        <Group justify="flex-end"><Button disabled={!name.trim()} loading={busy} onClick={submit}>Save</Button></Group>
       </Stack>
     </Modal>
   );

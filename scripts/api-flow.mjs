@@ -417,6 +417,47 @@ const vRow = (await api('owner', 'GET', '/vendors'))[0];
 await api('owner', 'PUT', `/vendors/${vRow.id}`, { name: vRow.name, active: 0 });
 expect((await api('owner', 'GET', '/vendors')).find((v) => v.id === vRow.id).active == 0, 'rate card, equipment and vendor accept 1/0 for yes/no');
 await api('owner', 'PUT', `/vendors/${vRow.id}`, { name: vRow.name, active: 'true' });
+console.log('20. Record dates and Recycle Bin');
+{
+  const fail2 = async (f) => { try { await f(); return null; } catch (e) { return e.message; } };
+  const c0 = (await api('owner', 'GET', `/clients/${client.id}`));
+  await new Promise((r) => setTimeout(r, 20));
+  await api('owner', 'PUT', `/clients/${client.id}`, { name: c0.name, gstin: c0.gstin, state_code: c0.state_code, address: c0.address, notes: 'touched ' + Date.now() });
+  const info = await api('owner', 'GET', `/record-info/client/${client.id}`);
+  expect(info.created_at && info.updated_at && info.updated_at > info.created_at, 'every record shows created and last-modified dates; editing moves last-modified');
+  expect(/System Administrators/.test(await fail2(() => api('frontdesk', 'PUT', `/record-info/sample/${s.id}`, { created_at: '2025-01-01T10:00:00Z' }))), 'only System Administrators can change record dates');
+  await api('admin', 'PUT', `/record-info/sample/${s.id}`, { created_at: '2025-01-01T10:00:00Z' });
+  const si = await api('admin', 'GET', `/record-info/sample/${s.id}`);
+  expect(si.created_at === '2025-01-01T10:00:00.000Z' && /administrator/.test(si.last_action), 'admin date correction is saved and audited');
+
+  expect(/administrators/i.test(await fail2(() => api('frontdesk', 'DELETE', `/recycle/sample/${s.id}`, {}))), 'non-admins cannot delete records');
+  const ps = await api('admin', 'GET', `/recycle/preview/sample/${s.id}`);
+  expect(ps.blocked && /report/.test(ps.blocked), 'a sample whose results are on a report cannot be deleted before the report');
+  expect(/Payments/.test((await api('admin', 'GET', `/recycle/preview/invoice/${inv.id}`)).blocked ?? ''), 'an invoice with payments cannot be deleted before the payments');
+  const pay = (await api('accounts', 'GET', '/payments')).find((p) => String(p.allocations ?? '').includes(String(inv.id)) || (p.client_id === client.id && p.reference === 'NEFT123'));
+  const st0 = (await api('owner', 'GET', `/documents/${inv.id}`)).status;
+  const bp = await api('admin', 'DELETE', `/recycle/payment/${pay.id}`, { reason: 'entered twice' });
+  expect((await api('owner', 'GET', `/documents/${inv.id}`)).status === 'issued', 'deleting a payment makes its invoice due again');
+  await api('admin', 'POST', `/recycle/${bp.binId}/restore`);
+  expect((await api('owner', 'GET', `/documents/${inv.id}`)).status === st0, 'restoring the payment puts the invoice back to ' + st0);
+
+  const br = await api('admin', 'DELETE', `/recycle/report/${rep.id}`, {});
+  expect(await fail2(() => api('owner', 'GET', `/documents/${rep.id}`)), 'deleted report disappears from the app');
+  const bs = await api('admin', 'DELETE', `/recycle/sample/${s.id}`, {});
+  await api('admin', 'POST', `/recycle/${bs.binId}/restore`);
+  await api('admin', 'POST', `/recycle/${br.binId}/restore`);
+  const rd = await api('owner', 'GET', `/documents/${rep.id}`);
+  const back = await api('owner', 'GET', `/samples/${s.id}`);
+  expect(rd.number && back.tests.every((t) => t.report_id === rep.id), 'sample and report restored with the same numbers and links');
+  const bin = await api('admin', 'GET', '/recycle');
+  expect(bin.rows.filter((r) => r.restored_at).length >= 3 && bin.rows[0].deleted_by_name, 'Recycle Bin lists deleted and restored records with who did it');
+  const eq = (await api('owner', 'GET', '/equipment'))[0];
+  const be = await api('admin', 'DELETE', `/recycle/equipment/${eq.id}`, {});
+  await api('admin', 'DELETE', `/recycle/bin/${be.binId}`);
+  expect(await fail2(() => api('admin', 'POST', `/recycle/${be.binId}/restore`)), 'permanently deleted records cannot be restored');
+  await api('admin', 'PUT', '/recycle/settings', { days: 60 });
+  expect((await api('admin', 'GET', '/recycle')).keepDays === 60, 'retention can be set to 60 days');
+}
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

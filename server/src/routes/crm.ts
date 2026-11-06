@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { formatDate } from '@suite/shared';
 import { db, insert, now, parseJson, row, today } from '../db';
-import { h, HttpError, requireAuth, zBool } from '../auth';
+import { h, HttpError, isAdmin, requireAuth, zBool } from '../auth';
+import { moveToBin } from '../recycle';
 import { audit, getCompany, getDocTemplate, sha256 } from '../services';
 
 /**
@@ -104,8 +105,9 @@ crm.put('/activities/:id', h(async (req) => {
   return { ok: true };
 }));
 crm.delete('/activities/:id', h(async (req) => {
-  const n = await db('activities').where({ id: Number(req.params.id), company_id: req.user.company_id, created_by: req.user.id }).delete();
-  if (!n) throw new HttpError(403, 'Only the person who created a follow-up can delete it');
+  const a = await db('activities').where({ id: Number(req.params.id), company_id: req.user.company_id }).first('id', 'created_by');
+  if (!a || (a.created_by !== req.user.id && !isAdmin(req.user))) throw new HttpError(403, 'Only the person who created a follow-up can delete it');
+  await moveToBin(req.user, 'activity', a.id);
   return { ok: true };
 }));
 

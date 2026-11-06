@@ -18,6 +18,7 @@ import { DocDetailsForm } from '../doc/LinesEditor';
 import { HeaderFields } from '../doc/HeaderFields';
 import { FitWidth } from '../doc/FitWidth';
 import { ClientForm } from './Clients';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 const KIND_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Tax invoice', report: 'Test report' };
 const PATHS: Record<string, { key: string; label: string }[]> = {
@@ -173,6 +174,7 @@ function DocumentView({ id }: { id: number }) {
         subtitle={<>{data.client?.name}{data.site ? ` · ${data.site.name}` : ''} · {dmy(doc.date)}{doc.kind === 'invoice' && doc.paid !== undefined && doc.status !== 'draft' ? ` · received ₹${money(doc.paid)} of ₹${money(doc.total)}` : ''}{doc.owner_name ? ` · Owner: ${doc.owner_name}` : ''}{dirty && editable ? ' · saving…' : ''}</>}
         actions={<>
           {actions}
+          <AdminDelete object={doc.kind} id={doc.id} compact onDeleted={() => nav(({ quote: '/quotes', invoice: '/invoices', report: '/reports' } as Record<string, string>)[doc.kind] ?? '/')} />
           {['quote', 'invoice'].includes(doc.kind) && <SharingButton access={doc.access} onClick={() => setShareOpen(true)} />}
           <Menu shadow="lg"><Menu.Target><Button variant="default" leftSection={<IconDownload size={16} />}>Export</Button></Menu.Target><Menu.Dropdown>
             <Menu.Item leftSection={<IconPrinter size={14} />} onClick={() => { setSelected(null); setTimeout(() => window.print(), 50); }}>Print / Save as PDF (best quality)</Menu.Item>
@@ -234,6 +236,7 @@ function DocumentView({ id }: { id: number }) {
         onClose={(sent) => { setWaOpen(false); if (sent) reload(); }} />}
       {shareOpen && <SharingModal object={doc.kind} id={doc.id} title={doc.number ?? `Draft #${doc.id}`} onClose={(ch) => { setShareOpen(false); if (ch) reload(); }} />}
       {dupOpen && <DuplicateModal doc={doc} onClose={() => setDupOpen(false)} onDone={(id) => { setDupOpen(false); nav(`/documents/${id}`); }} />}
+      <RecordInfo object={doc.kind} id={doc.id} />
       {noteModal && <NoteModal title={noteModal.title} onClose={() => setNoteModal(null)} onSubmit={async (n) => { await noteModal.action(n); setNoteModal(null); }} />}
     </>
   );

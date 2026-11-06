@@ -9,6 +9,7 @@ import { ListView, useCustomCols } from '../../components/ListView';
 import { RecordForm } from '../../components/RecordForm';
 import { Attachments } from '../../components/Attachments';
 import { EquipmentImport } from './EquipmentImport';
+import { AdminDelete, RecordInfo } from '../../components/RecordAdmin';
 
 export function EquipmentPage() {
   const { data, reload } = useApi<any[]>('/equipment');
@@ -61,7 +62,8 @@ function EqModal({ item, onClose, readOnly }: { item: any; onClose: (s: boolean)
         <Text size="xs" c="dimmed">When re-calibrated, update these values, the certificate and the dates. Earlier observation sheets keep the values they were tested with; testers can still enter a value manually on a sheet.</Text>
         {v.id ? <Certificates equipmentId={v.id} readOnly={readOnly} /> : <Text size="xs" c="dimmed">Save the equipment first, then attach its calibration certificate.</Text>}
         <Switch label="Active" disabled={readOnly} checked={v.active !== false} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} />
-        {!readOnly && <Group justify="flex-end"><Button onClick={save} disabled={!v.name}>Save</Button></Group>}
+        {item.id ? <RecordInfo object="equipment" id={item.id} /> : null}
+        <Group justify="flex-end">{item.id ? <AdminDelete object="equipment" id={item.id} compact onDeleted={() => onClose(true)} /> : null}{!readOnly && <Button onClick={save} disabled={!v.name}>Save</Button>}</Group>
       </Stack>
     </Modal>
   );

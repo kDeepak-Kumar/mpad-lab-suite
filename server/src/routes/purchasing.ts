@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db, insert, now, parseJson, toJson, today } from '../db';
 import { allow, can, h, HttpError, requireAuth, type AuthUser, zBool } from '../auth';
+import { moveToBin } from '../recycle';
 import { normalizeObservation, evaluateObservation, type ObservationInput } from '@suite/shared';
 import { audit, getObsTemplate } from '../services';
 
@@ -160,9 +161,7 @@ purchasing.put('/purchases/:id', allow('managePurchases'), h(async (req) => {
 purchasing.delete('/purchases/:id', allow('managePurchases'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
   if (await db('purchase_payments').where({ purchase_id: id, company_id: cid }).first('id')) throw new HttpError(409, 'Delete the payments of this bill first');
-  await db('files').where({ company_id: cid, entity: 'purchase', entity_id: id }).delete();
-  await db('purchases').where({ id, company_id: cid }).delete();
-  await audit(db, req.user, 'purchase', id, 'bill deleted');
+  await moveToBin(req.user, 'purchase', id);
   return { ok: true };
 }));
 purchasing.post('/purchases/:id/payments', allow('managePurchases'), h(async (req) => {

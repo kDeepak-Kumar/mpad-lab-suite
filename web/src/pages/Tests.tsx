@@ -10,6 +10,7 @@ import { ListView } from '../components/ListView';
 import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui';
 import { LineChart } from '../doc/Chart';
 import { BoreLog, SoilLegend } from '../doc/BoreLog';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export function TestsPage() {
   const me = useMe();
@@ -109,6 +110,7 @@ export function TestSheetPage() {
         subtitle={<>{s.code} · {t.client?.name}{t.site ? ` · ${t.site.name}` : ''} · {tpl.method}</>}
         actions={<>
           <Button className="hide-mobile" variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print sheet</Button>
+          <AdminDelete object="test" id={t.id} compact onDeleted={() => nav('/tests')} />
           {can('manageTemplates') && <Button className="hide-mobile" variant="subtle" onClick={() => nav(`/settings/templates/obs/${encodeURIComponent(tpl.code)}`)}>Edit sheet template</Button>}
           {editable && <Button variant="default" loading={busy} disabled={!dirty} onClick={() => (t.status === 'returned' ? setReasonOpen(true) : save())}>Save</Button>}
           {editable && ['pending', 'in_progress', 'returned'].includes(t.status) && <Button loading={busy} disabled={errors.length > 0 && !admin} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button>}
@@ -239,6 +241,7 @@ export function TestSheetPage() {
       </Grid>
       <ReasonModal opened={returnOpen} title="Return for correction – what needs fixing?" onClose={() => setReturnOpen(false)} onSubmit={async (n) => { setReturnOpen(false); await review('return', n); }} />
       <ReasonModal opened={reasonOpen} title="Reason for correction" onClose={() => setReasonOpen(false)} onSubmit={async (n) => { setReasonOpen(false); await save(n); }} />
+      <RecordInfo object="test" id={t.id} />
     </>
   );
 }

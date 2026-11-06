@@ -13,6 +13,7 @@ import { PageHeader, Loading, Kpi } from '../components/ui';
 import { WhatsAppButton, WhatsAppIcon, WhatsAppModal } from '../components/WhatsApp';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
 import { RecordForm, missingRequired } from '../components/RecordForm';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export function ClientForm({ initial, onSaved, onCancel }: { initial?: any; onSaved: (id: number) => void; onCancel: () => void }) {
   const [v, setV] = useState<any>({ type: 'company', payment_terms_days: 30, opening_balance: 0, ...initial });
@@ -138,6 +139,7 @@ export function ClientDetail() {
           <WhatsAppButton variant="light" onClick={() => setWa({})} />
           {can('sample.create') && <Button variant="default" onClick={() => nav(`/samples?new=1&client=${c.id}`)}>Register sample</Button>}
           {can('quote.create') && <Button onClick={() => nav(`/quotes/new?client=${c.id}`)}>New quotation</Button>}
+          <AdminDelete object="client" id={c.id} compact onDeleted={() => nav('/clients')} />
           {can('client.delete') && <Menu position="bottom-end"><Menu.Target><ActionIcon variant="default" size="lg"><IconDots size={16} /></ActionIcon></Menu.Target><Menu.Dropdown>
             <Menu.Item color="red" onClick={async () => { if (window.confirm('Delete this client? Only possible when it has no documents or samples.')) { await api(`/clients/${c.id}`, { method: 'DELETE' }); nav('/clients'); } }}>Delete client</Menu.Item>
           </Menu.Dropdown></Menu>}
@@ -197,6 +199,7 @@ export function ClientDetail() {
           </Timeline>{!c.timeline.length && <Text size="sm" c="dimmed">No activity yet</Text>}</Paper>
         </Tabs.Panel>
       </Tabs>
+      <RecordInfo object="client" id={c.id} />
       <Modal opened={edit} onClose={() => setEdit(false)} title="Edit client" size="xl"><ClientForm initial={c} onCancel={() => setEdit(false)} onSaved={() => { setEdit(false); reload(); }} /></Modal>
       {site && <SiteModal clientId={c.id} site={site.id ? site : undefined} onClose={(s) => { setSite(null); if (s) reload(); }} />}
       {contact && <ContactModal clientId={c.id} sites={c.sites} contact={contact.id ? contact : undefined} onClose={(s) => { setContact(null); if (s) reload(); }} />}

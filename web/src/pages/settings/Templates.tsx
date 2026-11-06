@@ -93,7 +93,7 @@ const SAMPLE = {
   rows: [{ group: 'Modified Proctor', name: 'MDD', unit: 'g/cc', method: 'IS 2720 (Part 8)', values: ['1.965'] }, { group: 'Modified Proctor', name: 'OMC', unit: '%', method: 'IS 2720 (Part 8)', values: ['10.2'] }, { name: 'Free Swell Index of soil', unit: '%', method: 'IS 2720 (Part 40)', values: ['20'] }],
   remarks: 'The soil can be used for backfilling purpose.',
   // receipt and statement previews
-  date: '2026-11-04', amount: 9440, tds: 160, mode: 'Bank transfer (NEFT)', reference: 'UTR 4521 7788 0091', against: '183/26-27',
+  date: '2026-11-04', amount: 9440, tds: 160, reference: 'UTR 4521 7788 0091', against: '183/26-27',
   asOn: '2026-11-04', opening: 0, balance: 590,
   entries: [{ date: '2026-10-28', type: 'Invoice', ref: '183/26-27', debit: 10030, credit: 0, balance: 10030 }, { date: '2026-11-04', type: 'Receipt', ref: 'RCPT/0012', debit: 0, credit: 9440, balance: 590 }],
 };
@@ -124,7 +124,7 @@ export function TemplateDesigner() {
         <Grid.Col span={{ base: 12, lg: 4 }}><DesignPanel base={base} overrides={ov} onChange={setOv} selected={sel} onSelect={setSel} onReset={() => setOv({})} /></Grid.Col>
         <Grid.Col span={{ base: 12, lg: 8 }}>
           <div className="doc-stage" onClick={() => setSel(null)}><FitWidth>
-            <DocRenderer template={eff} kind={tpl.kind} data={SAMPLE} company={company} number={({ invoice: '183/26-27', receipt: 'RCPT/0012/26-27', statement: '', report: 'TR/0142/26-27' } as Record<string, string>)[tpl.kind] ?? 'Q/076/26-27'} status="draft" totals={totals} selected={sel} onSelect={setSel} />
+            <DocRenderer template={eff} kind={tpl.kind} data={tpl.kind === 'receipt' ? { ...SAMPLE, mode: 'Bank transfer (NEFT)' } : SAMPLE} company={company} number={({ invoice: '183/26-27', receipt: 'RCPT/0012/26-27', statement: '', report: 'TR/0142/26-27' } as Record<string, string>)[tpl.kind] ?? 'Q/076/26-27'} status="draft" totals={totals} selected={sel} onSelect={setSel} />
           </FitWidth></div>
           <Text size="xs" c="dimmed" mt="xs">Signature and seal appear when a real document is signed and issued.</Text>
         </Grid.Col>

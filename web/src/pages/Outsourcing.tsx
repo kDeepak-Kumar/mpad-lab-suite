@@ -10,6 +10,7 @@ import { ListView } from '../components/ListView';
 import { readDocumentText, matchValues, findReportMeta, type Match } from '../lib/vendorDocs';
 import { BillModal } from './Purchases';
 import { Attachments } from '../components/Attachments';
+import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 
 export const JOB_STATUS: Record<string, { label: string; color: string }> = {
   to_send: { label: 'To send', color: 'orange' }, sent: { label: 'Sent to lab', color: 'blue' }, received: { label: 'Report received', color: 'grape' },
@@ -111,6 +112,7 @@ function JobDrawer({ id, onClose, onChange }: { id: number; onClose: () => void;
         </Paper>
         <Textarea label="Notes" autosize disabled={!edit} value={f.notes} onChange={(e) => setF({ ...f, notes: e.currentTarget.value })} onBlur={() => edit && save({})} />
         {edit && j.status !== 'cancelled' && <Button variant="subtle" color="gray" size="xs" w="fit-content" onClick={() => window.confirm('Cancel this outsourced job? The tests stay on the sample and can be done in-house.') && save({ status: 'cancelled' }, 'Cancelled')}>Cancel job (do in-house instead)</Button>}
+        <Group justify="space-between"><RecordInfo object="outsource" id={j.id} /><AdminDelete object="outsource" id={j.id} compact onDeleted={() => { onChange(); onClose(); }} /></Group>
       </Stack>
       {importing && <ImportModal job={j} file={importing} onClose={(done) => { setImporting(null); if (done) { reload(); onChange(); } }} />}
       {bill && <BillModal initial={{ category: 'subcontract', vendor_id: j.vendor_id, job_id: j.id, bill_date: localToday(), rate: 18 }} onClose={(s) => { setBill(false); if (s) { reload(); onChange(); } }} />}
