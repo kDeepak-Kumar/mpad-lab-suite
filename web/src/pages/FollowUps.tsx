@@ -19,7 +19,7 @@ export function FollowUpsPage() {
   const tab = sp.get('tab') ?? 'mine';
   const q = tab === 'mine' ? '?mine=1&open=1' : tab === 'open' ? '?open=1' : '';
   const { data, reload } = useApi<any[]>(`/activities${q}`, [tab]);
-  const [add, setAdd] = useState(false);
+  const [add, setAdd] = useState(() => sp.get('new') === '1');
   const td = localToday();
   const nav = useNavigate();
   const rows = (data ?? []).filter((a) => tab !== 'done' || a.done_at);

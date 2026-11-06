@@ -458,6 +458,12 @@ console.log('20. Record dates and Recycle Bin');
   await api('admin', 'PUT', '/recycle/settings', { days: 60 });
   expect((await api('admin', 'GET', '/recycle')).keepDays === 60, 'retention can be set to 60 days');
 }
+console.log('21. Home dashboard insights');
+{
+  const o = await api('owner', 'GET', '/dashboard/insights'), t = await api('tech', 'GET', '/dashboard/insights');
+  expect(o.months.length === 12 && o.money.invoiced.length === 12 && o.money.topClients.length > 0 && o.lab.intake.length === 14, 'owner sees 12-month money trend, top clients and sample intake');
+  expect(!t.money && t.lab, 'technician sees lab figures but no money');
+}
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

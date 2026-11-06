@@ -10,7 +10,7 @@ import {
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
 import { applyBrand } from './brand';
-import { MeCtx, MetaCtx, hasTab, useMe, type Me, type Meta } from './ctx';
+import { MeCtx, MetaCtx, hasTab, useCan, useMe, type Me, type Meta } from './ctx';
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
 import { Loading } from './components/ui';
@@ -165,6 +165,7 @@ function Shell() {
           </UnstyledButton>
           <Group gap="sm" wrap="nowrap">
             <ActionIcon variant="subtle" color="gray" hiddenFrom="sm" onClick={() => spotlight.open()}><IconSearch size={20} /></ActionIcon>
+            <QuickCreate />
             <NotificationBell reminders={reminders} />
             <Menu position="bottom-end" shadow="lg">
               <Menu.Target><Avatar color="brand" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
@@ -305,6 +306,30 @@ function NotificationBell({ reminders }: { reminders: any[] }) {
           {unread.slice(0, 20).map((r, i) => item(r, i, false))}
           {read.length > 0 && <><Menu.Divider /><Menu.Label>Earlier</Menu.Label>{read.slice(0, 15).map((r, i) => item(r, i, true))}</>}
         </ScrollArea.Autosize>
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
+/** "+ New" in the top bar: create the common records from any screen in one click. */
+function QuickCreate() {
+  const can = useCan();
+  const nav = useNavigate();
+  const items = [
+    { label: 'Quotation', to: '/quotes/new', icon: IconFileDollar, ok: can('quote.create') },
+    { label: 'Register sample', to: '/samples?new=1', icon: IconTestPipe, ok: can('sample.create') },
+    { label: 'Client', to: '/clients?new=1', icon: IconBuildingSkyscraper, ok: can('client.create') },
+    { label: 'Invoice', to: '/invoices/new', icon: IconFileInvoice, ok: can('invoice.create') },
+    { label: 'Record payment', to: '/payments?new=1', icon: IconWallet, ok: can('recordPayments') },
+    { label: 'Follow-up', to: '/followups?new=1', icon: IconCalendarEvent, ok: can('client.read') },
+  ].filter((i) => i.ok);
+  if (!items.length) return null;
+  return (
+    <Menu shadow="lg" position="bottom-end" width={210}>
+      <Menu.Target><Button size="xs" radius="xl" leftSection={<IconPlus size={14} />} visibleFrom="sm">New</Button></Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>Create</Menu.Label>
+        {items.map((i) => <Menu.Item key={i.to} leftSection={<i.icon size={16} />} onClick={() => nav(i.to)}>{i.label}</Menu.Item>)}
       </Menu.Dropdown>
     </Menu>
   );

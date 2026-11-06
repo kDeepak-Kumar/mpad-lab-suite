@@ -523,6 +523,56 @@ finance.post('/notifications/unread', h(async (req) => {
   return { ok: true };
 }));
 
+/** Home dashboard charts and KPIs: money for those who may see invoices, lab workload for those who may see samples. */
+finance.get('/dashboard/insights', h(async (req) => {
+  const cid = req.user.company_id, td = today();
+  const ym = (d: string) => d.slice(0, 7);
+  const months: string[] = [];
+  { const d = new Date(td + 'T00:00:00Z'); d.setUTCDate(1); for (let i = 11; i >= 0; i--) { const x = new Date(d); x.setUTCMonth(d.getUTCMonth() - i); months.push(x.toISOString().slice(0, 7)); } }
+  const thisM = months[11], lastM = months[10], from = months[0] + '-01';
+  const out: Record<string, unknown> = { months };
+  if (can(req.user, 'invoice.read')) {
+    const iq = db('documents as d').leftJoin('clients as c', 'c.id', 'd.client_id').where({ 'd.company_id': cid, 'd.kind': 'invoice' }).whereIn('d.status', ['issued', 'paid', 'partly_paid'])
+      .select('d.id', 'd.date', 'd.total', 'd.number', 'd.client_id', 'c.name as client_name');
+    await restrictDocuments(req.user, iq);
+    const inv: { id: number; date: string; total: number; number: string; client_id: number; client_name: string | null }[] = await iq;
+    const pays = can(req.user, 'payment.read') ? await db('payments').where({ company_id: cid }).andWhere('date', '>=', from).select('date', 'amount', 'tds') : [];
+    const paid = await paidAgainst(cid);
+    const byM = (rows: { date: string }[], val: (r: any) => number) => months.map((m) => Math.round(rows.filter((r) => ym(r.date) === m).reduce((a, r) => a + val(r), 0)));
+    const invoiced = byM(inv, (r) => Number(r.total)), collected = byM(pays, (r) => Number(r.amount) + Number(r.tds || 0));
+    const open = inv.map((i) => ({ ...i, balance: Number(i.total) - (paid.get(i.id) ?? 0) })).filter((i) => i.balance > 0.5);
+    const age = (d: string) => Math.floor((Date.now() - new Date(d + 'T00:00:00').getTime()) / 86400000);
+    const top = new Map<string, number>();
+    for (const i of inv.filter((i) => i.date >= from)) top.set(i.client_name ?? '—', (top.get(i.client_name ?? '—') ?? 0) + Number(i.total));
+    const total12 = invoiced.reduce((a, b) => a + b, 0);
+    out.money = {
+      invoiced, collected, invoicedThis: invoiced[11], invoicedLast: invoiced[10], collectedThis: collected[11], collectedLast: collected[10],
+      outstanding: Math.round(open.reduce((a, i) => a + i.balance, 0)),
+      overdue: Math.round(open.filter((i) => age(i.date) > 30).reduce((a, i) => a + i.balance, 0)),
+      aging: [['0–30 days', 0, 30], ['31–60', 31, 60], ['61–90', 61, 90], ['90+', 91, 1e9]].map(([label, a, b]) => ({ label, amount: Math.round(open.filter((i) => age(i.date) >= (a as number) && age(i.date) <= (b as number)).reduce((s, i) => s + i.balance, 0)) })),
+      topClients: [...top.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, total]) => ({ name, total: Math.round(total), share: total12 ? Math.round((total / total12) * 1000) / 10 : 0 })),
+    };
+  }
+  if (can(req.user, 'sample.read')) {
+    const smp = await db('samples').where({ company_id: cid }).andWhere('received_date', '>=', from).select('received_date', 'material');
+    const days: string[] = []; for (let i = 13; i >= 0; i--) days.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+    const tests = await db('tests').where({ company_id: cid }).whereNot('status', 'cancelled').select('status', 'created_at');
+    const status: Record<string, number> = {};
+    for (const t of tests) status[t.status] = (status[t.status] ?? 0) + 1;
+    const mat = new Map<string, number>();
+    const since90 = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+    for (const s of smp.filter((s) => s.received_date >= since90)) mat.set(s.material || 'Other', (mat.get(s.material || 'Other') ?? 0) + 1);
+    out.lab = {
+      samplesThis: smp.filter((s) => ym(s.received_date) === thisM).length, samplesLast: smp.filter((s) => ym(s.received_date) === lastM).length,
+      samplesByMonth: months.map((m) => smp.filter((s) => ym(s.received_date) === m).length),
+      intake: days.map((d) => ({ day: d, count: smp.filter((s) => s.received_date === d).length })),
+      testsByStatus: status, materials: [...mat.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count })),
+      testsThis: tests.filter((t) => String(t.created_at ?? '').slice(0, 7) === thisM).length, testsLast: tests.filter((t) => String(t.created_at ?? '').slice(0, 7) === lastM).length,
+    };
+  }
+  return out;
+}));
+
 finance.get('/dashboard', h(async (req) => {
   const cid = req.user.company_id, td = today();
   const monthStart = td.slice(0, 8) + '01';
