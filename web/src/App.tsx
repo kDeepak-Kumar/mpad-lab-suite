@@ -11,6 +11,7 @@ import {
 import { api, signOut, useApi } from './api';
 import { applyBrand } from './brand';
 import { Assistant } from './components/Assistant';
+import { ChatButton, ChatProvider } from './components/Chat';
 import { MeCtx, MetaCtx, hasTab, useCan, useMe, type Me, type Meta } from './ctx';
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
@@ -161,6 +162,7 @@ function Shell() {
 
   const width = mini ? 68 : 252;
   return (
+    <ChatProvider meId={me.user.id}>
     <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' },  header: { borderBottom: '1px solid var(--line)' } }}>
       <Assistant />
       <IdleGuard minutes={me.security?.idleMinutes ?? 10} warnAfter={me.security?.idleWarnAfter ?? 7} />
@@ -177,6 +179,7 @@ function Shell() {
           <Group gap="sm" wrap="nowrap">
             <ActionIcon variant="subtle" color="gray" hiddenFrom="sm" onClick={() => spotlight.open()}><IconSearch size={20} /></ActionIcon>
             <QuickCreate />
+            <ChatButton />
             <NotificationBell reminders={reminders} />
             <Menu position="bottom-end" shadow="lg">
               <Menu.Target><Avatar color="brand" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
@@ -258,6 +261,7 @@ function Shell() {
       <Spotlight actions={actions} query={query} onQueryChange={setQuery} filter={(q, a) => (!q ? a : (a as SpotlightActionData[]).filter((x) => x.group === 'Records' || x.group === 'AI' || String(x.label).toLowerCase().includes(q.toLowerCase())))} nothingFound="Nothing found" highlightQuery shortcut={['mod + K']}
         searchProps={{ leftSection: <IconSearch size={18} />, placeholder: 'Search clients, documents, samples… or ask a question' }} limit={30} scrollable maxHeight={460} />
     </AppShell>
+    </ChatProvider>
   );
 }
 

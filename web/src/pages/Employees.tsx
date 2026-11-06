@@ -10,7 +10,7 @@ import { Attachments } from '../components/Attachments';
 import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 import { MonthGrid } from './Attendance';
 
-const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+const initials = (n: string) => n.replace(/[^\p{L} ]/gu, ' ').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
 export function EmployeesPage() {
   const can = useCan();

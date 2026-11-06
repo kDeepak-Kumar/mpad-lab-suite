@@ -566,6 +566,30 @@ console.log('24. Employees, ID documents and attendance');
   const mon = await api('tech', 'GET', `/attendance?month=${d.slice(0, 7)}`);
   expect(mon.employees.length === 1 && mon.records.length === 1, 'staff see only their own monthly attendance');
 }
+console.log('25. Team chat');
+{
+  const usersAll = await api('owner', 'GET', '/users');
+  const rev = usersAll.find((u) => u.role === 'reviewer'), own = usersAll.find((u) => u.role === 'owner');
+  const p0 = await api('reviewer', 'GET', '/chat/poll');
+  const sent = await api('owner', 'POST', '/chat/send', { to: rev.id, body: '**Urgent**: CBR for DCTL/0001 today\n\n| Test | Due |\n|---|---|\n| CBR | 5 pm |' });
+  const p1 = await api('reviewer', 'GET', `/chat/poll?since=${p0.latestId}`);
+  expect(p1.messages.some((m) => m.id === sent.id && m.from_name) && p1.unread >= 1 && p1.presence[own.id].online, 'new message reaches the colleague with unread count; sender shows online');
+  const contacts = await api('reviewer', 'GET', '/chat/contacts');
+  const oc = contacts.find((c) => c.id === own.id);
+  expect(oc.unread === 1 && oc.last.body.startsWith('**Urgent**') && contacts[0].id === own.id, 'contact list shows unread and the latest message first');
+  const conv = await api('reviewer', 'GET', `/chat/with/${own.id}`);
+  expect(conv.messages.at(-1).body.includes('| CBR | 5 pm |'), 'rich text (bold, tables) is kept as written');
+  const p2 = await api('reviewer', 'GET', `/chat/poll?since=${p1.latestId}`);
+  expect(p2.unread === 0, 'opening the conversation marks it read');
+  const back = await api('owner', 'GET', `/chat/with/${rev.id}`);
+  expect(back.messages.find((m) => m.id === sent.id).read_at, 'sender sees the read tick');
+  let m = await fail(() => api('owner', 'POST', '/chat/send', { to: 99999, body: 'x' }));
+  expect(m, 'cannot message someone outside the company');
+  m = await fail(() => api('owner', 'POST', '/chat/send', { to: rev.id, body: '   ' }));
+  expect(m, 'empty messages are refused');
+  const other = await api('tech', 'GET', `/chat/with/${own.id}`);
+  expect(!other.messages.some((x) => x.id === sent.id), "people cannot read other people's conversations");
+}
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

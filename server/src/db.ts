@@ -362,6 +362,12 @@ const migrations: Migration[] = [
     },
   },
   {
+    id: '011_quick_reports',
+    up: async (k) => {
+      if (!(await k.schema.hasColumn('samples', 'quick'))) await k.schema.alterTable('samples', (t) => { t.boolean('quick').defaultTo(false); });
+    },
+  },
+  {
     id: '012_employees_attendance',
     up: async (k) => {
       const mysql = k.client.config.client === 'mysql2';
@@ -382,9 +388,14 @@ const migrations: Migration[] = [
     },
   },
   {
-    id: '011_quick_reports',
+    id: '013_internal_chat',
     up: async (k) => {
-      if (!(await k.schema.hasColumn('samples', 'quick'))) await k.schema.alterTable('samples', (t) => { t.boolean('quick').defaultTo(false); });
+      if (!(await k.schema.hasColumn('users', 'last_seen_at'))) await k.schema.alterTable('users', (t) => { t.string('last_seen_at', 32).nullable(); });
+      if (!(await k.schema.hasTable('chat_messages'))) await k.schema.createTable('chat_messages', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.integer('from_user').unsigned().notNullable(); t.integer('to_user').unsigned().notNullable();
+        t.text('body').notNullable(); t.string('created_at', 32).notNullable(); t.string('read_at', 32).nullable();
+        t.index(['company_id', 'to_user', 'read_at']); t.index(['company_id', 'from_user', 'to_user']);
+      });
     },
   },
 ];
