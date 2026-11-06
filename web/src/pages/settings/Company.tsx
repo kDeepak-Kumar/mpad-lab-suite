@@ -277,7 +277,7 @@ function AiSettings({ v, set }: { v: any; set: (path: string, val: any) => void 
         </Paper>
       )}
       {test && !test.ok && (
-        <Alert color="red" variant="light" title={test.problem ?? 'Connection failed'}>
+        <Alert color={test.busy ? 'orange' : 'red'} variant="light" title={test.problem ?? 'Connection failed'}>
           {test.fix?.length > 0 && <><Text size="sm" fw={600} mt={2}>How to fix it</Text><List size="sm">{test.fix.map((f: string) => <List.Item key={f}>{f}</List.Item>)}</List></>}
           {test.suggestions?.length > 0 && <Group gap={6} mt="xs"><Text size="sm">Try a model:</Text>{test.suggestions.map((m: string) => <Button key={m} size="compact-xs" variant="light" onClick={() => { set('ai', { ...ai, model: m }); setTest(null); }}>{m}</Button>)}</Group>}
           {err && (

@@ -151,7 +151,29 @@ function providerMessage(j: any, raw: string) {
 async function readBody(r: Response) { const raw = await r.text(); let j: any = null; try { j = JSON.parse(raw); } catch { /* not JSON */ } return { raw, j }; }
 const fail = (r: Response, j: any, raw: string) => Object.assign(new Error(providerMessage(j, raw) || `HTTP ${r.status}`), { status: r.status, providerStatus: (Array.isArray(j) ? j[0]?.error?.status : j?.error?.status) ?? null });
 
-export async function chat(ai: AiSettings, system: string, user: string, opts: { maxTokens?: number; timeoutMs?: number; noFallback?: boolean } = {}): Promise<string> {
+type ChatOpts = { maxTokens?: number; timeoutMs?: number; noFallback?: boolean; retries?: number };
+const busy = (e: any) => [429, 500, 502, 503, 504].includes(Number(e?.status)) && !/quota|billing|credit|per day|daily/i.test(String(e?.message));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/**
+ * Ask the model. Temporary "busy" answers (503 high demand, 500, short rate limits) are retried with a pause;
+ * if Gemini stays busy, live requests move to Google's lighter Flash model so the assistant keeps answering.
+ */
+export async function chat(ai: AiSettings, system: string, user: string, opts: ChatOpts = {}): Promise<string> {
+  const tries = opts.retries ?? 2;
+  for (let i = 0; ; i++) {
+    try { return await chatOnce(ai, system, user, opts); }
+    catch (e: any) {
+      if (!busy(e)) throw e;
+      if (i < tries) { await sleep(i === 0 ? 1500 : 4000); continue; }
+      if (isGemini(ai) && !opts.noFallback) {
+        const lite = /lite/.test(String(ai.model)) ? 'gemini-flash-latest' : 'gemini-flash-lite-latest';
+        if (lite !== geminiModel(String(ai.model))) { console.warn(`[ai] Gemini ${ai.model} busy (${e.status}), trying ${lite}`); return chatOnce({ ...ai, model: lite }, system, user, { ...opts, noFallback: true }); }
+      }
+      throw Object.assign(e, { busy: true });
+    }
+  }
+}
+async function chatOnce(ai: AiSettings, system: string, user: string, opts: ChatOpts = {}): Promise<string> {
   if (!ai?.enabled || !ai.model) throw new Error('AI is not configured');
   const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45000);
   try {
@@ -168,7 +190,7 @@ export async function chat(ai: AiSettings, system: string, user: string, opts: {
         // Google retires model names; keep the assistant working with its recommended / latest Flash model
         if (r.status === 404 && !opts.noFallback) {
           const next = [...String(err.message).matchAll(/use\s+(?:the\s+)?(?:models\/)?([a-z][a-z0-9.\-]*\d[a-z0-9.\-]*)/gi)].map((m) => m[1].replace(/[.\-]+$/, ''))[0] ?? 'gemini-flash-latest';
-          if (next !== geminiModel(ai.model)) { console.warn(`[ai] Gemini model ${ai.model} unavailable, using ${next}`); return chat({ ...ai, model: next }, system, user, { ...opts, noFallback: true }); }
+          if (next !== geminiModel(ai.model)) { console.warn(`[ai] Gemini model ${ai.model} unavailable, using ${next}`); return chatOnce({ ...ai, model: next }, system, user, { ...opts, noFallback: true }); }
         }
         throw err;
       }
@@ -363,6 +385,7 @@ function diagnose(e: any, ai: AiSettings): { problem: string; fix: string[] } {
   if (/location is not supported|region|country/i.test(m)) return { problem: 'The provider does not offer its free API in the server\'s country / region.', fix: ['Use another provider (Groq, OpenRouter, Mistral) or a paid plan.', gem ? 'Google lists the supported regions on ai.google.dev ("available regions").' : 'Check the provider\'s list of supported regions.'] };
   if (st === 401 || st === 403 || /api key|api_key|unauthori[sz]ed|permission|invalid.*key|authentication|credential/i.test(m)) return { problem: 'The provider rejected the API key.', fix: ['Copy the key again from the provider and paste it (no spaces, the whole key).', gem ? 'For Gemini, create the key at aistudio.google.com/apikey – keys from Google Cloud console need the "Generative Language API" enabled.' : 'Check the key belongs to this provider and is not deleted or restricted.', 'If the key has "application restrictions" (website / IP), remove them or add your server\'s IP.'] };
   if (st === 404 || /not found|does not exist|unknown model|no such model|not supported for generatecontent/i.test(m)) return { problem: 'The model name is not available to this key.', fix: ['Click “List models” and pick one from the list.', gem ? 'For Gemini, “gemini-flash-latest” always points to Google\'s current Flash model.' : 'Copy the exact current name from the provider\'s models page.'] };
+  if (e?.busy || ((st === 503 || st === 502 || st === 504) && /demand|overload|unavailable|try again/i.test(m))) return { problem: 'Your setup is correct – the provider is busy right now.', fix: ['Nothing to change: you can press “Save changes”.', 'Busy moments are usually short; the app retries automatically and, for Gemini, switches to the lighter Flash model when needed.', 'If it happens often, choose “gemini-flash-lite-latest” or add billing for higher priority.'] };
   if (st === 429 || /rate|quota|exceeded|too many|resource.?exhausted|billing|credit/i.test(m)) return { problem: 'The free quota or rate limit is used up (or billing is needed).', fix: ['Wait a minute and test again.', gem ? 'Free Gemini keys have a daily limit per model – try another flash model or wait until tomorrow.' : 'Check the usage / limits page of the provider.', 'Choose a smaller model, another free provider, or add billing.'] };
   if (st >= 500) return { problem: 'The provider is having a temporary problem.', fix: ['Try again in a few minutes.', 'Check the provider\'s status page.'] };
   if (st === 400) return { problem: 'The provider refused the request.', fix: ['Read the provider\'s message below – it says what it did not accept.', 'Pick a model from “List models”.'] };
@@ -412,6 +435,7 @@ analytics.post('/ai/test', allow('manageSettings'), h(async (req) => {
     steps.push({ key: 'reply', label: 'Model replied', ok: true, note: reply.trim().slice(0, 40) || '(empty reply)' });
     return out(true, { reply: reply.slice(0, 60) });
   } catch (e: any) {
+    if (e?.busy) { steps.push({ key: 'reply', label: 'Model replied', ok: null, note: 'busy right now – tried 3 times' }); return out(false, { busy: true, ...diagnose(e, ai), error: detail(e) }); }
     steps.push({ key: 'reply', label: 'Model replied', ok: false });
     const sugg = [...new Set([...recommended(String(e?.message ?? '')), ...(isGemini(ai) ? ['gemini-flash-latest'] : []), ...(models?.filter((m) => /latest|flash|mini|haiku|instant|small|8b|lite/i.test(m)) ?? [])])].filter((m) => m !== ai.model).slice(0, 6);
     return out(false, { ...diagnose(e, ai), error: detail(e), suggestions: sugg });

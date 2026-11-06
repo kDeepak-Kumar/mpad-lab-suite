@@ -498,6 +498,12 @@ console.log('22. Assistant, invoice analytics, AI diagnostics');
     expect(!t.ok && /not available/.test(t.problem) && t.suggestions[0] === 'gemini-3.8-flash' && t.suggestions.includes('gemini-flash-latest') && t.steps.find((x) => x.key === 'key').ok, 'Gemini: retired model – key accepted, Google\'s recommended model offered first');
     t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'models/gemini-flash-latest', apiKey: 'good-key' });
     expect(t.ok && t.reply === 'OK' && t.steps.every((x) => x.ok), 'Gemini: connected through Google\'s own API (old address and "models/" prefix accepted; thinking text ignored)');
+    t = await api('owner', 'POST', '/ai/test', { provider: 'gemini', model: 'gemini-flash-latest', apiKey: 'busy-key' });
+    expect(!t.ok && t.busy && /setup is correct/.test(t.problem) && t.steps.find((x) => x.key === 'key').ok && t.steps.find((x) => x.key === 'reply').ok === null, 'Gemini busy (503): test retries, then says the setup is correct and Google is busy');
+    await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'gemini', model: 'gemini-flash-latest', apiKey: 'busy-key' } });
+    const ask = await api('owner', 'POST', '/ai/ask', { question: 'revenue by client' });
+    expect(ask.explanation === 'lite', 'Gemini busy: live requests switch to the lighter Flash model and still answer');
+    await api('owner', 'PUT', '/company', { ai: { enabled: false } });
     const ml = await api('owner', 'POST', '/ai/models', { provider: 'gemini', apiKey: 'good-key' });
     expect(ml.models[0] === 'gemini-flash-latest' && ml.models.includes('gemini-3.8-flash') && !ml.models.some((x) => /embedding/.test(x)) && ml.endpoint.endsWith('/v1beta/models'), 'Gemini: List models reads every page, keeps chat models, latest alias first');
   }
