@@ -2,15 +2,15 @@ import { type ComponentType } from 'react';
 import { Link as RLink, useLocation, useNavigate } from 'react-router-dom';
 import { ActionIcon, Popover, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
-import { IconBriefcase, IconChevronRight, IconCoinRupee, IconFlask, IconSettings, IconStarFilled, IconStar, IconClockHour4, IconX, IconUsers, IconFileText, IconLayoutList, IconFile, IconClipboardCheck } from '@tabler/icons-react';
+import { IconUsersGroup, IconBriefcase, IconChevronRight, IconCoinRupee, IconFlask, IconSettings, IconStarFilled, IconStar, IconClockHour4, IconX, IconUsers, IconFileText, IconLayoutList, IconFile, IconClipboardCheck } from '@tabler/icons-react';
 import { useFavs, useRecent, type Fav } from '../favorites';
 import { useDragReorder, moveItem } from './useDragReorder';
 
 export type NavItem = { label: string; to: string; tab: string; icon: ComponentType<{ size?: number | string; stroke?: number | string }>; section?: string };
 /** Accent per section: icon tint of the active item and the section marker. */
-export const SECTION_COLOR: Record<string, string> = { 'Sales & CRM': '#9b8afb', Laboratory: '#2ed3b7', Accounts: '#fdb022', Administration: '#98a2b3' };
+export const SECTION_COLOR: Record<string, string> = { 'Sales & CRM': '#9b8afb', Laboratory: '#2ed3b7', Accounts: '#fdb022', People: '#f670c7', Administration: '#98a2b3' };
 
-export const SECTION_ICON: Record<string, ComponentType<{ size?: number | string; color?: string }>> = { 'Sales & CRM': IconBriefcase, Laboratory: IconFlask, Accounts: IconCoinRupee, Administration: IconSettings };
+export const SECTION_ICON: Record<string, ComponentType<{ size?: number | string; color?: string }>> = { 'Sales & CRM': IconBriefcase, Laboratory: IconFlask, Accounts: IconCoinRupee, People: IconUsersGroup, Administration: IconSettings };
 const KIND_ICON: Record<string, ComponentType<{ size?: number | string }>> = { client: IconUsers, document: IconFileText, listview: IconLayoutList, workorder: IconClipboardCheck, page: IconFile };
 
 export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean; all: NavItem[] }) {
@@ -18,7 +18,7 @@ export function SideNav({ items, mini, all }: { items: NavItem[]; mini: boolean;
   const nav = useNavigate();
   const favs = useFavs();
   const recent = useRecent().filter((r) => r.to !== loc.pathname).slice(0, 5);
-  const [open, setOpen] = useLocalStorage<Record<string, boolean>>({ key: 'nav-groups-v2', defaultValue: { Favourites: true, Recent: false, 'Sales & CRM': true, Laboratory: true, Accounts: true, Administration: false } });
+  const [open, setOpen] = useLocalStorage<Record<string, boolean>>({ key: 'nav-groups-v2', defaultValue: { Favourites: true, Recent: false, 'Sales & CRM': true, Laboratory: true, Accounts: true, People: true, Administration: false } });
   const isActive = (n: NavItem) => (n.to === '/' ? loc.pathname === '/' : loc.pathname === n.to || (loc.pathname.startsWith(n.to + '/') && !all.some((o) => o.to !== n.to && o.to.startsWith(n.to) && loc.pathname.startsWith(o.to))));
   const top = items.filter((n) => !n.section);
   const groups = [...new Set(items.filter((n) => n.section).map((n) => n.section!))];

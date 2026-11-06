@@ -4,7 +4,7 @@ import { IconAlertTriangle, IconClockEdit, IconHistory, IconTrash } from '@table
 import { api, invalidate, ok, useApi } from '../api';
 import { isAdmin, useMe } from '../ctx';
 
-export type BinObject = 'sample' | 'test' | 'quote' | 'invoice' | 'report' | 'client' | 'workorder' | 'payment' | 'equipment' | 'vendor' | 'purchase' | 'outsource' | 'activity' | 'catalog';
+export type BinObject = 'sample' | 'test' | 'quote' | 'invoice' | 'report' | 'client' | 'workorder' | 'payment' | 'equipment' | 'vendor' | 'purchase' | 'outsource' | 'activity' | 'catalog' | 'employee';
 
 const fmt = (v?: string | null) => { if (!v) return '—'; const d = new Date(v); return Number.isNaN(+d) ? v : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
 const toLocalInput = (v?: string | null) => { if (!v) return ''; const d = new Date(v); if (Number.isNaN(+d)) return ''; const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };

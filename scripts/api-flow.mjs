@@ -526,6 +526,46 @@ console.log('23. Quick test report without registration, register later');
   m = await fail(() => api('frontdesk', 'POST', `/quick-reports/${qr.id}/register`, { client_id: client.id }));
   expect(m, 'cannot register twice');
 }
+console.log('24. Employees, ID documents and attendance');
+{
+  let m = await fail(() => api('owner', 'POST', '/employees', { name: 'Test Person', id_type: 'Aadhaar', id_number: '1234' }));
+  expect(/12 digits/.test(m), 'Aadhaar number is checked');
+  const e1 = await api('owner', 'POST', '/employees', { name: 'Anil Kumar', code: 'E901', designation: 'Lab assistant', id_type: 'Aadhaar', id_number: '2345 6789 0123', pan: 'abcde1234f', date_of_joining: '2026-01-05', qualifications: 'Diploma Civil' });
+  const g = await api('owner', 'GET', `/employees/${e1.id}`);
+  expect(g.id_number === 'XXXX XXXX 0123' && g.pan === 'ABCDE1234F', 'ID number is shown masked; PAN normalised');
+  const rv = await api('owner', 'POST', `/employees/${e1.id}/reveal-id`);
+  expect(rv.id_number === '234567890123', 'HR can reveal the full number (recorded)');
+  await api('owner', 'PUT', `/employees/${e1.id}`, { ...g, user: undefined, canManage: undefined, has_id_number: undefined, designation: 'Senior lab assistant' });
+  expect((await api('owner', 'POST', `/employees/${e1.id}/reveal-id`)).id_number === '234567890123', 'saving the form with the masked number keeps the real one');
+  m = await fail(() => api('frontdesk', 'POST', `/employees/${e1.id}/reveal-id`));
+  expect(m, 'other roles cannot reveal ID numbers');
+  const fu = await api('owner', 'POST', '/employees/from-users');
+  expect(fu.created >= 5, `${fu.created} profiles created from app users`);
+  const techMe = await api('tech', 'GET', '/employees/me');
+  expect(techMe && /Ravi/.test(techMe.name), 'a user sees their own employee profile');
+  expect((await api('tech', 'GET', '/employees')).length === 1, 'employees without HR rights see only themselves');
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  await api('owner', 'POST', '/files', { entity: 'employee', entity_id: techMe.id, name: 'aadhaar.png', mime: 'image/png', data: png, kind: 'id' });
+  expect((await api('tech', 'GET', `/files?entity=employee&entity_id=${techMe.id}`)).length === 1, 'employee can see their own ID document');
+  m = await fail(() => api('frontdesk', 'GET', `/files?entity=employee&entity_id=${techMe.id}`));
+  expect(m, "others cannot see an employee's ID documents");
+  const d = today;
+  await api('owner', 'PUT', '/attendance', { rows: [{ employee_id: e1.id, date: d, status: 'P', in_time: '09:05', out_time: '18:00' }, { employee_id: techMe.id, date: d, status: 'L', note: 'Casual leave' }] });
+  const day = await api('owner', 'GET', `/attendance?date=${d}`);
+  expect(day.records.length === 2 && day.records.find((r) => r.employee_id === e1.id).in_time === '09:05', 'daily register saved with in/out times');
+  m = await fail(() => api('owner', 'PUT', '/attendance', { rows: [{ employee_id: e1.id, date: '2099-01-01', status: 'P' }] }));
+  expect(/future/.test(m), 'future dates are refused');
+  m = await fail(() => api('tech', 'PUT', '/attendance', { rows: [{ employee_id: techMe.id, date: d, status: 'P' }] }));
+  expect(m, 'staff cannot mark their own attendance');
+  const dd = `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}`;
+  const chk = await api('owner', 'POST', '/attendance/import', { rows: [{ 'Employee code': 'E901', Date: dd, 'In time': '9:30 AM', 'Out time': '6:15 PM' }, { 'Employee code': 'E999', Date: dd, Status: 'P' }, { 'Employee name': 'Anil Kumar', Date: 'yesterday?', Status: 'P' }], dryRun: true });
+  expect(chk.valid === 1 && chk.errorCount === 2, 'upload is checked first: unknown employee and bad date reported');
+  const imp = await api('owner', 'POST', '/attendance/import', { rows: [{ 'Emp Code': 'E901', Date: dd, 'Punch In': '9:30 AM', 'Punch Out': '6:15 PM' }], dryRun: false });
+  const after = (await api('owner', 'GET', `/attendance?date=${d}`)).records.find((r) => r.employee_id === e1.id);
+  expect(imp.updated === 1 && after.in_time === '09:30' && after.out_time === '18:15' && after.status === 'P', 'biometric-style upload updates the day (punch times → present)');
+  const mon = await api('tech', 'GET', `/attendance?month=${d.slice(0, 7)}`);
+  expect(mon.employees.length === 1 && mon.records.length === 1, 'staff see only their own monthly attendance');
+}
 console.log('17. AI contract review');
 if (process.env.MOCK_AI) {
   await api('owner', 'PUT', '/company', { ai: { enabled: true, provider: 'openai', baseUrl: process.env.MOCK_AI, model: 'mock', apiKey: 'x' } });

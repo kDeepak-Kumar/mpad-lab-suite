@@ -5,7 +5,7 @@ import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
-  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle, IconChartBar, IconBolt,
+  IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle, IconChartBar, IconBolt, IconId, IconCalendarCheck,
   IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
@@ -49,6 +49,9 @@ const ObsTemplateEditor = page(() => import('./pages/settings/ObsTemplateEditor'
 const SetupPage = page(() => import('./pages/settings/Setup'), 'SetupPage');
 const InvoiceAnalyticsPage = page(() => import('./pages/InvoiceAnalytics'), 'InvoiceAnalyticsPage');
 const QuickReportsPage = page(() => import('./pages/QuickReports'), 'QuickReportsPage');
+const EmployeesPage = page(() => import('./pages/Employees'), 'EmployeesPage');
+const EmployeeDetail = page(() => import('./pages/Employees'), 'EmployeeDetail');
+const AttendancePage = page(() => import('./pages/Attendance'), 'AttendancePage');
 const RecycleBinPage = page(() => import('./pages/settings/RecycleBin'), 'RecycleBinPage');
 const FollowUpsPage = page(() => import('./pages/FollowUps'), 'FollowUpsPage');
 const AccountPage = page(() => import('./pages/Account'), 'AccountPage');
@@ -83,6 +86,8 @@ const NAV: NavItem[] = [
   { label: 'Purchases', to: '/purchases', tab: 'purchases', icon: IconShoppingCart, section: 'Accounts' },
   { label: 'GST returns', to: '/gst', tab: 'gst', icon: IconReceiptTax, section: 'Accounts' },
   { label: 'Registers', to: '/registers', tab: 'registers', icon: IconTable, section: 'Accounts' },
+  { label: 'Employees', to: '/employees', tab: 'employees', icon: IconId, section: 'People' },
+  { label: 'Attendance', to: '/attendance', tab: 'employees', icon: IconCalendarCheck, section: 'People' },
   { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconBuilding, section: 'Administration' },
   { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconTags, section: 'Administration' },
   { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate, section: 'Administration' },
@@ -179,6 +184,7 @@ function Shell() {
                 <Menu.Label>{me.user.name}<br /><Badge size="xs" variant="light" color={me.role.admin ? 'red' : 'brand'}>{me.role.label}</Badge></Menu.Label>
                 <Menu.Item onClick={() => nav('/account')}>My account & security</Menu.Item>
                 <Menu.Item onClick={() => nav('/settings/users?me=1')}>My profile & signature</Menu.Item>
+                <Menu.Item onClick={() => nav('/employees/me')}>My employee record & attendance</Menu.Item>
                 <Menu.Item leftSection={<IconLogout size={16} />} onClick={logout}>Sign out</Menu.Item>
               </Menu.Dropdown>
             </Menu>
@@ -233,6 +239,9 @@ function Shell() {
             <Route path="/settings/users" element={<UsersSettings />} />
             <Route path="/settings/recycle-bin" element={<RecycleBinPage />} />
             <Route path="/reports/quick" element={<QuickReportsPage />} />
+            <Route path="/employees" element={<EmployeesPage />} />
+            <Route path="/employees/:id" element={<EmployeeDetail />} />
+            <Route path="/attendance" element={<AttendancePage />} />
             <Route path="/settings/catalog" element={<CatalogSettings />} />
             <Route path="/settings/templates" element={<TemplatesPage />} />
             <Route path="/settings/templates/obs/:code" element={<ObsTemplateEditor />} />

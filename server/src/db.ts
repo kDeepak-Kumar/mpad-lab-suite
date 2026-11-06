@@ -337,6 +337,7 @@ const migrations: Migration[] = [
       // A trigger only stamps when the update did not set updated_at itself – that lets System Administrators correct it.
       const mysql = k.client.config.client === 'mysql2';
       for (const t of TRACKED_TABLES) {
+        if (!(await k.schema.hasTable(t))) continue; // created by a later migration, which sets its own dates
         if (!(await k.schema.hasColumn(t, 'updated_at'))) {
           await k.schema.alterTable(t, (b) => { b.string('updated_at', 32).nullable(); });
           await k(t).whereNull('updated_at').update({ updated_at: k.ref('created_at') });
@@ -361,6 +362,26 @@ const migrations: Migration[] = [
     },
   },
   {
+    id: '012_employees_attendance',
+    up: async (k) => {
+      const mysql = k.client.config.client === 'mysql2';
+      if (!(await k.schema.hasTable('employees'))) await k.schema.createTable('employees', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.string('code', 30); t.string('name', 120).notNullable(); t.integer('user_id').unsigned().nullable();
+        t.string('designation', 120); t.string('department', 80); t.text('qualifications'); t.string('experience', 120); t.string('date_of_joining', 10); t.string('date_of_birth', 10);
+        t.string('phone', 40); t.string('email', 190); t.text('address'); t.string('emergency_contact', 200); t.string('blood_group', 8);
+        if (mysql) t.text('photo', 'longtext'); else t.text('photo');
+        t.string('id_type', 30); t.string('id_number', 40); t.string('pan', 12); t.string('status', 12).defaultTo('active'); t.string('left_on', 10); t.text('notes'); json(t, 'data');
+        t.string('created_at', 32); t.string('updated_at', 32); t.index(['company_id', 'status']);
+      });
+      if (!(await k.schema.hasTable('attendance'))) await k.schema.createTable('attendance', (t) => {
+        t.increments('id'); t.integer('company_id').unsigned().notNullable(); t.integer('employee_id').unsigned().notNullable(); t.string('date', 10).notNullable();
+        t.string('status', 4).notNullable(); t.string('in_time', 5); t.string('out_time', 5); t.string('note', 300); t.string('source', 12).defaultTo('manual');
+        t.integer('marked_by').unsigned(); t.string('created_at', 32); t.string('updated_at', 32);
+        t.unique(['company_id', 'employee_id', 'date']); t.index(['company_id', 'date']);
+      });
+    },
+  },
+  {
     id: '011_quick_reports',
     up: async (k) => {
       if (!(await k.schema.hasColumn('samples', 'quick'))) await k.schema.alterTable('samples', (t) => { t.boolean('quick').defaultTo(false); });
@@ -369,7 +390,7 @@ const migrations: Migration[] = [
 ];
 
 /** Tables whose records show Created / Last modified dates (and that admins may correct). */
-export const TRACKED_TABLES = ['clients', 'contacts', 'sites', 'catalog', 'equipment', 'documents', 'samples', 'tests', 'payments', 'work_orders', 'activities', 'vendors', 'outsource_jobs', 'purchases', 'users'];
+export const TRACKED_TABLES = ['clients', 'contacts', 'sites', 'catalog', 'equipment', 'documents', 'samples', 'tests', 'payments', 'work_orders', 'activities', 'vendors', 'outsource_jobs', 'purchases', 'users', 'employees'];
 
 export async function migrate(k: Knex = db) {
   if (!(await k.schema.hasTable('_migrations'))) {

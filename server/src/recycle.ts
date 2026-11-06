@@ -91,6 +91,10 @@ async function plan(cid: number, object: string, id: number): Promise<Plan> {
       const a = await one('activities');
       return { label: `Follow-up: ${a.subject ?? a.type}`, rows: { activities: [a] }, patches: [], summary: [] };
     }
+    case 'employee': {
+      const e = await one('employees'); const att = await db('attendance').where({ employee_id: id, company_id: cid }); const f = await files(cid, 'employee', [id]);
+      return { label: `Employee ${e.name}`, rows: { employees: [e], attendance: att, files: f }, patches: [], summary: [...n(att, 'attendance entry'), ...n(f, 'document')] };
+    }
     case 'catalog': {
       const c = await one('catalog');
       const used = await db('tests').where({ catalog_id: id, company_id: cid }).first('id');
@@ -99,7 +103,7 @@ async function plan(cid: number, object: string, id: number): Promise<Plan> {
     default: throw new HttpError(400, 'This kind of record cannot be deleted here');
   }
 }
-export const RECYCLE_OBJECTS = ['sample', 'test', 'quote', 'invoice', 'report', 'client', 'workorder', 'payment', 'equipment', 'vendor', 'purchase', 'outsource', 'activity', 'catalog'];
+export const RECYCLE_OBJECTS = ['sample', 'test', 'quote', 'invoice', 'report', 'client', 'workorder', 'payment', 'equipment', 'vendor', 'purchase', 'outsource', 'activity', 'catalog', 'employee'];
 
 async function retentionDays(cid: number) { return Number(((await getCompany(cid)).defaults as any)?.recycleDays ?? 30) === 60 ? 60 : 30; }
 
@@ -203,7 +207,7 @@ const TABLE: Record<string, { table: string; entity: string }> = {
   client: { table: 'clients', entity: 'client' }, quote: { table: 'documents', entity: 'document' }, invoice: { table: 'documents', entity: 'document' }, report: { table: 'documents', entity: 'document' },
   document: { table: 'documents', entity: 'document' }, sample: { table: 'samples', entity: 'sample' }, test: { table: 'tests', entity: 'test' }, workorder: { table: 'work_orders', entity: 'workorder' },
   payment: { table: 'payments', entity: 'payment' }, equipment: { table: 'equipment', entity: 'equipment' }, vendor: { table: 'vendors', entity: 'vendor' }, purchase: { table: 'purchases', entity: 'purchase' },
-  outsource: { table: 'outsource_jobs', entity: 'outsource' }, catalog: { table: 'catalog', entity: 'catalog' }, activity: { table: 'activities', entity: 'activity' }, user: { table: 'users', entity: 'user' },
+  outsource: { table: 'outsource_jobs', entity: 'outsource' }, catalog: { table: 'catalog', entity: 'catalog' }, activity: { table: 'activities', entity: 'activity' }, user: { table: 'users', entity: 'user' }, employee: { table: 'employees', entity: 'employee' },
 };
 /** Created / last modified (with who, from the audit trail). */
 recycle.get('/record-info/:object/:id', h(async (req) => {

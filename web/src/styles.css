@@ -314,3 +314,16 @@ body.dragging-rows, body.dragging-rows * { cursor: grabbing !important; user-sel
 .ai-card:hover { border-color: #c7d0db; box-shadow: 0 4px 14px rgba(16,24,40,.06); }
 .asst-msg .md-link { color: #175cd3; }
 body:has(.set-savebar) .asst-fab, body:has(.saving-pill) .asst-fab { bottom: 100px; }
+
+/* attendance month grid */
+.att-grid { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.att-grid th, .att-grid td { border-bottom: 1px solid var(--line); padding: 4px 3px; text-align: center; white-space: nowrap; }
+.att-grid th { font-weight: 650; color: var(--ink-2); font-size: 11px; background: #f9fafb; }
+.att-grid th div { font-weight: 400; color: var(--ink-3); font-size: 10px; }
+.att-grid th.sun { color: #b42318; }
+.att-grid .att-name { text-align: left; position: sticky; left: 0; background: #fff; min-width: 150px; max-width: 200px; padding-left: 8px; z-index: 1; }
+.att-grid th.att-name { background: #f9fafb; }
+.att-c { display: inline-block; min-width: 22px; padding: 1px 2px; border-radius: 5px; font-weight: 650; font-size: 11px; }
+.att-teal { background: #dcfae6; color: #067647; } .att-red { background: #fee4e2; color: #b42318; } .att-yellow { background: #fef0c7; color: #93370d; }
+.att-violet { background: #ebe9fe; color: #5925dc; } .att-gray { background: #f2f4f7; color: #475467; } .att-blue { background: #d1e9ff; color: #175cd3; } .att-cyan { background: #cff9fe; color: #0e7090; }
+.att-none { color: #d0d5dd; }

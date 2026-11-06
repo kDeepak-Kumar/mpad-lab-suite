@@ -81,7 +81,7 @@ export const TABS: { key: string; label: string }[] = [
   { key: 'samples', label: 'Sample register' }, { key: 'tests', label: 'Tests & observations' }, { key: 'prepare', label: 'Prepare report' }, { key: 'reports', label: 'Reports' },
   { key: 'invoices', label: 'Invoices' }, { key: 'payments', label: 'Payments' }, { key: 'ledger', label: 'Ledgers' }, { key: 'gst', label: 'GST returns' }, { key: 'purchases', label: 'Purchases & vendor bills' }, { key: 'outsourcing', label: 'Outsourced tests' }, { key: 'registers', label: 'Registers' },
   { key: 'analytics', label: 'Analytics & AI' }, { key: 'company', label: 'Company & branding' }, { key: 'catalog', label: 'Rate card' }, { key: 'equipment', label: 'Equipment' },
-  { key: 'templates', label: 'Templates' }, { key: 'users', label: 'Users' }, { key: 'setup', label: 'Setup (customise)' },
+  { key: 'templates', label: 'Templates' }, { key: 'users', label: 'Users' }, { key: 'employees', label: 'Employees & attendance' }, { key: 'setup', label: 'Setup (customise)' },
 ];
 export const PERM_OBJECTS = ['client', 'quote', 'workorder', 'sample', 'test', 'report', 'invoice', 'payment', 'catalog', 'equipment'] as const;
 export type Crud = { read: boolean; create: boolean; edit: boolean; delete: boolean; viewAll?: boolean; modifyAll?: boolean };
@@ -100,7 +100,7 @@ export const ACTIONS: { key: string; label: string }[] = [
   { key: 'issueInvoices', label: 'Issue invoices' }, { key: 'recordPayments', label: 'Record payments' }, { key: 'manageGst', label: 'Prepare GST returns' }, { key: 'managePurchases', label: 'Record vendor bills, purchases and payments' }, { key: 'manageOutsourcing', label: 'Send samples to external labs and enter their results' },
   { key: 'viewAnalytics', label: 'View analytics & dashboards' }, { key: 'useAI', label: 'Use the AI assistant' },
   { key: 'manageTemplates', label: 'Edit templates' }, { key: 'manageSettings', label: 'Company settings' },
-  { key: 'manageUsers', label: 'Manage users' }, { key: 'manageCustomization', label: 'Customise fields, picklists, layouts, roles' },
+  { key: 'manageUsers', label: 'Manage users' }, { key: 'manageEmployees', label: 'Manage employees, ID documents and attendance' }, { key: 'markAttendance', label: 'Mark daily attendance' }, { key: 'manageCustomization', label: 'Customise fields, picklists, layouts, roles' },
 ];
 export interface RoleDef {
   key: string; label: string; system?: boolean;

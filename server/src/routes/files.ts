@@ -9,7 +9,7 @@ import { readArchived } from '../archive';
 export const files = Router();
 files.use(requireAuth);
 
-const ENTITIES: Record<string, { table: string | null; read: string; write: string }> = {
+const ENTITIES: Record<string, { table: string | null; read: string; write: string; self?: string; sensitive?: boolean }> = {
   equipment: { table: 'equipment', read: 'equipment.read', write: 'equipment.edit' },
   /** Company documents (brochure, accreditation certificate…): entity_id is always 0. Anyone signed in can read and attach them. */
   company: { table: null, read: '', write: 'manageSettings' },
@@ -17,7 +17,17 @@ const ENTITIES: Record<string, { table: string | null; read: string; write: stri
   outsource: { table: 'outsource_jobs', read: 'sample.read', write: 'manageOutsourcing' },
   /** Vendor bill copy. */
   purchase: { table: 'purchases', read: 'managePurchases', write: 'managePurchases' },
+  /** Employee ID documents (Aadhaar, PAN, certificates): HR and the employee themself only; every view is recorded. */
+  employee: { table: 'employees', read: 'manageEmployees', write: 'manageEmployees', self: 'user_id', sensitive: true },
 };
+/** May this user read files of that record? (role permission, or their own employee record) */
+async function mayRead(u: { id: number; company_id: number } & Parameters<typeof can>[0], entity: string, id: number) {
+  const e = ENTITIES[entity];
+  if (!e) return false;
+  if (!e.read || can(u, e.read)) return true;
+  if (e.self && e.table) { const r = await db(e.table).where({ id, company_id: u.company_id }).first(e.self); return Boolean(r && r[e.self] === u.id); }
+  return false;
+}
 const MAX_BYTES = 10 * 1024 * 1024;
 const MIME = /^(application\/pdf|image\/(png|jpe?g|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document))$/;
 
@@ -31,8 +41,8 @@ async function owned(cid: number, entity: string, id: number) {
 
 files.get('/files', h(async (req) => {
   const entity = String(req.query.entity ?? ''), id = Number(req.query.entity_id);
-  const e = await owned(req.user.company_id, entity, id);
-  if (e.read && !can(req.user, e.read)) throw new HttpError(403, 'Your role cannot see these files');
+  await owned(req.user.company_id, entity, id);
+  if (!(await mayRead(req.user, entity, id))) throw new HttpError(403, 'Your role cannot see these files');
   return db('files as f').leftJoin('users as u', 'u.id', 'f.uploaded_by').where({ 'f.company_id': req.user.company_id, 'f.entity': entity, 'f.entity_id': id })
     .select('f.id', 'f.name', 'f.mime', 'f.size', 'f.note', 'f.kind', 'f.archived_at', 'f.created_at', 'u.name as uploaded_by_name').orderBy('f.id', 'desc');
 }));
@@ -57,7 +67,8 @@ files.get('/files/:id/download', async (req, res) => {
     const f = await db('files').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
     if (!f) { res.status(404).json({ error: 'File not found' }); return; }
     const e = ENTITIES[f.entity];
-    if (!e || (e.read && !can(req.user, e.read))) { res.status(403).json({ error: 'Not allowed' }); return; }
+    if (!e || !(await mayRead(req.user, f.entity, f.entity_id))) { res.status(403).json({ error: 'Not allowed' }); return; }
+    if (e.sensitive) await audit(db, req.user, f.entity, f.entity_id, 'document viewed', { name: f.name });
     const buf = f.archive_path ? await readArchived(f.archive_path) : Buffer.from(String(f.data), 'base64');
     res.setHeader('Content-Type', f.mime || 'application/octet-stream');
     res.setHeader('Content-Length', String(buf.length));
