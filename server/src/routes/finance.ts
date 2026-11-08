@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { mailer } from '../alerts';
 import { emailHtml, footerText } from '../email';
-import { computeTotals, formatDate, isEmailList, stateName, type LineInput } from '@suite/shared';
+import { cleanLayout, refreshRoles, computeTotals, formatDate, isEmailList, stateName, type LineInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
@@ -161,6 +161,22 @@ finance.put('/documents/:id', h(async (req) => {
   if (locked && (body.data || body.client_id || body.date || body.number !== undefined)) throw new HttpError(409, issued ? (admin ? 'Unlock the issued document first (System Admin).' : 'Issued documents cannot be changed. Use an amendment or credit note.') : 'This quotation was already sent. Create a revision to change it.');
   if (locked && body.overrides) throw new HttpError(409, 'Layout of an issued document is frozen');
   checkDocData(body.data);
+  if (body.data && 'layout' in body.data) {
+    // report layout edited in the browser: only simple formatting is kept (no scripts, links or images)
+    if (d.kind !== 'report') delete body.data.layout;
+    else if (body.data.layout !== null) {
+      const clean = cleanLayout(body.data.layout);
+      if (!clean) throw new HttpError(400, 'The report layout is not valid');
+      body.data.layout = clean;
+      const before = JSON.stringify((d.data as any).layout?.sections ?? null);
+      if (before !== JSON.stringify(clean.sections)) {
+        // one history line per editing session, not one per autosave
+        const last = await db('audit_log').where({ company_id: req.user.company_id, entity: 'document', entity_id: d.id }).orderBy('id', 'desc').first();
+        if (!(last?.action === 'report layout edited' && last.user_id === req.user.id && Date.now() - new Date(last.at).getTime() < 15 * 60_000)) await audit(db, req.user, 'document', d.id, 'report layout edited', { sections: clean.sections.length });
+      }
+    }
+  }
+  if (body.data && d.kind === 'report') for (const k of ['tests', 'customer', 'extra', 'testIds', 'sampleIds'] as const) delete body.data[k]; // from the lab records only
   let data = { ...d.data, ...(body.data ?? {}) };
   if (body.data?.custom) data.custom = (await cleanWrite(cid, req.user.roleDef, d.kind, { custom: body.data.custom }, { creating: false })).custom;
   if (body.client_id || body.site_id !== undefined || body.contact_id !== undefined) {
@@ -174,6 +190,11 @@ finance.put('/documents/:id', h(async (req) => {
     }
     if (!(data.unlocked as Record<string, boolean> | undefined)?.discountPct) merged.discountPct = snap.defaultDiscountPct;
     data = merged;
+  }
+  // remarks / notes changed through the API: the report body follows (a layout sent with the change wins)
+  if (d.kind === 'report' && body.data && !('layout' in body.data) && (data as any).layout?.sections) {
+    const roles = (['remarks', 'notes'] as const).filter((k) => k in body.data!);
+    if (roles.length) (data as any).layout = refreshRoles((data as any).layout, { data: data as never }, [...roles]);
   }
   if (data.placeOfSupply && !(data.unlocked as any)?.placeOfSupplyName) data.placeOfSupplyName = stateName(String(data.placeOfSupply));
   const patch: Record<string, unknown> = { data: toJson(data), updated_at: now(), accreditation: (data.accreditation as string) ?? null };
@@ -346,8 +367,17 @@ finance.post('/documents/:id/issue', h(async (req) => {
     const hash = sha256({ data, overrides: d.overrides, template: d.template_id });
     await trx('documents').where({ id: d.id }).update({ number, date, status: 'issued', data: toJson(data), issued_at: now(), issued_by: req.user.id, hash, updated_at: now() });
     if (d.kind === 'report') {
-      await trx('tests').whereIn('id', (d.data.testIds as number[]) ?? []).update({ status: 'reported', report_id: d.id });
-      await trx('samples').whereIn('id', (d.data.sampleIds as number[]) ?? []).update({ status: 'reported' });
+      const tids = (d.data.testIds as number[]) ?? [];
+      await trx('tests').whereIn('id', tids).update({ status: 'reported' });
+      // results repeated from an earlier issued report keep their link to it (that report stays as issued)
+      const keep = (await trx('tests as t').join('documents as o', 'o.id', 't.report_id').whereIn('t.id', tids).where('o.status', 'issued').whereNot('o.id', d.id)
+        .modify((q) => { if (d.parent_id) q.whereNot('o.id', d.parent_id as number); }).select('t.id')).map((r: { id: number }) => r.id);
+      await trx('tests').whereIn('id', tids.filter((x) => !keep.includes(x))).update({ report_id: d.id });
+      // a sample is reported once all its tests are (28-day cubes may still be waiting)
+      for (const sid of (d.data.sampleIds as number[]) ?? []) {
+        const open = await trx('tests').where({ sample_id: sid }).whereNot('status', 'reported').first('id');
+        if (!open) await trx('samples').where({ id: sid }).update({ status: 'reported' });
+      }
       if (d.parent_id) await trx('documents').where({ id: d.parent_id }).update({ status: 'cancelled' });
     }
     await audit(trx, req.user, 'document', d.id, `${d.kind} signed and issued`, { number, hash: hash.slice(0, 12), signatory: signatory!.name });

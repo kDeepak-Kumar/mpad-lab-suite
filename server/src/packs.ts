@@ -67,6 +67,10 @@ export const PACK_CATALOG: CatalogSeed[] = [
   t('CEM-SG', 'Cement', 'Density (specific gravity) of cement', 'Specific gravity', 'IS 4031 (Part 11) : 1988 RA 2019', 600, 'CEM-SG', 1),
   // Steel
   t('STEEL-TMT', 'Steel', 'Physical properties of TMT bars (mass, 0.2% proof stress, TS, elongation, bend, rebend)', 'Physical properties of reinforcement steel', 'IS 1608 (Part 1) & IS 1786 : 2008', 1500, 'STEEL-TMT', 2, 'Per diameter'),
+  t('STEEL-CHEM', 'Steel', 'Chemical analysis of TMT bars (C, S, P)', 'Chemical analysis of TMT bars', 'IS 8811 : 1998 & IS 1786 : 2008', 2500, 'STEEL-CHEM', 3, 'Per diameter', { nabl: false }),
+  // GGBS
+  t('GGBS-PHY', 'GGBS', 'Physical properties of GGBS (specific gravity, fineness, slag activity index)', 'Physical properties of GGBS', 'IS 16714 : 2018', 4000, 'GGBS-PHY', 29, 'Per sample', { nabl: false }),
+  t('GGBS-CHEM', 'GGBS', 'Chemical analysis of GGBS', 'Chemical properties of GGBS', 'IS 16714 : 2018', 5000, 'GGBS-CHEM', 7, 'Per sample', { nabl: false }),
   // Concrete
   t('CON-CUBE', 'Concrete', 'Compressive strength of concrete cubes (set of 3)', 'Compressive strength of concrete cubes', 'IS 516 (Part 1/Sec 1) : 2021', 600, 'CUBE-COMP', 1, 'Per set'),
   t('CON-FLEX', 'Concrete', 'Flexural strength of concrete beams (set of 3)', 'Flexural strength', 'IS 516 (Part 1/Sec 1) : 2021', 1200, 'CON-FLEX', 1, 'Per set'),

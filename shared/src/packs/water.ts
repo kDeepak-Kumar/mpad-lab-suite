@@ -5,7 +5,7 @@ import type { ObservationTemplate } from '../observation';
  * the sheet is a direct-entry table – values are typed or imported from the vendor's report.
  * Requirements are editable in the template editor; verify them against the current edition of each standard.
  */
-interface Param { key: string; name: string; unit: string; method: string; spec: string; decimals?: number; text?: boolean; options?: string[] }
+interface Param { key: string; group?: string; name: string; unit: string; method: string; spec: string; decimals?: number; text?: boolean; options?: string[] }
 
 function entrySheet(o: { code: string; name: string; material: string; category: string; method: string; doc: string; params: Param[]; refs: string[]; extraHeader?: ObservationTemplate['headerFields'] }): ObservationTemplate {
   return {
@@ -21,7 +21,7 @@ function entrySheet(o: { code: string; name: string; material: string; category:
     constants: [], derived: [], grids: [],
     results: o.params.map((p) => ({ key: `r_${p.key}`, label: p.name, formula: `IF(${p.key}="","",${p.key})`, unit: p.unit, ...(p.text ? {} : { decimals: p.decimals ?? 2 }) })),
     checks: [],
-    reportRows: o.params.map((p) => ({ name: p.name, unit: p.unit, result: `r_${p.key}`, decimals: p.text ? undefined : p.decimals ?? 2, spec: p.spec })),
+    reportRows: o.params.map((p) => ({ group: p.group, name: p.name, unit: p.unit, result: `r_${p.key}`, decimals: p.text ? undefined : p.decimals ?? 2, spec: p.spec })),
     references: o.refs,
     procedure: ['Enter each result as reported (by this laboratory or the external laboratory). Leave a parameter blank if it was not tested – blank rows are left off the report.'],
     sampleCalc: [],
@@ -87,4 +87,63 @@ export const CEMENT_CHEMICAL = entrySheet({
   refs: ['IS 4032 : 1985 Methods of chemical analysis of hydraulic cement. Check limits against the purchased cement’s specification and edit the requirement column in the template editor if needed.'],
 });
 
-export const WATER_TEMPLATES: ObservationTemplate[] = [WATER_CONSTRUCTION, WATER_DRINKING, CEMENT_CHEMICAL];
+
+/** Chemical analysis of TMT bars (per diameter), limits of IS 1786 : 2008 Table 1 with product-analysis tolerance. */
+const STEEL_GRADES = ['Fe 415', 'Fe 415D', 'Fe 500', 'Fe 500D', 'Fe 550', 'Fe 550D', 'Fe 600'];
+const STEEL_CHEM_BASE = entrySheet({
+  code: 'STEEL-CHEM', name: 'Chemical analysis of TMT bars', material: 'Steel', category: 'Steel', doc: 'OBS/ST/02',
+  method: 'IS: 8811-1998 (RA 2018)',
+  extraHeader: [
+    { key: 'grade', label: 'Grade', type: 'select', options: STEEL_GRADES, required: true, default: 'Fe 500D' },
+    { key: 'dia', label: 'Nominal diameter', type: 'select', options: ['8', '10', '12', '16', '20', '25', '28', '32', '36', '40'], unit: 'mm', required: true },
+    { key: 'brand', label: 'Make / brand', type: 'text' },
+  ],
+  params: [
+    { key: 'c', name: 'Carbon (C)', unit: '%', method: 'IS 8811', spec: 'As per grade', decimals: 3 },
+    { key: 'p', name: 'Phosphorus (P)', unit: '%', method: 'IS 8811', spec: 'As per grade', decimals: 3 },
+    { key: 's', name: 'Sulphur (S)', unit: '%', method: 'IS 8811', spec: 'As per grade', decimals: 3 },
+  ],
+  refs: ['IS 1786 : 2008 (RA 2018) Table 1 – chemical composition; product analysis tolerance as per clause 6.1. IS 8811 : 1998 – spectrometric analysis of steel.'],
+});
+export const STEEL_CHEMICAL: ObservationTemplate = {
+  ...STEEL_CHEM_BASE,
+  tables: { lim: { g: STEEL_GRADES, c: [0.30, 0.25, 0.32, 0.27, 0.32, 0.27, 0.32], s: [0.060, 0.045, 0.060, 0.045, 0.060, 0.045, 0.045], p: [0.060, 0.045, 0.060, 0.045, 0.060, 0.045, 0.045], ps: [0.110, 0.085, 0.115, 0.085, 0.110, 0.085, 0.085] } },
+  results: [
+    ...STEEL_CHEM_BASE.results,
+    { key: 'r_ps', label: 'P + S', formula: 'IF(OR(p="",s=""),"",p+s)', unit: '%', decimals: 3 },
+    { key: 'verdict', label: 'Conformity', formula: 'IF(OR(c="",p="",s=""),"",IF(AND(c<=LOOKUPX(grade,lim.g,lim.c),p<=LOOKUPX(grade,lim.g,lim.p),s<=LOOKUPX(grade,lim.g,lim.s),p+s<=LOOKUPX(grade,lim.g,lim.ps)),"Conforms","Does not conform"))' },
+  ],
+  reportRows: [...STEEL_CHEM_BASE.reportRows, { name: 'Sulphur + Phosphorus (P + S)', unit: '%', result: 'r_ps', decimals: 3, spec: 'As per grade' }],
+  example: { input: { header: { grade: 'Fe 550D', dia: '12', brand: 'Jindal panther', c: 0.201, p: 0.024, s: 0.025 }, grids: {} }, expect: { r_c: 0.201, r_ps: 0.049, verdict: 'Conforms' } },
+};
+
+/** Ground granulated blast furnace slag: IS 16714 : 2018 requirements. */
+export const GGBS_PHYSICAL = entrySheet({
+  code: 'GGBS-PHY', name: 'Physical properties of GGBS', material: 'GGBS', category: 'GGBS', doc: 'OBS/GGBS/01',
+  method: 'IS: 1727-1967 (Reaf-2018); IS: 4031(P-2,4,6)-1999 (Reaf-2018)',
+  params: [
+    { key: 'sg', name: 'Specific gravity', unit: '--', method: 'IS 1727', spec: '--', decimals: 2 },
+    { key: 'fine', name: 'Fineness (m²/kg) – by Blaine’s Permeability method', unit: 'm²/kg', method: 'IS 4031 (Part 2)', spec: 'Min 320', decimals: 0 },
+    { key: 'sai7', group: 'Slag Activity Index (%)', name: '7 days', unit: '%', method: 'IS 16714 Annex', spec: 'Min. 60 %', decimals: 2 },
+    { key: 'sai28', group: 'Slag Activity Index (%)', name: '28 days', unit: '%', method: 'IS 16714 Annex', spec: 'Min. 75 %', decimals: 2 },
+  ],
+  refs: ['IS 16714 : 2018 Ground granulated blast furnace slag for use in cement, mortar and concrete – specification (Table 1 physical requirements).'],
+});
+export const GGBS_CHEMICAL = entrySheet({
+  code: 'GGBS-CHEM', name: 'Chemical properties of GGBS', material: 'GGBS', category: 'GGBS', doc: 'OBS/GGBS/02',
+  method: 'IS: 4032-1985 (Reaff-2019); IS: 16714-2018',
+  params: [
+    { key: 'mno', name: 'Manganese oxide MnO', unit: '%', method: 'IS 4032', spec: '5.5 Max' },
+    { key: 'mgo', name: 'Magnesium Oxide (MgO)', unit: '%', method: 'IS 4032', spec: '17.0 Max' },
+    { key: 'sul', name: 'Sulphide Sulphur (S)', unit: '%', method: 'IS 4032', spec: '2.0 Max' },
+    { key: 'so3', name: 'Sulphate (SO₃)', unit: '%', method: 'IS 4032', spec: '3.0 Max' },
+    { key: 'ir', name: 'Insoluble Residue', unit: '%', method: 'IS 4032', spec: '3.0 Max' },
+    { key: 'cl', name: 'Chlorides (Cl)', unit: '%', method: 'IS 4032', spec: '0.1 Max', decimals: 3 },
+    { key: 'loi', name: 'Loss on Ignition', unit: '%', method: 'IS 4032', spec: '3.0 Max' },
+    { key: 'b1', name: '(CaO + MgO + 1/3 Al₂O₃) / (SiO₂ + 2/3 Al₂O₃)', unit: '--', method: 'IS 16714', spec: '1.0 Min' },
+    { key: 'b2', name: '(CaO + MgO + Al₂O₃) / SiO₂', unit: '--', method: 'IS 16714', spec: '1.0 Min' },
+  ],
+  refs: ['IS 16714 : 2018 Table 2 – chemical requirements of GGBS.'],
+});
+
+export const WATER_TEMPLATES: ObservationTemplate[] = [WATER_CONSTRUCTION, WATER_DRINKING, CEMENT_CHEMICAL, STEEL_CHEMICAL, GGBS_PHYSICAL, GGBS_CHEMICAL];

@@ -1,3 +1,4 @@
+import { ExtraFieldsEditor } from '../components/ExtraFields';
 import { useEffect, useState } from 'react';
 import { trackRecent } from '../favorites';
 import { SharingButton, SharingModal } from '../components/Sharing';
@@ -174,6 +175,7 @@ export function ClientDetail() {
           <Group justify="space-between" mt="lg" mb="xs"><Text fw={600}>Contacts</Text>{can('client.edit') && <Button size="xs" variant="light" onClick={() => setContact({ receives: [] })}>Add contact</Button>}</Group>
           <ListView id={`client-contacts`} rows={c.contacts} onRow={(r) => setContact(r)} columns={[{ key: 'name', label: 'Name' }, { key: 'role', label: 'Role' }, { key: 'phone', label: 'Phone', render: (p: any) => p.phone ? <Group gap={6} wrap="nowrap"><Text size="sm">{p.phone}</Text><WhatsAppIcon title={`WhatsApp ${p.name}`} onClick={() => setWa({ phone: p.phone, name: p.name })} /></Group> : '' }, { key: 'email', label: 'Email' },
             { key: 'site', label: 'Site', value: (p) => c.sites.find((s: any) => s.id === p.site_id)?.name ?? 'All sites' }, { key: 'receives', label: 'Receives', value: (p) => (p.receives ?? []).join(', ') }]} />
+          <div style={{ marginTop: 18 }}><ExtraFieldsEditor clientId={c.id} canEdit={can('client.edit') && c.access !== 'read'} /></div>
         </Tabs.Panel>
         <Tabs.Panel value="quotes">
           <ListView id="client-quotes" rows={docs('quote')} onRow={(d) => nav(`/documents/${d.id}`)} columns={[{ key: 'number', label: 'Number' }, { key: 'date', label: 'Date', type: 'date' }, { key: 'accreditation', label: 'Type', type: 'badge' }, { key: 'site', label: 'Site', value: (d) => c.sites.find((s: any) => s.id === d.site_id)?.name }, { key: 'total', label: 'Value', type: 'money' }, { key: 'status', label: 'Status', type: 'status' }]} />

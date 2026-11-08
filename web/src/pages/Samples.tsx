@@ -1,3 +1,4 @@
+import { ExtraValuesInput } from '../components/ExtraFields';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Group, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Divider } from '@mantine/core';
@@ -52,6 +53,7 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
         </SimpleGrid>
         <Divider label="Sample details" labelPosition="left" />
         <RecordForm object="sample" value={v} onChange={setV} cols={3} exclude={['accreditation']} />
+        <ExtraValuesInput clientId={v.client_id} value={v.extra ?? {}} onChange={(x) => setV({ ...v, extra: x })} />
         <NumberInput mt="sm" w={260} label="Retain sample for (days)" description="Blank = default for this material (Settings → Defaults)" min={0} max={3650} value={v.retention_days ?? ''} onChange={(x) => setV({ ...v, retention_days: x === '' ? null : Number(x) })} />
         <Divider label="Tests" labelPosition="left" />
         <MultiSelect label="Tests to perform" required searchable data={testable.filter((c) => !v.material || c.material === v.material || tests.includes(String(c.id))).map((c) => ({ value: String(c.id), label: `${c.report_name || c.billing_name} (${c.method || c.code})${c.nabl ? '' : ' · Non-NABL'}` }))} value={tests} onChange={setTests} />
@@ -103,13 +105,14 @@ export function SamplesPage() {
             {edit ? (
               <Paper withBorder p="md">
                 <RecordForm object="sample" value={edit} onChange={setEdit} cols={3} />
+                <div style={{ marginTop: 10 }}><ExtraValuesInput fields={sample.extraFields} value={edit.extra ?? {}} onChange={(x) => setEdit({ ...edit, extra: x })} /></div>
                 <Group justify="flex-end" mt="sm"><Button variant="default" onClick={() => setEdit(null)}>Cancel</Button>
-                  <Button onClick={async () => { const { accreditation, material, received_date, quantity, condition, source, customer_ref, sample_label, specification, description, custom: cu } = edit; await api(`/samples/${sample.id}`, { method: 'PUT', body: { accreditation, material, received_date, quantity, condition, source, customer_ref, sample_label, specification, description, custom: cu } }); ok('Sample updated'); setEdit(null); reloadSample(); reload(); }}>Save</Button></Group>
+                  <Button onClick={async () => { const { accreditation, material, received_date, quantity, condition, source, customer_ref, sample_label, specification, description, custom: cu, extra } = edit; await api(`/samples/${sample.id}`, { method: 'PUT', body: { accreditation, material, received_date, quantity, condition, source, customer_ref, sample_label, specification, description, custom: cu, extra } }); ok('Sample updated'); setEdit(null); reloadSample(); reload(); }}>Save</Button></Group>
               </Paper>
             ) : (
               <Paper withBorder p="sm">
                 <SimpleGrid cols={2} spacing={4}>
-                  {[['Client', sample.client?.name], ['ULR', sample.ulr || '—'], ['Received', dmy(sample.received_date)], ['Retention', sample.disposed_at ? `Disposed ${dmy(sample.disposed_at)} – ${sample.disposal_method}${sample.disposal_note ? ` (${sample.disposal_note})` : ''}` : sample.dispose_after ? `${sample.retention_days} days · keep till ${dmy(sample.dispose_after)}` : '—'], ['Material', sample.material], ['Quantity', sample.quantity], ['Condition', sample.condition], ['Source', sample.source], ['Customer ref', sample.customer_ref], ['Description', sample.description]].map(([k, val]) => <Text key={k} size="sm"><Text span c="dimmed">{k}: </Text>{val}</Text>)}
+                  {[['Client', sample.client?.name], ['ULR', sample.ulr || '—'], ['Received', dmy(sample.received_date)], ['Retention', sample.disposed_at ? `Disposed ${dmy(sample.disposed_at)} – ${sample.disposal_method}${sample.disposal_note ? ` (${sample.disposal_note})` : ''}` : sample.dispose_after ? `${sample.retention_days} days · keep till ${dmy(sample.dispose_after)}` : '—'], ['Material', sample.material], ['Quantity', sample.quantity], ['Condition', sample.condition], ['Source', sample.source], ['Customer ref', sample.customer_ref], ['Description', sample.description], ...(sample.extraFields ?? []).map((f: any) => [f.label, sample.extra?.[f.key]])].map(([k, val]) => <Text key={k} size="sm"><Text span c="dimmed">{k}: </Text>{val}</Text>)}
                 </SimpleGrid>
               </Paper>
             )}

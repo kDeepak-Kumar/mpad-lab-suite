@@ -617,4 +617,84 @@ if (process.env.MOCK_AI) {
   expect(cr.requirements[1].catalogId === null && cr.unusualClauses[0].risk === 'high' && cr.deviations.length === 1, 'invented rate-card ids are dropped; risky clauses and deviations returned');
   await api('owner', 'PUT', '/company', { ai: { enabled: false } });
 } else console.log('  (skipped – set MOCK_AI to run)');
+console.log('26. Test-specific report formats, split reports, client fields, editable layout');
+{
+  const cube = byCode('CON-CUBE');
+  expect(byCode('STEEL-CHEM') && byCode('GGBS-PHY') && byCode('GGBS-CHEM'), 'steel chemical and GGBS (physical / chemical) sheets are in the rate card');
+  const fx = await api('owner', 'PUT', `/clients/${client.id}/extra-fields`, { fields: [{ label: 'Vehicle No', type: 'text', onReport: true }, { label: 'Invoice No', type: 'text', onReport: true }, { label: 'Internal note', type: 'text', onReport: false }] });
+  expect(fx.fields.map((f) => f.key).join() === 'vehicle_no,invoice_no,internal_note', 'client-specific additional fields saved with keys');
+  const site = detail.sites[0];
+  const smp = await api('frontdesk', 'POST', '/samples', { client_id: client.id, site_id: site.id, material: 'Concrete', received_date: today, customer_ref: 'RPPL/QC/Oct/2026', specification: '150 x 150 x 150mm Size cube', condition: 'Satisfactory', source: 'Sample supplied by the customer', accreditation: cube.nabl ? 'NABL' : 'Non-NABL',
+    extra: { vehicle_no: 'TS 08 UH 9299', invoice_no: '6676', internal_note: 'not printed' }, tests: [1, 2, 3].map(() => ({ catalog_id: cube.id, assigned_to: tech.id })) });
+  const sv = await api('frontdesk', 'GET', `/samples/${smp.id}`);
+  expect(sv.extra.vehicle_no === 'TS 08 UH 9299' && sv.extraFields.length === 3, 'additional information captured on the sample');
+  const ts = sv.tests.sort((a, b) => a.id - b.id);
+  const ages = [3, 7, 28];
+  for (const [i, t] of ts.entries()) {
+    const loads = [[400, 410, 420], [600, 610, 620], [879.8, 871.7, 842.4]][i];
+    await api('tech', 'PUT', `/tests/${t.id}/observation`, { observation: { header: { grade: 'M30', age: ages[i], casting_date: today, element: 'Slab RCC, Tower-A' }, grids: { cubes: loads.map((load, k) => ({ id: `C${k + 1}`, l: 150, b: 150, h: 150, mass: 8.3, load })) }, constants: {}, equipment: {} }, started_at: today, completed_at: today });
+    await api('tech', 'POST', `/tests/${t.id}/submit`);
+  }
+  for (const t of ts.slice(0, 2)) await api('reviewer', 'POST', `/tests/${t.id}/review`, { action: 'accept' });
+  const pend = await api('reviewer', 'GET', '/reports/pending-tests');
+  expect(pend.filter((x) => x.sample_id === smp.id).map((x) => x.age).join() === '3,7', 'pending tests show the age of each cube set (28-day not accepted yet)');
+  // Scenario A/B/C: separate 3-day and 7-day reports
+  const two = await api('reviewer', 'POST', '/reports', { testIds: [ts[0].id, ts[1].id], split: 'each' });
+  expect(two.ids.length === 2, 'one report per age (3-day and 7-day reports)');
+  const r3 = await api('reviewer', 'GET', `/documents/${two.ids[0]}`);
+  const L = r3.data.layout;
+  const txt = (h) => String(h ?? '').replace(/<br>/g, '\n').replace(/<[^>]+>/g, '');
+  const flat = (l) => l.sections.map((s) => s.type === 'table' ? s.rows.map((r) => r.map((c) => txt(c.h)).join('|')).join('\n') : txt(s.h ?? '')).join('\n');
+  expect(L.format === 'cubes' && /COMPRESSIVE STRENGTH TEST OF CONCRETE CUBES/.test(flat(L)), 'cube report uses the cube format');
+  const res3 = L.sections.find((x) => x.role === 'results');
+  expect(res3.rows.length === 4 && txt(res3.rows[1][4].h) === '3' && res3.rows[1][8].rs === 3, '3-day report holds only the 3-day set (3 cubes, average merged)');
+  expect(flat(L).includes(client.name) && flat(L).includes(`Project Name*: ${site.project || site.name}`) && flat(L).includes('Customer Reference No*: RPPL/QC/Oct/2026'), 'customer block from the client master, project and customer reference');
+  expect(flat(L).includes('Vehicle No*: TS 08 UH 9299, Invoice No*: 6676') && !flat(L).includes('not printed'), 'additional information printed; fields marked "not on report" are left off');
+  expect(!flat(L).includes(detail.contacts[0].name) || !r3.data.options.includeContact, 'contact details are off by default');
+  // editing: sanitised, logged, protected fields ignored
+  const edited = { ...L, edited: true, sections: [...L.sections, { id: 'x1', type: 'text', h: '<b>Note</b><script>alert(1)</script><img src=x onerror=alert(1)>' }] };
+  await api('reviewer', 'PUT', `/documents/${two.ids[0]}`, { data: { layout: edited, tests: [], customer: { name: 'Hacked' } } });
+  const r3b = await api('reviewer', 'GET', `/documents/${two.ids[0]}`);
+  const last = r3b.data.layout.sections.at(-1);
+  expect(last.h === '<b>Note</b>' && r3b.data.tests.length === 1 && r3b.data.customer.name === client.name, 'layout edits are sanitised; results snapshot and customer master copy cannot be overwritten');
+  expect(r3b.history.some((h) => h.action === 'report layout edited'), 'layout edits are logged');
+  const ref = await api('reviewer', 'POST', `/reports/${two.ids[0]}/refresh`);
+  expect(ref.layoutKept, 'refreshing results keeps a layout edited by hand');
+  await api('reviewer', 'PUT', `/documents/${two.ids[1]}`, { data: { remarks: 'Results meet the 7-day requirement.' } });
+  const r7 = await api('reviewer', 'GET', `/documents/${two.ids[1]}`);
+  expect(flat(r7.data.layout).includes('Remarks: Results meet the 7-day requirement.'), 'remarks typed in the details appear in the report body');
+  await api('reviewer', 'POST', `/reports/${two.ids[1]}/workflow`, { action: 'submit' });
+  await api('owner', 'POST', `/reports/${two.ids[1]}/workflow`, { action: 'verify' });
+  const iss7 = await api('owner', 'POST', `/documents/${two.ids[1]}/issue`);
+  const r7i = await api('owner', 'GET', `/documents/${two.ids[1]}`);
+  const smpAfter = await api('frontdesk', 'GET', `/samples/${smp.id}`);
+  expect(smpAfter.status !== 'reported', 'sample is not marked reported while its 28-day cubes are still pending');
+  let m = await fail(() => api('reviewer', 'PUT', `/documents/${two.ids[1]}`, { data: { layout: r7i.data.layout } }));
+  expect(m, 'an issued report cannot be edited');
+  // Scenario D: 28-day report repeating the issued 7-day result
+  await api('reviewer', 'POST', `/tests/${ts[2].id}/review`, { action: 'accept' });
+  const withRep = await api('reviewer', 'GET', '/reports/pending-tests?withReported=1');
+  const seven = withRep.find((x) => x.id === ts[1].id);
+  expect(seven && seven.reported_in === iss7.number, 'issued results are offered for a later report, marked with the report they were issued in');
+  m = await fail(() => api('reviewer', 'POST', '/reports', { testIds: [ts[1].id] }));
+  expect(m, 'a report needs at least one result not issued before');
+  const r28 = await api('reviewer', 'POST', '/reports', { testIds: [ts[2].id, ts[1].id] });
+  const d28 = await api('reviewer', 'GET', `/documents/${r28.id}`);
+  const res28 = d28.data.layout.sections.find((x) => x.role === 'results');
+  expect(res28.rows.length === 7 && d28.data.tests.find((t) => t.id === ts[1].id).previous === iss7.number, '28-day report includes the earlier 7-day result (consolidated)');
+  const r7again = await api('owner', 'GET', `/documents/${two.ids[1]}`);
+  expect(r7again.status === 'issued' && r7again.hash === r7i.hash && JSON.stringify(r7again.data) === JSON.stringify(r7i.data), 'the issued 7-day report is unchanged');
+  await api('reviewer', 'POST', `/reports/${r28.id}/workflow`, { action: 'submit' });
+  await api('owner', 'POST', `/reports/${r28.id}/workflow`, { action: 'verify' });
+  await api('owner', 'POST', `/documents/${r28.id}/issue`);
+  const tl = await api('owner', 'GET', `/tests/${ts[1].id}`);
+  expect(tl.report_id === two.ids[1], 'the 7-day test stays linked to the report it was first issued in');
+  expect((await api('frontdesk', 'GET', `/samples/${smp.id}`)).status !== 'reported', 'still not reported while the 3-day report is a draft');
+  await api('reviewer', 'POST', `/reports/${two.ids[0]}/workflow`, { action: 'submit' });
+  await api('owner', 'POST', `/reports/${two.ids[0]}/workflow`, { action: 'verify' });
+  await api('owner', 'POST', `/documents/${two.ids[0]}/issue`);
+  const smpDone = await api('frontdesk', 'GET', `/samples/${smp.id}`);
+  expect(smpDone.status === 'reported', 'sample is reported once every age is reported');
+}
+
 console.log('\nALL CHECKS PASSED');

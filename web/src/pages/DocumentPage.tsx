@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMediaQuery } from '@mantine/hooks';
 import { Alert, Button, Checkbox, Grid, Group, Menu, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
 import { IconFileSearch, IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck, IconCopy } from '@tabler/icons-react';
-import { applyOverrides, computeTotals, DEFAULT_TEMPLATES, type DocOverrides, type DocTemplate, type LineInput } from '@suite/shared';
+import { applyOverrides, buildLayout, computeTotals, DEFAULT_TEMPLATES, refreshRoles, type DocOverrides, type DocTemplate, type LineInput, type ReportLayout, type Section } from '@suite/shared';
 import { api, ok, useApi, dmy, money } from '../api';
 import { useCan, useMe, isAdmin, useFields } from '../ctx';
 import { PageHeader, StatusBadge, TypeBadge, Loading, Path } from '../components/ui';
@@ -20,6 +20,9 @@ import { FitWidth } from '../doc/FitWidth';
 import { ClientForm } from './Clients';
 import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 import { PagePlanOverlay } from '../doc/PagePlanOverlay';
+import { LayoutToolbar } from '../doc/LayoutToolbar';
+import { useValidSel, type LayoutEdit, type LayoutSel } from '../doc/LayoutView';
+import { ReportContents } from '../doc/ReportContents';
 
 const KIND_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Tax invoice', report: 'Test report' };
 const PATHS: Record<string, { key: string; label: string }[]> = {
@@ -97,6 +100,11 @@ function DocumentView({ id }: { id: number }) {
   useEffect(() => { if (doc?.id) trackRecent({ to: `/documents/${doc.id}`, label: doc.number ?? `Draft #${doc.id}`, sub: `${KIND_LABEL[doc.kind]} · ${doc.data?.client?.name ?? ''}`, kind: 'document' }); }, [doc?.id]);
   const [noteModal, setNoteModal] = useState<null | { title: string; action: (note: string) => Promise<void> }>(null);
   const [tab, setTab] = useState<string | null>('details');
+  // report body editing: selection, undo / redo
+  const [lsel, setLsel] = useState<LayoutSel | null>(null);
+  const hist = useRef<{ undo: Section[][]; redo: Section[][]; at: number; key: string }>({ undo: [], redo: [], at: 0, key: '' });
+  const [, bump] = useState(0);
+  useValidSel(data?.layout?.sections, lsel, setLsel);
   const phone = useMediaQuery('(max-width: 767px)');
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -124,7 +132,12 @@ function DocumentView({ id }: { id: number }) {
   useEffect(() => { if (!dirty || !editable) return; const t = setTimeout(() => save(true), 1200); return () => clearTimeout(t); }, [data, overrides, dirty]);
 
   if (!doc || !data || !template || !baseTemplate) return <Loading />;
-  const change = (d: Record<string, any>) => { setData(d); setDirty(true); dirtyRef.current = true; };
+  const HEADER_KEYS = ['client', 'customerRef', 'jobCodeText', 'ulr', 'receivedText', 'testDatesText', 'specification', 'condition', 'source', 'issueText', 'unlocked'];
+  const change = (d: Record<string, any>) => {
+    // report details typed in the side panel (dates, specification, client name…) update the report's details box
+    if (doc.kind === 'report' && d.layout?.sections && d.layout === data.layout && HEADER_KEYS.some((k) => JSON.stringify(d[k]) !== JSON.stringify(data[k]))) d = { ...d, layout: refreshRoles(d.layout, { data: d }, ['header']) };
+    setData(d); setDirty(true); dirtyRef.current = true;
+  };
   const changeOv = (o: DocOverrides) => { setOverrides(o); setDirty(true); dirtyRef.current = true; };
   const run = async (fn: () => Promise<unknown>, msg?: string) => { await save(true); await fn(); if (msg) ok(msg); dirtyRef.current = false; reload(); };
   const fileName = `${KIND_LABEL[doc.kind]} ${doc.number ?? 'draft'} ${doc.data.client?.name ?? ''}`.replace(/[\\/:*?"<>|]+/g, '-').trim();
@@ -166,7 +179,22 @@ function DocumentView({ id }: { id: number }) {
     ok(`Saved as ${doc.kind} template version ${r.version}. Future documents use it.`); reload();
   };
   const placeSeal = async (pos: { x: number; y: number; w: number }) => { setData((d) => ({ ...(d ?? {}), sealPos: pos })); await api(`/documents/${doc.id}/placement`, { method: 'PUT', body: { sealPos: pos }, quiet: true } as any); };
-  const exp = async (fn: 'downloadPdf' | 'downloadPng' | 'downloadDoc') => { setSelected(null); const m = await exportLib(); await (m[fn] as any)(printRef.current!, fileName); };
+  const layout = doc.kind === 'report' ? (data.layout as ReportLayout | undefined) : undefined;
+  const layoutEditable = !!(editable && layout);
+  /** Replace the report body; typing in one place is grouped into one undo step. */
+  const setSections = (next: Section[], key = '') => {
+    const h = hist.current; const t = Date.now();
+    if (!(key && key === h.key && t - h.at < 1500)) { h.undo.push(layout!.sections); if (h.undo.length > 100) h.undo.shift(); h.redo = []; }
+    h.at = t; h.key = key;
+    change({ ...data, layout: { ...layout!, sections: next, edited: true } }); bump((x) => x + 1);
+  };
+  const undoLayout = () => { const h = hist.current; const prev = h.undo.pop(); if (!prev || !layout) return; h.redo.push(layout.sections); h.key = ''; change({ ...data, layout: { ...layout, sections: prev, edited: true } }); bump((x) => x + 1); };
+  const redoLayout = () => { const h = hist.current; const nx = h.redo.pop(); if (!nx || !layout) return; h.undo.push(layout.sections); h.key = ''; change({ ...data, layout: { ...layout, sections: nx, edited: true } }); bump((x) => x + 1); };
+  const layoutEdit: LayoutEdit | undefined = layoutEditable ? {
+    sel: lsel, setSel: setLsel,
+    update: (sid, fn) => setSections(layout!.sections.map((s) => (s.id === sid ? fn(s) : s)), `${sid}`),
+  } : undefined;
+  const exp = async (fn: 'downloadPdf' | 'downloadPng' | 'downloadDoc') => { setSelected(null); setLsel(null); const m = await exportLib(); await (m[fn] as any)(printRef.current!, fileName); };
 
   return (
     <>
@@ -178,7 +206,7 @@ function DocumentView({ id }: { id: number }) {
           <AdminDelete object={doc.kind} id={doc.id} compact onDeleted={() => nav(({ quote: '/quotes', invoice: '/invoices', report: '/reports' } as Record<string, string>)[doc.kind] ?? '/')} />
           {['quote', 'invoice'].includes(doc.kind) && <SharingButton access={doc.access} onClick={() => setShareOpen(true)} />}
           <Menu shadow="lg"><Menu.Target><Button variant="default" leftSection={<IconDownload size={16} />}>Export</Button></Menu.Target><Menu.Dropdown>
-            <Menu.Item leftSection={<IconPrinter size={14} />} onClick={async () => { setSelected(null); const m = await exportLib(); await m.printDocument(printRef.current!); }}>Print (A4, 300 dpi)</Menu.Item>
+            <Menu.Item leftSection={<IconPrinter size={14} />} onClick={async () => { setSelected(null); setLsel(null); const m = await exportLib(); await m.printDocument(printRef.current!); }}>Print (A4, 300 dpi)</Menu.Item>
             <Menu.Item onClick={() => { setSelected(null); setTimeout(() => window.print(), 50); }}>Print from the browser (text stays selectable)</Menu.Item>
             <Menu.Item onClick={() => exp('downloadPdf')}>Download PDF</Menu.Item>
             <Menu.Item onClick={() => exp('downloadPng')}>Download PNG image</Menu.Item>
@@ -202,7 +230,7 @@ function DocumentView({ id }: { id: number }) {
                   onNumber={(n) => run(() => api(`/documents/${doc.id}`, { method: 'PUT', body: { number: n } }), 'Number updated')}
                   onDate={(d) => { change({ ...data, dateText: undefined }); run(() => api(`/documents/${doc.id}`, { method: 'PUT', body: { date: d, data: { ...strip(data), dateText: undefined, unlocked: { ...(data.unlocked ?? {}), date: true } } } }), 'Date updated'); }} />
                 {doc.kind === 'report'
-                  ? <ReportDetails doc={doc} data={data} onChange={change} disabled={!editable} />
+                  ? <><ReportContents data={data} onChange={change} disabled={!editable} /><ReportDetails doc={doc} data={data} onChange={change} disabled={!editable} /></>
                   : <DocDetailsForm kind={doc.kind} data={data} onChange={change} totals={totals} disabled={!editable} />}
                 {!issued && <SignPanel doc={doc} data={data} onLocal={(patch) => setData((d) => ({ ...(d ?? {}), ...patch }))} />}
                 <CustomFields kind={doc.kind} data={data} onChange={change} disabled={!editable} />
@@ -224,8 +252,12 @@ function DocumentView({ id }: { id: number }) {
         </Grid.Col>
         <Grid.Col span={{ base: 12, xl: 7 }} className={phone && tab !== 'preview' ? 'offscreen' : undefined}>
           <div className="print-root" ref={printRef}>
-            <div className="doc-stage" onClick={() => setSelected(null)}><FitWidth>
-              <DocRenderer template={template} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
+            {layoutEditable && tab !== 'design' && <LayoutToolbar sections={layout!.sections} sel={lsel} setSel={setLsel} onChange={(s) => setSections(s)}
+              undo={undoLayout} redo={redoLayout} canUndo={hist.current.undo.length > 0} canRedo={hist.current.redo.length > 0}
+              onRebuild={() => { if (!window.confirm('Rebuild the report layout from the format? Changes made by hand in the report will be replaced (you can still undo).')) return; hist.current.undo.push(layout!.sections); hist.current.redo = []; hist.current.key = ''; change({ ...data, layout: { ...buildLayout({ data }), edited: false } }); setLsel(null); }} />}
+            <div className="doc-stage" onClick={() => { setSelected(null); setLsel(null); }}
+              onKeyDown={layoutEditable ? (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undoLayout(); } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redoLayout(); } } : undefined}><FitWidth>
+              <DocRenderer template={template} layoutEdit={tab !== 'design' ? layoutEdit : undefined} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
                 issuer={doc.issuer} onSealMove={!issued && data.sealPos ? (pos) => placeSeal(pos) : undefined} verifyUrl={doc.verify ? `${window.location.origin}/verify/${doc.verify}` : null} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
             </FitWidth></div>
             <PagePlanOverlay rootRef={printRef} />
@@ -257,7 +289,12 @@ function RecordFormIfAny(p: { object: string; value: any; onChange: (v: any) => 
 function ReportDetails({ doc, data, onChange, disabled }: { doc: any; data: Record<string, any>; onChange: (d: any) => void; disabled: boolean }) {
   const can = useCan();
   const [busy, setBusy] = useState(false);
-  const set = (patch: Record<string, any>) => onChange({ ...data, ...patch });
+  // remarks and notes typed here also update the report body
+  const set = (patch: Record<string, any>) => {
+    const d = { ...data, ...patch };
+    const roles = (['remarks', 'notes'] as const).filter((k) => k in patch);
+    onChange(d.layout && roles.length ? { ...d, layout: refreshRoles(d.layout, { data: d }, roles as any) } : d);
+  };
   const notes: string[] = Array.isArray(data.notes) ? data.notes : [];
   const suggest = async () => {
     setBusy(true);

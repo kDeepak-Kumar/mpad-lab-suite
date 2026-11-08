@@ -4,7 +4,8 @@ import { evaluateObservation, normalizeObservation, type ObservationInput } from
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin, type AuthUser, zBool } from '../auth';
 import { cleanWrite, mergeCustom } from '../meta';
-import { audit, buildReportData, getCompany, getObsTemplate, nextNumber, formatWithSeq } from '../services';
+import { buildLayout } from '@suite/shared';
+import { audit, buildReportData, extraFieldDefs, getCompany, getObsTemplate, nextNumber, formatWithSeq } from '../services';
 import { isIsoDate } from '@suite/shared';
 const isoDate = z.string().refine(isIsoDate, 'Enter a valid date (YYYY-MM-DD)');
 
@@ -50,6 +51,13 @@ lab.get('/workorders/:id', allow('workorder.read'), h(async (req) => {
 }));
 
 // ---------- samples (sample register) ----------
+/** Store additional-information values on the sample (empty values removed). */
+function withExtra(d: Record<string, any>, extra?: Record<string, unknown> | null) {
+  if (!extra) return d;
+  const next: Record<string, unknown> = { ...(d.extra ?? {}) };
+  for (const [k, v] of Object.entries(extra)) { if (!/^[a-z0-9_]{1,40}$/.test(k)) continue; if (v === null || v === '') delete next[k]; else next[k] = typeof v === 'string' ? v.trim() : v; }
+  return { ...d, extra: next };
+}
 const sampleSchema = z.object({
   work_order_id: z.number().nullable().optional(), client_id: z.number(), site_id: z.number().nullable().optional(),
   accreditation: z.string().optional().nullable(), custom: z.record(z.any()).optional(),
@@ -57,6 +65,8 @@ const sampleSchema = z.object({
   condition: z.string().optional().nullable(), source: z.string().optional().nullable(), received_date: isoDate,
   customer_ref: z.string().optional().nullable(), specification: z.string().optional().nullable(), sample_label: z.string().optional().nullable(),
   retention_days: z.number().int().min(0).max(3650).nullable().optional(),
+  /** Client-specific additional information (supplier, vehicle no., invoice no. …) – fields defined on the client. */
+  extra: z.record(z.union([z.string().max(300), z.number(), z.null()])).optional(),
   tests: z.array(z.object({ catalog_id: z.number(), assigned_to: z.number().nullable().optional(), due_date: isoDate.optional().nullable().or(z.literal('')) })).min(1, 'Add at least one test'),
 });
 lab.get('/samples', allow('sample.read'), h(async (req) => {
@@ -85,8 +95,8 @@ lab.post('/samples', allow('samples'), h(async (req) => {
     const ctx = { date: s.received_date, client: client.short_code || client.name.replace(/[^A-Za-z]/g, '').slice(0, 4), material: s.material };
     const { seq, number: code } = await nextNumber(trx, cid, 'sample', ctx);
     const ulr = accreditation === 'NABL' ? await formatWithSeq(cid, 'ulr', seq, ctx, trx) : null;
-    const { tests, custom, ...sample } = s;
-    const id = await insert(trx, 'samples', { ...sample, retention_days: keep, dispose_after: addDays(s.received_date, keep), accreditation, data: toJson(mergeCustom(null, custom)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
+    const { tests, custom, extra, ...sample } = s;
+    const id = await insert(trx, 'samples', { ...sample, retention_days: keep, dispose_after: addDays(s.received_date, keep), accreditation, data: toJson(withExtra(mergeCustom(null, custom), extra)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
     const outsourced = new Map<number | null, number[]>();
     for (const t of tests) {
       const cat = cats.find((c) => c.id === t.catalog_id)!;
@@ -109,9 +119,9 @@ lab.get('/samples/:id', allow('sample.read'), h(async (req) => {
   if (!s) throw new HttpError(404, 'Sample not found');
   const tests = await db('tests as t').leftJoin('catalog as k', 'k.id', 't.catalog_id').leftJoin('users as u', 'u.id', 't.assigned_to')
     .where('t.sample_id', s.id).select('t.id', 't.status', 't.due_date', 't.report_id', 't.template_code', 'k.billing_name', 'k.report_name', 'k.method', 'u.name as assignee');
-  const client = await db('clients').where({ id: s.client_id }).first('id', 'name');
+  const client = await db('clients').where({ id: s.client_id }).first('id', 'name', 'data');
   const r0 = row(s, ['data']) as Record<string, any>;
-  return { ...r0, custom: r0.data?.custom ?? {}, client, tests };
+  return { ...r0, custom: r0.data?.custom ?? {}, extra: r0.data?.extra ?? {}, extraFields: extraFieldDefs(client), client: client ? { id: client.id, name: client.name } : null, tests };
 }));
 /** Days a sample is retained after receipt: Settings → Defaults (per material, else general), else 30. */
 async function defaultRetention(cid: number, material: string) {
@@ -137,7 +147,7 @@ lab.put('/samples/:id', allow('samples'), h(async (req) => {
   const ex = await db('samples').where({ id, company_id: cid }).first();
   if (!ex) throw new HttpError(404, 'Sample not found');
   if (ex.status === 'reported' && !isAdmin(req.user)) throw new HttpError(409, 'This sample is already reported');
-  const { custom, ...patch } = (await cleanWrite(cid, req.user.roleDef, 'sample', sampleSchema.omit({ tests: true }).partial().parse(req.body), { creating: false })) as Record<string, any>;
+  const { custom, extra, ...patch } = (await cleanWrite(cid, req.user.roleDef, 'sample', sampleSchema.omit({ tests: true }).partial().parse(req.body), { creating: false })) as Record<string, any>;
   if (patch.retention_days !== undefined || patch.received_date) {
     const keep = patch.retention_days ?? ex.retention_days ?? await defaultRetention(cid, ex.material);
     patch.retention_days = keep; patch.dispose_after = addDays(patch.received_date ?? ex.received_date, keep);
@@ -147,7 +157,7 @@ lab.put('/samples/:id', allow('samples'), h(async (req) => {
     patch.ulr = await formatWithSeq(cid, 'ulr', ex.seq, { date: ex.received_date, client: client?.short_code, material: ex.material });
   }
   if (patch.accreditation === 'Non-NABL') patch.ulr = null;
-  await db('samples').where({ id }).update({ ...patch, data: toJson(mergeCustom(ex.data, custom)) });
+  await db('samples').where({ id }).update({ ...patch, data: toJson(withExtra(mergeCustom(ex.data, custom), extra)) });
   await audit(db, req.user, 'sample', id, 'updated', patch);
   return { ok: true };
 }));
@@ -295,14 +305,9 @@ lab.post('/tests/:id/assign', allow('samples'), h(async (req) => {
 }));
 
 // ---------- reports ----------
-lab.post('/reports', allow('reportPrepare'), h(async (req) => {
+/** Create one report draft from accepted tests (results already issued on another report may be repeated on it). */
+async function draftReport(req: { user: AuthUser }, testIds: number[]) {
   const cid = req.user.company_id;
-  const { testIds } = z.object({ testIds: z.array(z.number()).min(1) }).parse(req.body);
-  const used = await db('tests').whereIn('id', testIds).whereNotNull('report_id').first();
-  if (used) {
-    const rep = await db('documents').where({ id: used.report_id }).first();
-    if (rep && rep.status !== 'cancelled') throw new HttpError(409, `A test is already on report draft #${rep.id}${rep.number ? ' (' + rep.number + ')' : ''}`);
-  }
   const data = await buildReportData(cid, testIds);
   const smp = await db('samples').whereIn('id', data.sampleIds);
   const types = [...new Set(smp.map((x) => x.accreditation || 'Non-NABL'))];
@@ -311,13 +316,38 @@ lab.post('/reports', allow('reportPrepare'), h(async (req) => {
   const s = smp.find((x) => x.id === data.sampleIds[0]);
   const tpl = await db('doc_templates').where({ company_id: cid, kind: 'report' }).orderBy([{ column: 'is_default', order: 'desc' }, { column: 'version', order: 'desc' }]).first();
   const client = await db('clients').where({ id: s.client_id }).first();
+  const full = { ...data, accreditation, client: { name: client.name, address: client.address, gstin: client.gstin }, options: { includeContact: false, includeExtra: true, extraStyle: 'line' as const } };
+  const layout = buildLayout({ data: full });
   const id = await insert(db, 'documents', {
     company_id: cid, kind: 'report', status: 'draft', client_id: s.client_id, site_id: s.site_id, work_order_id: s.work_order_id, date: today(), accreditation,
-    data: toJson({ ...data, accreditation, client: { name: client.name, address: client.address, gstin: client.gstin } }), overrides: toJson({}), template_id: tpl?.id, totals: toJson(null), created_by: req.user.id, created_at: now(), updated_at: now(),
+    data: toJson({ ...full, layout }), overrides: toJson({}), template_id: tpl?.id, totals: toJson(null), created_by: req.user.id, created_at: now(), updated_at: now(),
   });
-  await db('tests').whereIn('id', testIds).update({ report_id: id });
-  await audit(db, req.user, 'document', id, 'report drafted', { tests: testIds });
-  return { id };
+  // tests issued on an earlier report keep pointing at it: that report is never changed
+  await db('tests').whereIn('id', testIds).andWhere((w) => w.whereNull('report_id').orWhereIn('report_id', db('documents').select('id').where({ status: 'cancelled' }))).update({ report_id: id });
+  await db('tests').whereIn('id', testIds).whereIn('report_id', db('documents').select('id').whereIn('status', ['draft', 'review', 'verified']).whereNot({ id })).update({ report_id: id });
+  await audit(db, req.user, 'document', id, 'report drafted', { tests: testIds, format: layout.format });
+  return id;
+}
+lab.post('/reports', allow('reportPrepare'), h(async (req) => {
+  const cid = req.user.company_id;
+  const { testIds, split } = z.object({ testIds: z.array(z.number()).min(1), split: z.enum(['none', 'each', 'sample']).default('none') }).parse(req.body);
+  const tests = await db('tests').whereIn('id', testIds).andWhere({ company_id: cid });
+  if (tests.length !== new Set(testIds).size) throw new HttpError(404, 'Test not found');
+  const reps = await db('documents').whereIn('id', tests.map((t) => t.report_id).filter(Boolean));
+  for (const t of tests) {
+    const rep = reps.find((r) => r.id === t.report_id);
+    if (rep && ['draft', 'review', 'verified'].includes(rep.status)) throw new HttpError(409, `A test is already on report draft #${rep.id}${rep.number ? ' (' + rep.number + ')' : ''}`);
+  }
+  // every report needs at least one result that was not issued before
+  const fresh = (ids: number[]) => ids.some((i) => { const t = tests.find((x) => x.id === i); const rep = reps.find((r) => r.id === t?.report_id); return !rep || rep.status === 'cancelled'; });
+  let groups: number[][] = [testIds];
+  if (split === 'each') groups = testIds.filter((i) => fresh([i])).map((i) => [i, ...(testIds.filter((j) => !fresh([j]) && tests.find((x) => x.id === j)?.sample_id === tests.find((x) => x.id === i)?.sample_id))]);
+  if (split === 'sample') groups = [...new Set(tests.map((t) => t.sample_id))].map((sid) => tests.filter((t) => t.sample_id === sid).map((t) => t.id));
+  groups = groups.filter((g) => g.length && fresh(g));
+  if (!groups.length) throw new HttpError(400, 'Select at least one result that has not been issued yet');
+  const ids: number[] = [];
+  for (const g of groups) ids.push(await draftReport(req, g));
+  return { id: ids[0], ids };
 }));
 lab.post('/reports/:id/refresh', allow('reportPrepare'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
@@ -326,9 +356,13 @@ lab.post('/reports/:id/refresh', allow('reportPrepare'), h(async (req) => {
   if (!['draft'].includes(d.status as string)) throw new HttpError(409, 'Only draft reports can be refreshed');
   const old = d.data as Record<string, unknown>;
   const data = await buildReportData(cid, old.testIds as number[]);
-  const keep = Object.fromEntries(Object.entries(old).filter(([k]) => ['client', 'remarks', 'notes', 'accreditation', 'unlocked', 'custom', 'specification', 'condition', 'source', 'customerRef', 'samples', 'hideCharts'].includes(k) || (old.unlocked as any)?.[k]));
-  await db('documents').where({ id }).update({ data: toJson({ ...data, ...keep }), updated_at: now() });
-  return { ok: true };
+  const keep = Object.fromEntries(Object.entries(old).filter(([k]) => ['client', 'remarks', 'notes', 'accreditation', 'unlocked', 'custom', 'specification', 'condition', 'source', 'customerRef', 'samples', 'hideCharts', 'options', 'sealPos', 'signatoryId'].includes(k) || (old.unlocked as any)?.[k]));
+  const next: Record<string, unknown> = { ...data, ...keep };
+  const prev = old.layout as { edited?: boolean } | undefined;
+  // a layout edited by hand is kept (the user can rebuild it from the format); otherwise it follows the new results
+  next.layout = prev?.edited ? prev : buildLayout({ data: next as never });
+  await db('documents').where({ id }).update({ data: toJson(next), updated_at: now() });
+  return { ok: true, layoutKept: Boolean(prev?.edited) };
 }));
 lab.post('/reports/:id/workflow', h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
@@ -353,12 +387,32 @@ lab.post('/reports/:id/workflow', h(async (req) => {
 lab.get('/reports/pending-tests', h(async (req) => {
   // accepted tests not yet on a live report, grouped by sample
   const cid = req.user.company_id;
+  if (req.query.withReported) {
+    // also results already issued on a report, for samples that still have results waiting (e.g. 3 / 7-day cubes for the 28-day report)
+    const pending = await db('tests as t').leftJoin('documents as d', 'd.id', 't.report_id').where('t.company_id', cid).andWhere('t.status', 'accepted')
+      .andWhere((w) => w.whereNull('t.report_id').orWhere('d.status', 'cancelled')).distinct('t.sample_id');
+    const sids = pending.map((r) => r.sample_id);
+    if (!sids.length) return [];
+    return db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('catalog as k', 'k.id', 't.catalog_id')
+      .leftJoin('documents as d', 'd.id', 't.report_id')
+      .where('t.company_id', cid).whereIn('t.sample_id', sids).whereIn('t.status', ['accepted', 'reported'])
+      .andWhere((w) => w.whereNull('t.report_id').orWhereIn('d.status', ['cancelled', 'issued']))
+      .select('t.id', 't.sample_id', 's.code as sample_code', 's.client_id', 'c.name as client_name', 's.material', 's.accreditation', 'k.report_name', 'k.billing_name', 't.completed_at', 't.template_code', 't.observation',
+        db.raw("CASE WHEN d.status = 'issued' THEN d.number ELSE NULL END as reported_in"))
+      .orderBy('s.id').then((rows) => rows.map(({ observation, ...r }) => ({ ...r, age: ageOf(observation) })));
+  }
   return db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('catalog as k', 'k.id', 't.catalog_id')
     .leftJoin('documents as d', 'd.id', 't.report_id')
     .where('t.company_id', cid).andWhere('t.status', 'accepted').andWhere((w) => w.whereNull('t.report_id').orWhere('d.status', 'cancelled'))
     .andWhere((w) => w.whereNull('s.quick').orWhere('s.quick', false))
-    .select('t.id', 't.sample_id', 's.code as sample_code', 's.client_id', 'c.name as client_name', 's.material', 's.accreditation', 'k.report_name', 'k.billing_name', 't.completed_at')
-    .orderBy('s.id');
+    .select('t.id', 't.sample_id', 's.code as sample_code', 's.client_id', 'c.name as client_name', 's.material', 's.accreditation', 'k.report_name', 'k.billing_name', 't.completed_at', 't.template_code', 't.observation')
+    .orderBy('s.id').then((rows) => rows.map(({ observation, ...r }) => ({ ...r, age: ageOf(observation) })));
 }));
+/** Age at test (days) of cube / cement strength sets, so a report can be prepared per age. */
+function ageOf(obs: unknown): string | null {
+  const o = parseJson<{ header?: Record<string, unknown> }>(obs as string, {});
+  const a = o.header?.age;
+  return a === undefined || a === null || a === '' ? null : String(a);
+}
 
 export { parseJson };

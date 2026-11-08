@@ -13,3 +13,4 @@ screenshots/
 *.sqlite-wal
 data/
 web/public/ocr/
+scripts/tmp/

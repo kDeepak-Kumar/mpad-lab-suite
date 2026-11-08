@@ -9,7 +9,7 @@ import { DEFAULT_TEMPLATES, EQUIPMENT_CATEGORIES, INDIAN_STATES, isIsoDate, type
 import { db, insert, now, parseJson, row, toJson } from '../db';
 import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession, zBool } from '../auth';
 import { moveToBin } from '../recycle';
-import { audit, getCompany, ledger } from '../services';
+import { audit, extraFieldDefs, getCompany, ledger } from '../services';
 import { cleanWrite, deleteMeta, getMeta, mergeCustom, saveMeta, stripHidden, type MetaKind } from '../meta';
 
 export const core = Router();
@@ -318,6 +318,33 @@ core.put('/clients/:id', allow('client.edit'), h(async (req) => {
   await db('clients').where({ id }).update({ ...rest, data: toJson(mergeCustom(ex.data, cu)) });
   await audit(db, req.user, 'client', id, 'updated', { fields: Object.keys(rest) });
   return { ok: true };
+}));
+// ---------- client-specific additional information fields (captured on each sample, printed on reports) ----------
+const extraFieldSchema = z.object({ fields: z.array(z.object({
+  key: z.string().max(40).optional(), label: z.string().trim().min(1).max(60), type: z.enum(['text', 'number', 'date', 'select']).default('text'),
+  options: z.array(z.string().max(80)).max(50).optional(), onReport: z.boolean().default(true),
+})).max(20) });
+core.get('/clients/:id/extra-fields', h(async (req) => {
+  const c = await db('clients').where({ id: Number(req.params.id), company_id: req.user.company_id }).first();
+  if (!c) throw new HttpError(404, 'Client not found');
+  return { fields: extraFieldDefs(c) };
+}));
+core.put('/clients/:id/extra-fields', allow('client.edit'), h(async (req) => {
+  const id = Number(req.params.id);
+  const c = await db('clients').where({ id, company_id: req.user.company_id }).first();
+  if (!c) throw new HttpError(404, 'Client not found');
+  const { fields } = extraFieldSchema.parse(req.body);
+  const used = new Set<string>();
+  const clean = fields.map((f) => {
+    let key = (f.key && /^[a-z0-9_]{1,40}$/.test(f.key) ? f.key : f.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30)) || 'field';
+    while (used.has(key)) key = `${key}_2`;
+    used.add(key);
+    return { key, label: f.label, type: f.type, ...(f.type === 'select' ? { options: (f.options ?? []).filter(Boolean) } : {}), onReport: f.onReport };
+  });
+  const data = { ...parseJson<Record<string, unknown>>(c.data, {}), extraFields: clean };
+  await db('clients').where({ id }).update({ data: toJson(data) });
+  await audit(db, req.user, 'client', id, 'additional sample fields updated', { fields: clean.map((f) => f.label) });
+  return { fields: clean };
 }));
 core.delete('/clients/:id', allow('client.delete'), h(async (req) => {
   const id = Number(req.params.id), cid = req.user.company_id;

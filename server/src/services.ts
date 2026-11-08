@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Knex } from 'knex';
 import {
   counterScope, formatNumber, formatDate, DEFAULT_NUMBERING, type ObservationTemplate, evaluateObservation,
-  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries, allCharts, fillRefs, reportTexts, reportInfoRows, boreLogData, evaluate, isError, partShown, type BoreLogData,
+  formatValue, stateName, type ObservationInput, reportSpec, reportTableRows, chartSeries, allCharts, fillRefs, reportTexts, reportInfoRows, boreLogData, evaluate, isError, partShown, type BoreLogData, snapTest, type TestSnap, type ExtraValue, type ReportCustomer,
 } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from './db';
 import { HttpError, type AuthUser } from './auth';
@@ -105,6 +105,10 @@ export async function buildReportData(cid: number, testIds: number[]) {
   const intros: { code: string; title: string; texts: { title?: string; text: string }[] }[] = [];
   const notes: string[] = [];
   const nabl: boolean[] = [];
+  const snaps: TestSnap[] = [];
+  // results already issued on an earlier report (e.g. 7-day cubes repeated on the 28-day report)
+  const repIds = [...new Set(tests.map((t) => t.report_id).filter(Boolean))] as number[];
+  const issuedOn = new Map((repIds.length ? await db('documents').whereIn('id', repIds).whereIn('status', ['issued']).select('id', 'number') : []).map((r) => [r.id as number, r.number as string]));
   const sorted = tests.sort((a, b) => (a.catalog_id as number) - (b.catalog_id as number) || (a.id as number) - (b.id as number));
   const perKey = new Map<string, number>();
   for (const t of sorted) { const k = `${t.template_code}|${t.sample_id}`; perKey.set(k, (perKey.get(k) ?? 0) + 1); }
@@ -158,7 +162,10 @@ export async function buildReportData(cid: number, testIds: number[]) {
     if (info.length || texts.length || dTables.length || dCharts.length) details.push({ title: label || cat?.report_name || tpl.name, sample: sampleIds.length > 1 ? sampleLabel : '', info, texts, tables: dTables, charts: dCharts });
     const bl = boreLogData(tpl, res);
     if (bl && bl.strata.length) borelogs.push({ ...bl, title: bl.title || label, sample: sampleLabel });
+    snaps.push(snapTest(t as never, tpl, res, obsIn, { name: cat?.report_name || tpl.name, method: cat?.method || tpl.method, sample: sIdx, sampleCode: samples[sIdx]?.code ?? '', sampleLabel: samples[sIdx]?.sample_label || (sampleIds.length > 1 ? `Sample-${String(sIdx + 1).padStart(2, '0')}` : ''), shown }));
+    if (t.report_id && issuedOn.has(t.report_id as number)) snaps[snaps.length - 1].previous = issuedOn.get(t.report_id as number) || 'earlier report';
   }
+  const { customer, extra } = await reportCustomer(cid, samples);
   const company = await getCompany(cid);
   for (const n of (company.defaults?.reportNotes ?? '').split('\n').map((s) => s.trim()).filter(Boolean)) if (!notes.includes(n)) notes.push(n);
   const s0 = samples[0];
@@ -178,7 +185,42 @@ export async function buildReportData(cid: number, testIds: number[]) {
     nablAll: nabl.length > 0 && nabl.every(Boolean),
     rows: rows.map(({ key: _k, ...r }) => r),
     tables, charts, details, borelogs, intros, notes, remarks: '',
+    quantity: s0?.quantity || '',
+    tests: snaps, customer, extra,
   };
+}
+
+/** Client-specific additional information fields (defined on the client, values captured on each sample). */
+export interface ExtraFieldDef { key: string; label: string; type?: 'text' | 'number' | 'date' | 'select'; options?: string[]; onReport?: boolean }
+export const extraFieldDefs = (client: { data?: unknown } | null | undefined): ExtraFieldDef[] =>
+  (parseJson<{ extraFields?: ExtraFieldDef[] }>(client?.data as string, {}).extraFields ?? []).filter((f) => f?.key && f.label);
+
+/** Customer block of a report from the client master, the site (project) and the samples (customer reference). */
+export async function reportCustomer(cid: number, samples: Record<string, any>[]): Promise<{ customer: ReportCustomer; extra: ExtraValue[] }> {
+  const s0 = samples[0];
+  const client = s0 ? await db('clients').where({ id: s0.client_id, company_id: cid }).first() : null;
+  const site = s0?.site_id ? await db('sites').where({ id: s0.site_id, company_id: cid }).first() : null;
+  const contacts = client ? await db('contacts').where({ company_id: cid, client_id: client.id }).orderBy('id') : [];
+  const contact = contacts.find((c) => site && c.site_id === site.id) ?? contacts[0] ?? null;
+  const refs = [...new Set(samples.map((x) => x.customer_ref).filter(Boolean))];
+  const customer: ReportCustomer = {
+    name: client?.name ?? '', address: client?.address ?? '', gstin: client?.gstin ?? '',
+    project: site ? (site.project || site.name) : '', customerRef: refs.join(', '),
+    contact: contact ? { name: contact.name, phone: contact.phone || client?.phone || '', email: contact.email || client?.email || '' } : (client?.phone || client?.email ? { phone: client.phone, email: client.email } : null),
+  };
+  const defs = extraFieldDefs(client);
+  const extra: ExtraValue[] = [];
+  samples.forEach((smp, i) => {
+    const vals = parseJson<{ extra?: Record<string, unknown> }>(smp.data, {}).extra ?? {};
+    for (const f of defs) {
+      if (f.onReport === false) continue;
+      let v = vals[f.key];
+      if (v === undefined || v === null || v === '') continue;
+      if (f.type === 'date') v = formatDate(String(v));
+      extra.push({ key: f.key, label: f.label, value: String(v), sample: samples.length > 1 ? (smp.sample_label || smp.code) : '' });
+    }
+  });
+  return { customer, extra };
 }
 
 /** Client ledger: opening balance, issued invoices (debit), payments and TDS (credit), running balance. */

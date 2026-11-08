@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { amountInWords, fillPlaceholders, formatDate, inr, type Block, type Column, type DocTemplate } from '@suite/shared';
+import { amountInWords, fillPlaceholders, formatDate, inr, type Block, type Column, type DocTemplate, type ReportLayout } from '@suite/shared';
+import { layoutBlocks, type LayoutEdit } from './LayoutView';
 import qrcode from 'qrcode-generator';
 import { LineChart } from './Chart';
 import { BoreLog, SiteProfile, SoilLegend } from './BoreLog';
@@ -19,7 +20,11 @@ export interface RenderInput {
   verifyUrl?: string | null;
   /** When given, the seal can be dragged anywhere on the page (final stage, before issue). */
   onSealMove?: (pos: { x: number; y: number; w: number }) => void;
+  /** Report body editing (word-processor style) – only for drafts. */
+  layoutEdit?: LayoutEdit;
 }
+/** Template blocks whose content the report layout replaces. */
+const IN_LAYOUT = (b: Block) => ['reportInfo', 'results', 'remarks', 'charts', 'notes'].includes(b.type) || b.id === 'tableTitle' || b.id === 'end';
 
 const rateOnly = (kind: string, d: any) => kind === 'quote' && !(d.showQty ?? d.mode !== 'rate');
 
@@ -75,11 +80,19 @@ export function DocRenderer(p: RenderInput) {
     width: t.page.orientation === 'landscape' ? '297mm' : '210mm', minHeight: t.page.orientation === 'landscape' ? '210mm' : '297mm',
     padding: `${imgTop ? Math.min(edge, m) : m}mm ${m}mm ${imgBottom ? Math.min(edge, m) : m}mm`, fontFamily: t.page.fontFamily, fontSize: `${t.page.fontSize}pt`, display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
   };
+  const layout = p.kind === 'report' && Array.isArray(p.data.layout?.sections) ? (p.data.layout as ReportLayout) : null;
+  let layoutDone = false;
   return (
     <div className="doc-page" style={{ ...page, position: 'relative' }}>
       {isDraft && <div className="doc-watermark">DRAFT</div>}
       {p.data.sealPos && p.company.seal && <FreeSeal p={p} />}
       {t.blocks.filter((b) => b.visible).map((b) => {
+        if (layout && IN_LAYOUT(b)) {
+          if (layoutDone) return null;
+          layoutDone = true;
+          const rb = t.blocks.find((x) => x.type === 'results');
+          return layoutBlocks(layout.sections, { number: p.number ?? '', issueText: p.data.issueText ?? '' }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
+        }
         const el = renderBlock(b, p, ctx);
         if (!el) return null;
         return (
@@ -329,6 +342,48 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
               })}
             </tbody>
           </table>
+          <ResultExtras p={p} pr={pr} />
+        </>
+      );
+    }
+    case 'remarks':
+      if (!d.remarks) return null;
+      // one element per line, so long remarks can continue on the next page between lines
+      return <div style={{ border: '1px solid #333', borderTop: 0, padding: '3px 6px', fontWeight: 700 }}>{String(d.remarks).split('\n').map((line, i) => <div key={i} className="doc-line">{i === 0 ? `${pr.label ?? ''} ${line}` : line}</div>)}</div>;
+    case 'charts':
+      if (!(d.charts ?? []).length) return null;
+      return d.hideCharts || (d.details ?? []).some((x: any) => x.charts?.length) ? null : <ChartList charts={d.charts} />;
+    case 'receiptBody':
+      return (
+        <table className="bx" style={{ marginTop: 10 }}><tbody>
+          {[['Receipt No.', p.number], ['Date', formatDate(d.date)], ['Received from', d.client?.name], ['Amount', `₹ ${inr(d.amount, 2)} (${amountInWords(d.amount)})`], ['TDS deducted', d.tds ? `₹ ${inr(d.tds, 2)}` : '--'], ['Mode', d.mode], ['Reference', d.reference], ['Against invoices', d.against]].map(([k, v]) => <tr key={String(k)}><td style={{ width: '30%' }}>{k}</td><td>{v}</td></tr>)}
+        </tbody></table>
+      );
+    case 'statementBody':
+      return (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '6px 0' }}><div><b>{d.client?.name}</b><div style={{ whiteSpace: 'pre-line' }}>{d.client?.address}</div></div><div>As on {formatDate(d.asOn)}</div></div>
+          <table className="bx" style={{ fontSize: '9.5pt' }}>
+            <thead><tr><th>Date</th><th>Particulars</th><th>Ref</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
+            <tbody>
+              <tr><td /><td>Opening balance</td><td /><td /><td /><td style={{ textAlign: 'right' }}>{inr(d.opening ?? 0, 2)}</td></tr>
+              {(d.entries ?? []).map((e: any, i: number) => <tr key={i}><td>{formatDate(e.date)}</td><td>{e.type}</td><td>{e.ref}</td><td style={{ textAlign: 'right' }}>{e.debit ? inr(e.debit, 2) : ''}</td><td style={{ textAlign: 'right' }}>{e.credit ? inr(e.credit, 2) : ''}</td><td style={{ textAlign: 'right' }}>{inr(e.balance, 2)}</td></tr>)}
+              <tr><td colSpan={5} style={{ textAlign: 'right', fontWeight: 700 }}>Balance due</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{inr(d.balance ?? 0, 2)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+/** Detailed tables, graphs, scope paragraphs and borehole logs generated by the observation sheets. */
+function ResultExtras({ p, pr }: { p: RenderInput; pr: Record<string, any> }) {
+  const d = p.data;
+  const tables = (d.tables ?? []) as { title: string; sample?: string; columns: string[]; rows: string[][] }[];
+  return (
+    <>
           {(d.intros ?? []).map((it: any, k: number) => (
             <div key={'i' + k} style={{ marginTop: 10 }}>
               <div style={{ fontWeight: 700, fontSize: '10pt', textTransform: 'uppercase' }}>{it.title} – scope and method</div>
@@ -365,39 +420,8 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
             </div>
           )}
           {!(d.details ?? []).some((x: any) => x.charts?.length) && !p.template.blocks.some((x) => x.type === 'charts' && x.visible) && !d.hideCharts && (d.charts ?? []).length > 0 && <ChartList charts={d.charts} />}
-        </>
-      );
-    }
-    case 'remarks':
-      if (!d.remarks) return null;
-      // one element per line, so long remarks can continue on the next page between lines
-      return <div style={{ border: '1px solid #333', borderTop: 0, padding: '3px 6px', fontWeight: 700 }}>{String(d.remarks).split('\n').map((line, i) => <div key={i} className="doc-line">{i === 0 ? `${pr.label ?? ''} ${line}` : line}</div>)}</div>;
-    case 'charts':
-      if (!(d.charts ?? []).length) return null;
-      return d.hideCharts || (d.details ?? []).some((x: any) => x.charts?.length) ? null : <ChartList charts={d.charts} />;
-    case 'receiptBody':
-      return (
-        <table className="bx" style={{ marginTop: 10 }}><tbody>
-          {[['Receipt No.', p.number], ['Date', formatDate(d.date)], ['Received from', d.client?.name], ['Amount', `₹ ${inr(d.amount, 2)} (${amountInWords(d.amount)})`], ['TDS deducted', d.tds ? `₹ ${inr(d.tds, 2)}` : '--'], ['Mode', d.mode], ['Reference', d.reference], ['Against invoices', d.against]].map(([k, v]) => <tr key={String(k)}><td style={{ width: '30%' }}>{k}</td><td>{v}</td></tr>)}
-        </tbody></table>
-      );
-    case 'statementBody':
-      return (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', margin: '6px 0' }}><div><b>{d.client?.name}</b><div style={{ whiteSpace: 'pre-line' }}>{d.client?.address}</div></div><div>As on {formatDate(d.asOn)}</div></div>
-          <table className="bx" style={{ fontSize: '9.5pt' }}>
-            <thead><tr><th>Date</th><th>Particulars</th><th>Ref</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-            <tbody>
-              <tr><td /><td>Opening balance</td><td /><td /><td /><td style={{ textAlign: 'right' }}>{inr(d.opening ?? 0, 2)}</td></tr>
-              {(d.entries ?? []).map((e: any, i: number) => <tr key={i}><td>{formatDate(e.date)}</td><td>{e.type}</td><td>{e.ref}</td><td style={{ textAlign: 'right' }}>{e.debit ? inr(e.debit, 2) : ''}</td><td style={{ textAlign: 'right' }}>{e.credit ? inr(e.credit, 2) : ''}</td><td style={{ textAlign: 'right' }}>{inr(e.balance, 2)}</td></tr>)}
-              <tr><td colSpan={5} style={{ textAlign: 'right', fontWeight: 700 }}>Balance due</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{inr(d.balance ?? 0, 2)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-      );
-    default:
-      return null;
-  }
+    </>
+  );
 }
 
 function DetailTable({ tb }: { tb: { title: string; sample?: string; columns: string[]; rows: string[][] } }) {
