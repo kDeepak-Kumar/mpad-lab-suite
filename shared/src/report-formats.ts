@@ -255,6 +255,35 @@ const cubes: Builder = (tests, d) => {
   ];
 };
 
+/** Concrete cores (IS 516 Part 4): laid out like the cube report – one row per core, grade and average merged. */
+const cores: Builder = (tests, d) => {
+  const rows: CellSpec[][] = [[
+    C('Sl. no'), C('Grade of concrete*'), C('Core ID / Location*'), C('Dia (mm)'), C('L/D ratio'), C('Load (KN)'), H('Cylinder Strength (N/mm<sup>2</sup>)'), H('Equivalent Cube Strength (N/mm<sup>2</sup>)'), H('Average Equivalent Cube Strength (N/mm<sup>2</sup>)'),
+  ]];
+  const acc: CellSpec[][] = [[C('Acceptance as per IS 456:2000, cl. 17.4.3', { cs: 4 }), null, null, null], [C('Grade'), C('Average ≥ 0.85 fck'), C('Lowest individual ≥ 0.75 fck'), C('Result')]];
+  let n = 0;
+  for (const t of tests) {
+    const cs = t.grids.cores?.rows.filter((r) => r.fcube || r.p) ?? [];
+    const k = Math.max(1, cs.length);
+    const grade = [t.header.grade?.replace(/^M(\d)/, 'M-$1'), t.header.condition].filter(Boolean).map(h).join('<br>');
+    cs.forEach((c, i) => {
+      const first = i === 0;
+      rows.push([C(`${++n}.`), first ? H(grade || '--', { rs: k }) : null, C(c.id || '--'), C(fix(c.d, 0) || '--'), C(c.ld || '--'), C(fix(c.p, 1) || '--'), C(c.fcyl || '--'), C(c.fcube || '--'), first ? C(t.results.avg || '--', { rs: k }) : null]);
+    });
+    const fck = Number(t.results.fck);
+    if (Number.isFinite(fck) && fck > 0) acc.push([C(t.header.grade || '--'), C(`${t.results.avg || '--'} (≥ ${(0.85 * fck).toFixed(2)})`), C(`${t.results.minv || '--'} (≥ ${(0.75 * fck).toFixed(2)})`), C(t.results.verdict || '--')]);
+  }
+  const method = uniq(tests.map((t) => t.method)).join('; ');
+  return [
+    headerBox(d, 'Cores', commonRows(d, [], { method })),
+    title('TEST REPORT ON COMPRESSIVE STRENGTH OF CONCRETE CORES'),
+    table([6, 13, 15, 8, 8, 9, 13, 13, 15], rows, { head: 1, role: 'results', sz: 10 }),
+    ...extraSections(d), ...remarksSection(d),
+    ...(acc.length > 2 ? [table([16, 28, 32, 24], acc, { width: 80, align: 'center', mt: 4, role: 'requirements', sz: 10 })] : []),
+    ...notesSection(d), endSection(),
+  ];
+};
+
 /** IS 1786 mass per metre (kg/m): minimum and nominal, as printed on the laboratory's steel reports. */
 const STEEL_MASS: [number, number, number][] = [[8, 0.363, 0.395], [10, 0.567, 0.617], [12, 0.834, 0.888], [16, 1.483, 1.580], [20, 2.366, 2.470], [25, 3.697, 3.850], [32, 6.058, 6.310]];
 const STEEL_GRADE: Record<string, { ts: number; pct: number; ys: number; el: string; c: string; s: string; p: string; ps: string }> = {
@@ -457,6 +486,7 @@ const generic: Builder = (tests, d) => {
 
 export const REPORT_FORMATS: Record<string, { label: string; build: Builder; codes?: RegExp }> = {
   cubes: { label: 'Concrete cubes – compressive strength', build: cubes, codes: /^CUBE-COMP$/ },
+  cores: { label: 'Concrete cores – compressive strength', build: cores, codes: /^NDT-CORE$/ },
   'steel-physical': { label: 'Steel (TMT) – physical properties', build: steelPhysical, codes: /^STEEL-TMT$/ },
   'steel-chemical': { label: 'Steel (TMT) – chemical analysis', build: steelChemical, codes: /^STEEL-CHEM$/ },
   'coarse-aggregate': { label: 'Coarse aggregate', build: aggregate(false), codes: /^CA-/ },

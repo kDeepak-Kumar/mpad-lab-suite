@@ -13,6 +13,7 @@ import { PageHeader, Empty } from '../components/ui';
 export function PrepareReport() {
   const [withReported, setWithReported] = useState(false);
   const { data } = useApi<any[]>(`/reports/pending-tests${withReported ? '?withReported=1' : ''}`, [withReported]);
+  const { data: onDrafts } = useApi<any[]>('/reports/on-drafts', []);
   const [sel, setSel] = useState<number[]>([]);
   const [split, setSplit] = useState<'none' | 'each' | 'sample'>('none');
   const [busy, setBusy] = useState(false);
@@ -48,7 +49,9 @@ export function PrepareReport() {
           <Switch label="Show results already issued (to repeat them on a new report)" checked={withReported} onChange={(e) => { setWithReported(e.currentTarget.checked); setSel([]); }} />
         </Group>
       </Paper>
-      {!rows.length && <Empty>No accepted tests waiting for a report. Tests appear here after a reviewer accepts their observation sheets.</Empty>}
+      {!rows.length && <Empty>{withReported
+        ? 'Earlier results are offered only for samples that still have a result waiting for a report (for example the 28-day cubes after the 7-day report).'
+        : 'No accepted tests waiting for a report. Tests appear here after a reviewer accepts their observation sheets.'}{(onDrafts ?? []).length ? ' Tests already on a report draft are listed below – open the draft to continue.' : ''}</Empty>}
       {sel.length > 0 && <Alert variant="light" mb="sm">You can add other {selType ?? ''} samples of the same client to this report; each sample becomes a result column. NABL and Non-NABL samples always go on separate reports.{sel.length > fresh.length ? ' Results issued earlier are repeated as they are – the earlier report is not changed.' : ''}</Alert>}
       <Stack>
         {[...bySample.entries()].map(([sid, tests]) => {
@@ -68,6 +71,23 @@ export function PrepareReport() {
           );
         })}
       </Stack>
+      {(onDrafts ?? []).length > 0 && (
+        <Paper withBorder p="sm" mt="md">
+          <Text fw={600} size="sm">Already on a report draft</Text>
+          <Text size="xs" c="dimmed" mb={6}>These results are on a report that has not been issued yet. Open the draft to edit, refresh or send it for verification; cancel the draft to prepare them again.</Text>
+          <Stack gap={4}>
+            {[...new Map((onDrafts ?? []).map((t) => [t.report_id, t])).values()].map((t) => {
+              const tests = (onDrafts ?? []).filter((x) => x.report_id === t.report_id);
+              return (
+                <Group key={t.report_id} justify="space-between" wrap="nowrap">
+                  <Text size="sm">{t.client_name} · {tests.map((x) => `${x.sample_code} ${x.report_name || x.billing_name}`).join(', ')} <Badge size="xs" variant="light" color="gray">{t.report_status}</Badge></Text>
+                  <Button size="compact-xs" variant="light" onClick={() => nav(`/documents/${t.report_id}`)}>Open draft</Button>
+                </Group>
+              );
+            })}
+          </Stack>
+        </Paper>
+      )}
     </>
   );
 }

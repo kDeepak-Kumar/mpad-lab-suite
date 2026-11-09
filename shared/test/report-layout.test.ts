@@ -95,6 +95,7 @@ describe('report formats', () => {
   const cube = (id: number, age: number, loads: number[]) => snap(id, 'CUBE-COMP', { grade: 'M30', age, casting_date: '2026-09-22', element: 'Slab RCC, Tower-A' }, { cubes: loads.map((load, i) => ({ id: `C${i + 1}`, l: 150, b: 150, h: 150, mass: 8.3, load })) });
   it('picks the format from the tests', () => {
     expect(pickFormat(['CUBE-COMP'])).toBe('cubes');
+    expect(pickFormat(['NDT-CORE'])).toBe('cores');
     expect(pickFormat(['CA-SIEVE', 'CA-AIV', 'FA-SIEVE'])).toBe('coarse-aggregate');
     expect(pickFormat(['CEM-NC', 'CEM-SET'])).toBe('cement-physical');
     expect(pickFormat(['CEM-CHEM'])).toBe('cement-chemical');
@@ -151,6 +152,17 @@ describe('report formats', () => {
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
     expect(res.rows.length).toBe(4);
     expect(htmlToText(res.rows[1][4].h)).toBe('7');
+  });
+  it('concrete cores: one row per core in the cube-report style, IS 456 acceptance', () => {
+    const t = snap(9, 'NDT-CORE', { grade: 'M25', condition: 'Soaked 48 h (wet)' }, { cores: [{ id: 'C1 – Column C4', d: 150, l: 150, p: 420.6 }, { id: 'C2', d: 150, l: 150, p: 450 }, { id: 'C3', d: 150, l: 150, p: 470 }] });
+    const l = buildLayout({ data: { ...base, tests: [t], customer, options: {} } });
+    expect(l.format).toBe('cores');
+    const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
+    expect(res.rows.length).toBe(4);
+    expect(htmlToText(res.rows[1][2].h)).toBe('C1 – Column C4');
+    expect(res.rows[1][1].rs).toBe(3); expect(res.rows[1][8].rs).toBe(3);
+    expect(all(l)).toContain('COMPRESSIVE STRENGTH OF CONCRETE CORES');
+    expect(all(l)).toContain('Acceptance as per IS 456:2000');
   });
   it('steel: one row per diameter, IS 1786 requirement tables', () => {
     const bar = (id: number, dia: string, ys: number) => snap(id, 'STEEL-TMT', { grade: 'Fe 550D', dia, brand: 'Jindal panther' }, { b: [1, 2, 3].map(() => ({ len: 1000, mass: (Number(dia) ** 2) / 162.2, py: ys * Math.PI * Number(dia) ** 2 / 4 / 1000, pm: ys * 1.2 * Math.PI * Number(dia) ** 2 / 4 / 1000, l0: 100, lf: 120, bend: 'Satisfactory', rebend: 'Satisfactory' })) });

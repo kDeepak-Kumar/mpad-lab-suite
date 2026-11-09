@@ -408,6 +408,15 @@ lab.get('/reports/pending-tests', h(async (req) => {
     .select('t.id', 't.sample_id', 's.code as sample_code', 's.client_id', 'c.name as client_name', 's.material', 's.accreditation', 'k.report_name', 'k.billing_name', 't.completed_at', 't.template_code', 't.observation')
     .orderBy('s.id').then((rows) => rows.map(({ observation, ...r }) => ({ ...r, age: ageOf(observation) })));
 }));
+/** Accepted tests that are already on a report draft (so Prepare report can point to the draft instead of looking empty). */
+lab.get('/reports/on-drafts', h(async (req) => {
+  return db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('catalog as k', 'k.id', 't.catalog_id')
+    .join('documents as d', 'd.id', 't.report_id')
+    .where('t.company_id', req.user.company_id).andWhere('t.status', 'accepted').whereIn('d.status', ['draft', 'review', 'verified'])
+    .andWhere((w) => w.whereNull('s.quick').orWhere('s.quick', false))
+    .select('t.id', 's.code as sample_code', 'c.name as client_name', 'k.report_name', 'k.billing_name', 'd.id as report_id', 'd.status as report_status')
+    .orderBy('d.id', 'desc').limit(200);
+}));
 /** Age at test (days) of cube / cement strength sets, so a report can be prepared per age. */
 function ageOf(obs: unknown): string | null {
   const o = parseJson<{ header?: Record<string, unknown> }>(obs as string, {});
