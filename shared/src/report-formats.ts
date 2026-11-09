@@ -508,11 +508,19 @@ export function pickFormat(codes: string[]): string {
   return best ? best[0] : 'generic';
 }
 
+/** Whether a format can show any of these tests (the general format shows everything). */
+export function formatFits(format: string, codes: string[]): boolean {
+  const f = REPORT_FORMATS[format];
+  return !!f && (!f.codes || codes.some((c) => f.codes!.test(c)));
+}
+
 /** Generate the editable layout of a report from its data. */
 export function buildLayout(input: FormatInput): ReportLayout {
   const d = input.data;
   const tests = activeTests(d);
-  const fmt = d.options?.format && REPORT_FORMATS[d.options.format] ? d.options.format : pickFormat(tests.map((t) => t.code));
+  // a chosen format is used only if it fits at least one test (a cube layout for core results would come out empty)
+  const forced = d.options?.format && REPORT_FORMATS[d.options.format] && formatFits(d.options.format, tests.map((t) => t.code)) ? d.options.format : null;
+  const fmt = forced ?? pickFormat(tests.map((t) => t.code));
   if (!d.tests) { // reports drafted before formats existed: general layout from the result rows
     return { format: 'generic', version: 1, sections: legacyLayout(d) };
   }

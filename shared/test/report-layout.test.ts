@@ -163,6 +163,9 @@ describe('report formats', () => {
     expect(res.rows[1][1].rs).toBe(3); expect(res.rows[1][8].rs).toBe(3);
     expect(all(l)).toContain('COMPRESSIVE STRENGTH OF CONCRETE CORES');
     expect(all(l)).toContain('Acceptance as per IS 456:2000');
+    // choosing the cube format for core results is ignored (it would give an empty cube table)
+    const l2 = buildLayout({ data: { ...base, tests: [t], customer, options: { format: 'cubes' } } });
+    expect(l2.format).toBe('cores');
   });
   it('steel: one row per diameter, IS 1786 requirement tables', () => {
     const bar = (id: number, dia: string, ys: number) => snap(id, 'STEEL-TMT', { grade: 'Fe 550D', dia, brand: 'Jindal panther' }, { b: [1, 2, 3].map(() => ({ len: 1000, mass: (Number(dia) ** 2) / 162.2, py: ys * Math.PI * Number(dia) ** 2 / 4 / 1000, pm: ys * 1.2 * Math.PI * Number(dia) ** 2 / 4 / 1000, l0: 100, lf: 120, bend: 'Satisfactory', rebend: 'Satisfactory' })) });

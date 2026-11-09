@@ -1,5 +1,5 @@
 import { Alert, Badge, Button, Checkbox, Group, Paper, SegmentedControl, Select, Stack, Switch, Text } from '@mantine/core';
-import { buildLayout, refreshRoles, REPORT_FORMATS, type ReportLayout, type ReportOptions, type TestSnap } from '@suite/shared';
+import { buildLayout, formatFits, refreshRoles, REPORT_FORMATS, type ReportLayout, type ReportOptions, type TestSnap } from '@suite/shared';
 
 /**
  * What goes on this report: format, parameters (tests / result rows), customer contact details and the
@@ -45,8 +45,8 @@ export function ReportContents({ data, onChange, disabled }: { data: Record<stri
     <Stack gap="sm">
       <Paper withBorder p="sm">
         <Group justify="space-between" align="flex-end">
-          <Select size="xs" style={{ flex: 1 }} label="Report format" disabled={disabled} data={Object.entries(REPORT_FORMATS).map(([value, f]) => ({ value, label: f.label }))}
-            value={opts.format ?? layout.format} onChange={(v) => v && setOpts({ format: v }, 'rebuild')} />
+          <Select size="xs" style={{ flex: 1 }} label="Report format" disabled={disabled} data={Object.entries(REPORT_FORMATS).map(([value, f]) => { const fits = formatFits(value, tests.map((t) => t.code)); return { value, label: fits ? f.label : `${f.label} – not for these tests`, disabled: tests.length > 0 && !fits }; })}
+            value={layout.format} onChange={(v) => v && setOpts({ format: v }, 'rebuild')} />
           <Button size="xs" variant="default" disabled={disabled} onClick={() => rebuild(data)}>Rebuild layout</Button>
         </Group>
         <Text size="xs" c="dimmed" mt={4}>{edited ? 'Edited by hand – edit the report directly in the preview. Rebuilding replaces the manual changes.' : 'Click any table or text in the preview to edit it like a Word document.'}</Text>
