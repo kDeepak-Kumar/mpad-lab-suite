@@ -248,14 +248,7 @@ function renderBlock(b: Block, p: RenderInput, ctx: any): ReactNode {
     case 'text':
       return <div style={{ textAlign: pr.align ?? 'left', fontSize: pr.size ? `${pr.size}pt` : undefined, fontWeight: pr.bold ? 700 : undefined, margin: '4px 0' }}>{nl(fill(pr.text))}</div>;
     case 'signature':
-      if (p.kind === 'report' && p.verifyUrl && pr.showQr !== false) {
-        return (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16 }}>
-            <div style={{ flex: 1 }}><Signature pr={pr} p={p} fill={fill} /></div>
-            <VerifyQr url={p.verifyUrl} />
-          </div>
-        );
-      }
+      if (p.kind === 'report') return <ReportSignature pr={pr} p={p} fill={fill} />;
       return <Signature pr={pr} p={p} fill={fill} />;
     case 'bankSignature': {
       const bk = c.bank ?? {};
@@ -394,15 +387,17 @@ function ResultExtras({ p, pr }: { p: RenderInput; pr: Record<string, any> }) {
           ))}
           {(() => { let fig = 0; return (d.details ?? []).map((dt: any, k: number) => (
             <div key={'d' + k} style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: '10pt', borderBottom: '1.5px solid #333', paddingBottom: 2, marginBottom: 4, breakAfter: 'avoid' }}>{dt.title}{dt.sample ? ` – ${dt.sample}` : ''}</div>
+              {/* the heading is the band on top of the first table of the calculation (kept with it across pages) */}
+              {dt.info.length === 0 && !(pr.showTables !== false && (dt.tables ?? []).length) && <table className="bx" style={{ fontSize: '9pt' }}><tbody><tr><td style={BAND}>{dt.title}{dt.sample ? ` – ${dt.sample}` : ''}</td></tr></tbody></table>}
               {dt.info.length > 0 && (
                 <table className="bx" style={{ fontSize: '9pt', tableLayout: 'fixed', marginBottom: 6 }}>
+                  <thead><tr><th colSpan={4} style={BAND}>{dt.title}{dt.sample ? ` – ${dt.sample}` : ''}</th></tr></thead>
                   <tbody>{Array.from({ length: Math.ceil(dt.info.length / 2) }, (_, r) => (
                     <tr key={r}>{[0, 1].map((c) => { const it = dt.info[r * 2 + c]; return it ? [<td key={c + 'l'} style={{ width: '22%', background: '#f6f7f9' }}>{it[0]}</td>, <td key={c + 'v'} style={{ width: '28%' }}>{it[1]}</td>] : <td key={c} colSpan={2} />; })}</tr>
                   ))}</tbody>
                 </table>
               )}
-              {pr.showTables !== false && (dt.tables ?? []).map((tb: any, j: number) => <DetailTable key={j} tb={tb} />)}
+              {pr.showTables !== false && (dt.tables ?? []).map((tb: any, j: number) => <DetailTable key={j} tb={tb} band={j === 0 && dt.info.length === 0 ? `${dt.title}${dt.sample ? ` – ${dt.sample}` : ''}` : undefined} />)}
               {!d.hideCharts && (dt.charts ?? []).map((ch: any, j: number) => { fig++; return <div key={'c' + j} style={{ textAlign: 'center', breakInside: 'avoid', margin: '8px 0' }}><LineChart points={ch.points} series={ch.series} xLog={ch.xLog} yLog={ch.yLog} yReverse={ch.yReverse} xTop={ch.xTop} xMin={ch.xMin} xMax={ch.xMax} yMin={ch.yMin} yMax={ch.yMax} fit={ch.fit} title={`Fig. ${fig}: ${ch.title}`} xLabel={ch.xLabel} yLabel={ch.yLabel} note={ch.note} width={620} height={380} /></div>; })}
               {dt.texts.map((x: any, j: number) => <p key={j} style={{ margin: '3px 0', fontSize: '9.5pt', textAlign: 'justify' }}>{x.title && <b>{x.title}: </b>}{x.text}</p>)}
             </div>
@@ -426,12 +421,21 @@ function ResultExtras({ p, pr }: { p: RenderInput; pr: Record<string, any> }) {
   );
 }
 
-function DetailTable({ tb }: { tb: { title: string; sample?: string; columns: string[]; rows: string[][] } }) {
+/** Report house style (same as the generated report sections): section band, sub-band and shaded column headings. */
+const BAND: CSSProperties = { background: '#E3E8EF', fontWeight: 700, letterSpacing: '0.6pt', textAlign: 'left', textTransform: 'uppercase', fontSize: '10pt' };
+const SUBBAND: CSSProperties = { background: '#EEF1F5', fontWeight: 700, letterSpacing: '0.4pt', textAlign: 'left' };
+const HEADCELL: CSSProperties = { background: '#F4F6F9', fontWeight: 700 };
+
+function DetailTable({ tb, band }: { tb: { title: string; sample?: string; columns: string[]; rows: string[][] }; band?: string }) {
+  const n = tb.columns.length + 1;
   return (
-    <div style={{ marginTop: 6, breakInside: 'avoid' }}>
-      <div style={{ fontWeight: 700, fontSize: '9.5pt', marginBottom: 2 }}>{tb.title}{tb.sample ? ` – ${tb.sample}` : ''}</div>
+    <div style={{ marginTop: band ? 0 : 6, breakInside: 'avoid' }}>
       <table className="bx" style={{ fontSize: '9pt' }}>
-        <thead><tr><th style={{ width: '6%' }}>S.No</th>{tb.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
+        <thead>
+          {band && <tr><th colSpan={n} style={BAND}>{band}</th></tr>}
+          <tr><th colSpan={n} style={SUBBAND}>{tb.title}{tb.sample ? ` – ${tb.sample}` : ''}</th></tr>
+          <tr><th style={{ width: '6%', ...HEADCELL }}>S.No</th>{tb.columns.map((c, i) => <th key={i} style={HEADCELL}>{c}</th>)}</tr>
+        </thead>
         <tbody>{tb.rows.map((r, i) => <tr key={i}><td style={{ textAlign: 'center' }}>{i + 1}</td>{r.map((v, j) => <td key={j} style={{ textAlign: j === 0 ? 'left' : 'center' }}>{v || '--'}</td>)}</tr>)}</tbody>
       </table>
     </div>
@@ -476,6 +480,42 @@ function Signature({ pr, p, fill }: { pr: Record<string, any>; p: RenderInput; f
       {pr.label && <div>{pr.label}</div>}
       {pr.showName && signer && (issued || (signer as any).preview) && <div>{signer.name}</div>}
       {pr.showQualifications && signer && (issued || (signer as any).preview) && <div style={{ fontSize: '8.5pt', maxWidth: 360, display: 'inline-block' }}>{signer.designation}{signer.qualifications ? ` ${signer.qualifications}` : ''}</div>}
+    </div>
+  );
+}
+
+/**
+ * Test report sign-off, in the same ruled style as the report body: one box with the authorised signatory
+ * (signature, name, designation) on the left, the laboratory seal beside the signature, and the verification
+ * QR code on the right once issued. Before issue, dashed placeholders show where the signature and seal go.
+ */
+function ReportSignature({ pr, p, fill }: { pr: Record<string, any>; p: RenderInput; fill: (s?: string) => string }) {
+  const issued = ['issued', 'paid', 'partly_paid'].includes(p.status ?? '');
+  const signer = p.issuer;
+  const showSigner = signer && (issued || (signer as any).preview);
+  const label = /^authori[sz]ed signatory$/i.test(String(pr.label ?? '').trim()) || !pr.label ? 'Authorised Signatory' : pr.label;
+  const seal = pr.showSeal && !p.data.sealPos && (!issued || !!p.company.seal); // a seal dragged elsewhere on the page is drawn there instead
+  const qr = p.verifyUrl && pr.showQr !== false;
+  const ph: CSSProperties = { border: '1px dashed #b8c2d3', color: '#8a96a8', fontSize: '7.5pt', display: 'grid', placeItems: 'center', textAlign: 'center', lineHeight: 1.2 };
+  return (
+    <div className="rpt-sign" style={{ marginTop: '4mm', border: '1px solid #333', display: 'flex', alignItems: 'stretch', fontSize: '10pt', lineHeight: 1.3 }}>
+      <div style={{ flex: 1, padding: '5px 8px', display: 'flex', flexDirection: 'column' }}>
+        {pr.forText && <div style={{ fontSize: '9pt', color: '#444' }}>{fill(pr.forText)}</div>}
+        <div style={{ height: '17mm', display: 'flex', alignItems: 'center' }}>
+          {issued && pr.showSignature && signer?.signature && <img src={signer.signature} alt="" style={{ maxHeight: '15mm', maxWidth: '60mm' }} />}
+          {!issued && pr.showSignature && <span className="no-print" style={{ ...ph, width: '42mm', height: '12mm' }}>Signature – applied on issue</span>}
+        </div>
+        {pr.showName && showSigner ? <div style={{ fontWeight: 700 }}>{signer!.name}</div> : null}
+        <div>{label}{pr.showQualifications && showSigner && signer!.designation ? <span style={{ color: '#444' }}> · {signer!.designation}</span> : null}</div>
+        {pr.showQualifications && showSigner && signer!.qualifications ? <div style={{ fontSize: '8.5pt', color: '#444' }}>{signer!.qualifications}</div> : null}
+      </div>
+      {seal && (
+        <div style={{ width: '36mm', padding: '4px', display: 'grid', placeItems: 'center' }}>
+          {issued && p.company.seal && <img src={p.company.seal} alt="" style={{ maxHeight: '26mm', maxWidth: '32mm' }} />}
+          {!issued && <span className="no-print" style={{ ...ph, width: '24mm', height: '24mm', borderRadius: '50%' }}>{p.company.seal ? 'Seal – applied on issue' : 'Laboratory seal'}</span>}
+        </div>
+      )}
+      {qr && <div style={{ width: '26mm', padding: '4px', display: 'grid', placeItems: 'center' }}><VerifyQr url={p.verifyUrl!} /></div>}
     </div>
   );
 }

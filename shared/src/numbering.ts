@@ -41,7 +41,16 @@ export function codeRange(codes: string[]): string {
   return out.join(', ');
 }
 
-export function formatNumber(format: string, seq: number, ctx: { date: string; client?: string; material?: string; fp?: 'F' | 'P' }): string {
+/**
+ * NABL accreditation certificate number as used inside the ULR: "NABLT0726TS18813 (In lieu of TC-10775)" → "NABLT0726TS18813",
+ * "TC-5064" → "TC5064". Without a certificate number the old placeholder TC00000 is kept.
+ */
+export function certCode(certNo?: string | null): string {
+  const c = String(certNo ?? '').replace(/\(.*?\)/g, '').replace(/[\s\-/]/g, '').toUpperCase();
+  return c || 'TC00000';
+}
+
+export function formatNumber(format: string, seq: number, ctx: { date: string; client?: string; material?: string; fp?: 'F' | 'P'; cert?: string | null }): string {
   const [yyyy, mm, dd] = ctx.date.slice(0, 10).split('-');
   const fy = financialYear(ctx.date);
   return format
@@ -57,7 +66,8 @@ export function formatNumber(format: string, seq: number, ctx: { date: string; c
     .replace(/\{MAT\}/g, ctx.material || '')
     .replace(/\{Y1\}/g, yyyy.slice(3))
     .replace(/\{ML\}/g, 'ABCDEFGHIJKL'[Number(mm) - 1] ?? '')
-    .replace(/\{FP\}/g, ctx.fp ?? 'F');
+    .replace(/\{FP\}/g, ctx.fp ?? 'F')
+    .replace(/\{CERT\}/g, certCode(ctx.cert));
 }
 
 export const DEFAULT_NUMBERING: Record<string, string> = {
@@ -66,7 +76,7 @@ export const DEFAULT_NUMBERING: Record<string, string> = {
   workorder: 'WO/{SEQ:4}/{FY}',
   sample: 'LAB/{CLIENT}/{SEQ:4}/{MM}/{YYYY}',
   quick: 'QR/{SEQ:4}/{FY}',
-  ulr: 'TC00000{YY}{SEQ:8}F',
+  ulr: '{CERT}{YY}0{SEQ:8}{FP}',
   report: 'TR/{SEQ:4}/{FY}',
   receipt: 'RCPT/{SEQ:4}/{FY}',
 };

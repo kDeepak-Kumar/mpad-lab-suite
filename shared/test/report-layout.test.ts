@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  anchorOf, buildLayout, normalizeObservation, cleanHtml, cleanLayout, deleteCol, deleteRow, evaluateObservation, CIVIL_LAB_TEMPLATES, fillTokens, htmlToText, insertCol, insertRow, mergeCells,
+  anchorOf, certCode, formatNumber, DEFAULT_NUMBERING, buildLayout, normalizeObservation, cleanHtml, cleanLayout, deleteCol, deleteRow, evaluateObservation, CIVIL_LAB_TEMPLATES, fillTokens, htmlToText, insertCol, insertRow, mergeCells,
   pickFormat, refreshRoles, resizeCol, snapTest, splitCell, table, unfillTokens, type TableSection, type TestSnap,
 } from '../src/index';
 
@@ -118,11 +118,29 @@ describe('report formats', () => {
     for (const x of ['CUSTOMER', 'SAMPLE', 'TESTING', 'Project / site*', 'Pristinia', 'Customer reference*', 'EI/QC/Oct/2026, dated 29-10-2026', 'Date & time of receipt', '20-10-2026, 11:40', 'Environmental conditions', '27 °C, 65 % RH', 'Test location', 'Test method', 'Condition on receipt']) expect(t).toContain(x);
     expect(t).not.toContain('not covered under the scope of NABL');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(res.rows.length).toBe(4);
-    expect(res.rows[1][1].rs).toBe(3); expect(htmlToText(res.rows[1][1].h)).toBe('M-30\nSlab RCC, Tower-A');
-    expect(htmlToText(res.rows[1][7].h)).toBe('39.10'); expect(htmlToText(res.rows[1][8].h)).toBe('38.43'); // average of the unrounded strengths
-    expect(res.rows[1][8].rs).toBe(3);
+    expect(res.rows.length).toBe(5);
+    expect(res.rows[2][1].rs).toBe(3); expect(htmlToText(res.rows[2][1].h)).toBe('M-30\nSlab RCC, Tower-A');
+    expect(htmlToText(res.rows[2][7].h)).toBe('39.10'); expect(htmlToText(res.rows[2][8].h)).toBe('38.43'); // average of the unrounded strengths
+    expect(res.rows[2][8].rs).toBe(3);
     expect(t).toContain('END OF REPORT');
+  });
+  it('house style: results band with heading row shaded, remarks box, compact notes, end line', () => {
+    const l = buildLayout({ data: { ...base, remarks: 'Meets the 7-day requirement.', notes: ['Results relate only to the sample tested.', 'Not to be reproduced except in full.'], tests: [cube(1, 7, [600, 610, 620])], customer, options: {} } });
+    expect(l.sections.some((s) => s.type === 'text' && s.role === 'title')).toBe(false); // the title is the band on the results table
+    const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
+    expect(htmlToText(res.rows[0][0].h)).toBe('TEST RESULTS – COMPRESSIVE STRENGTH OF CONCRETE CUBES');
+    expect(res.rows[0][0].cs).toBe(res.cols.length); expect(res.head).toBe(2);
+    expect(res.rows[1].filter((c) => !c.m).every((c) => c.b && c.bg)).toBe(true);
+    expect(res.rows[2][7].b).toBe(true); // strengths in bold
+    const rem = l.sections.find((s) => s.role === 'remarks') as TableSection;
+    expect(rem.type).toBe('table'); expect(htmlToText(rem.rows[0][0].h)).toBe('REMARKS'); expect(htmlToText(rem.rows[1][0].h)).toBe('Meets the 7-day requirement.');
+    const notes = l.sections.find((s) => s.role === 'notes') as TableSection;
+    expect(notes.rows.length).toBe(1); expect(htmlToText(notes.rows[0][1].h)).toContain('2. Not to be reproduced');
+    const req = l.sections.find((s) => s.role === 'requirements') as TableSection;
+    expect(req.width).toBeUndefined(); expect(req.head).toBe(1);
+    expect(all(l)).toContain('— END OF REPORT —');
+    const again = refreshRoles(l, { data: { ...base, remarks: 'Changed.', tests: [], customer } }, ['remarks']);
+    expect(htmlToText((again.sections.find((s) => s.role === 'remarks') as TableSection).rows[1][0].h)).toBe('Changed.');
   });
   it('non-NABL: no ULR cell, no empty rows, scope statement', () => {
     const l = buildLayout({ data: { ...base, accreditation: 'Non-NABL', ulr: '', condition: '', tests: [cube(1, 7, [600, 610, 620])], customer, options: {} } });
@@ -155,7 +173,7 @@ describe('report formats', () => {
   it('details typed on the report (unlocked client name, dates) refresh the details box only', () => {
     const data: any = { ...base, tests: [cube(1, 7, [600, 610, 620])], customer, options: {} };
     const l = buildLayout({ data });
-    const edited = { ...l, sections: l.sections.map((s) => (s.type === 'text' && s.role === 'title' ? { ...s, h: 'MY TITLE' } : s)) };
+    const edited = { ...l, sections: l.sections.map((s) => (s.type === 'table' && s.role === 'results' ? { ...s, rows: [[{ ...s.rows[0][0], h: 'MY TITLE' }, ...s.rows[0].slice(1)], ...s.rows.slice(1)] } : s)) };
     const d2 = { ...data, client: { name: 'Example Infra (Data Centre Division)' }, unlocked: { 'client.name': true }, receivedText: '19-10-2026' };
     const l2 = refreshRoles(edited, { data: d2 }, ['header']);
     expect(all(l2)).toContain('Example Infra (Data Centre Division)'); expect(all(l2)).toContain('19-10-2026');
@@ -166,17 +184,17 @@ describe('report formats', () => {
     const d: any = { ...base, tests: [cube(1, 3, [300, 310, 320]), cube(2, 7, [500, 510, 520]), cube(3, 28, [800, 810, 820])], customer, options: { excluded: ['1', '3'] } };
     const l = buildLayout({ data: d });
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(res.rows.length).toBe(4);
-    expect(htmlToText(res.rows[1][4].h)).toBe('7');
+    expect(res.rows.length).toBe(5);
+    expect(htmlToText(res.rows[2][4].h)).toBe('7');
   });
   it('concrete cores: one row per core in the cube-report style, IS 456 acceptance', () => {
     const t = snap(9, 'NDT-CORE', { grade: 'M25', condition: 'Soaked 48 h (wet)' }, { cores: [{ id: 'C1 – Column C4', d: 150, l: 150, p: 420.6 }, { id: 'C2', d: 150, l: 150, p: 450 }, { id: 'C3', d: 150, l: 150, p: 470 }] });
     const l = buildLayout({ data: { ...base, tests: [t], customer, options: {} } });
     expect(l.format).toBe('cores');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(res.rows.length).toBe(4);
-    expect(htmlToText(res.rows[1][2].h)).toBe('C1 – Column C4');
-    expect(res.rows[1][1].rs).toBe(3); expect(res.rows[1][8].rs).toBe(3);
+    expect(res.rows.length).toBe(5);
+    expect(htmlToText(res.rows[2][2].h)).toBe('C1 – Column C4');
+    expect(res.rows[2][1].rs).toBe(3); expect(res.rows[2][8].rs).toBe(3);
     expect(all(l)).toContain('COMPRESSIVE STRENGTH OF CONCRETE CORES');
     expect(all(l)).toContain('Acceptance as per IS 456:2000');
     // choosing the cube format for core results is ignored (it would give an empty cube table)
@@ -188,9 +206,9 @@ describe('report formats', () => {
     const l = buildLayout({ data: { ...base, tests: [bar(2, '10', 610), bar(1, '8', 598)], customer, options: {} } });
     expect(l.format).toBe('steel-physical');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(htmlToText(res.rows[1][0].h)).toBe('Test Method as per IS');
-    expect(htmlToText(res.rows[2][1].h)).toBe('8'); expect(htmlToText(res.rows[3][1].h)).toBe('10');
-    expect(res.rows[2][2].rs).toBe(2); // same make merged
+    expect(htmlToText(res.rows[2][0].h)).toBe('Test Method as per IS');
+    expect(htmlToText(res.rows[3][1].h)).toBe('8'); expect(htmlToText(res.rows[4][1].h)).toBe('10');
+    expect(res.rows[3][2].rs).toBe(2); // same make merged
     expect(all(l)).toContain('600 or 8% more than actual proof Stress whichever is Higher');
   });
   it('coarse aggregate: sieve analysis table plus properties with requirements and method', () => {
@@ -217,5 +235,14 @@ describe('numbering helpers', () => {
     expect(formatNumber('TC7523{YY}0{SEQ:8}{FP}', 3170, { date: '2026-07-09', fp: 'P' })).toBe('TC752326000003170P');
     expect(codeRange(['6J0136', '6J0137', '6J0138', '6J0142'])).toBe('6J0136 – 0138, 6J0142');
     expect(codeRange(['MPAD/0044/10/2026'])).toBe('MPAD/0044/10/2026');
+  });
+});
+
+describe('ULR with the new NABL certificate number', () => {
+  it('uses the certificate number without the "in lieu of" note', () => {
+    expect(certCode('NABLT0726TS18813 (In lieu of TC-10775)')).toBe('NABLT0726TS18813');
+    expect(certCode('TC-5064')).toBe('TC5064');
+    expect(formatNumber(DEFAULT_NUMBERING.ulr, 3170, { date: '2026-11-10', cert: 'NABLT0726TS18813 (In lieu of TC-10775)' })).toBe('NABLT0726TS1881326000003170F');
+    expect(formatNumber(DEFAULT_NUMBERING.ulr, 1, { date: '2026-11-10', cert: 'NABLT0726TS18813', fp: 'P' })).toBe('NABLT0726TS1881326000000001P');
   });
 });

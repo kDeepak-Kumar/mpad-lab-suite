@@ -645,9 +645,9 @@ console.log('26. Test-specific report formats, split reports, client fields, edi
   const L = r3.data.layout;
   const txt = (h) => String(h ?? '').replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
   const flat = (l) => l.sections.map((s) => s.type === 'table' ? s.rows.map((r) => r.map((c) => txt(c.h)).join('|')).join('\n') : txt(s.h ?? '')).join('\n');
-  expect(L.format === 'cubes' && /COMPRESSIVE STRENGTH TEST OF CONCRETE CUBES/.test(flat(L)), 'cube report uses the cube format');
+  expect(L.format === 'cubes' && /TEST RESULTS – COMPRESSIVE STRENGTH OF CONCRETE CUBES/.test(flat(L)), 'cube report uses the cube format');
   const res3 = L.sections.find((x) => x.role === 'results');
-  expect(res3.rows.length === 4 && txt(res3.rows[1][4].h) === '3' && res3.rows[1][8].rs === 3, '3-day report holds only the 3-day set (3 cubes, average merged)');
+  expect(res3.rows.length === 5 && txt(res3.rows[2][4].h) === '3' && res3.rows[2][8].rs === 3, '3-day report holds only the 3-day set (3 cubes, average merged)');
   expect(flat(L).includes(client.name) && flat(L).includes(`Project / site*|${site.project || site.name}`) && flat(L).includes('Customer reference*|RPPL/QC/Oct/2026, dated 29-10-2026') && flat(L).includes('Date & time of receipt|') && flat(L).includes(', 11:40') && flat(L).includes('Mode of packing|Sealed bag') && flat(L).includes('Test location|Laboratory (permanent facility)') && flat(L).includes('Environmental conditions|27 °C, 65 % RH'), 'customer block from the client master, project and customer reference');
   const band = L.sections[0];
   expect(band.role === 'idband' && band.rows[0].some((c) => /ULR No\./.test(c.h)) === (r3.accreditation === 'NABL') && band.rows[0].some((c) => /\{\{pageOf\}\}/.test(c.h)), 'identification band: report no., ULR only on NABL reports, issue date, page');
@@ -664,7 +664,7 @@ console.log('26. Test-specific report formats, split reports, client fields, edi
   expect(ref.layoutKept, 'refreshing results keeps a layout edited by hand');
   await api('reviewer', 'PUT', `/documents/${two.ids[1]}`, { data: { remarks: 'Results meet the 7-day requirement.' } });
   const r7 = await api('reviewer', 'GET', `/documents/${two.ids[1]}`);
-  expect(flat(r7.data.layout).includes('Remarks: Results meet the 7-day requirement.'), 'remarks typed in the details appear in the report body');
+  expect(flat(r7.data.layout).includes('REMARKS\nResults meet the 7-day requirement.'), 'remarks typed in the details appear in the report body');
   await api('reviewer', 'POST', `/reports/${two.ids[1]}/workflow`, { action: 'submit' });
   await api('owner', 'POST', `/reports/${two.ids[1]}/workflow`, { action: 'verify' });
   const iss7 = await api('owner', 'POST', `/documents/${two.ids[1]}/issue`);
@@ -683,7 +683,7 @@ console.log('26. Test-specific report formats, split reports, client fields, edi
   const r28 = await api('reviewer', 'POST', '/reports', { testIds: [ts[2].id, ts[1].id] });
   const d28 = await api('reviewer', 'GET', `/documents/${r28.id}`);
   const res28 = d28.data.layout.sections.find((x) => x.role === 'results');
-  expect(res28.rows.length === 7 && d28.data.tests.find((t) => t.id === ts[1].id).previous === iss7.number, '28-day report includes the earlier 7-day result (consolidated)');
+  expect(res28.rows.length === 8 && d28.data.tests.find((t) => t.id === ts[1].id).previous === iss7.number, '28-day report includes the earlier 7-day result (consolidated)');
   const r7again = await api('owner', 'GET', `/documents/${two.ids[1]}`);
   expect(r7again.status === 'issued' && r7again.hash === r7i.hash && JSON.stringify(r7again.data) === JSON.stringify(r7i.data), 'the issued 7-day report is unchanged');
   await api('reviewer', 'POST', `/reports/${r28.id}/workflow`, { action: 'submit' });

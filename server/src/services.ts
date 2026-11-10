@@ -34,13 +34,13 @@ export async function nextNumber(trx: Knex, cid: number, kind: string, ctx: { da
   const seq = (cur?.value ?? 0) + 1;
   if (cur) await trx('counters').where({ company_id: cid, kind, scope }).update({ value: seq });
   else await trx('counters').insert({ company_id: cid, kind, scope, value: seq });
-  return { seq, number: formatNumber(format, seq, ctx) };
+  return { seq, number: formatNumber(format, seq, { ...ctx, cert: company.accreditation?.certNo }) };
 }
 
 /** Format a number with an existing sequence (e.g. ULR shares the sample's running number). */
 export async function formatWithSeq(cid: number, kind: string, seq: number, ctx: { date: string; client?: string; material?: string }, k: Knex = db) {
   const company = await getCompany(cid, k);
-  return formatNumber(company.numbering?.[kind] || DEFAULT_NUMBERING[kind], seq, ctx);
+  return formatNumber(company.numbering?.[kind] || DEFAULT_NUMBERING[kind], seq, { ...ctx, cert: company.accreditation?.certNo });
 }
 
 export async function audit(k: Knex, u: AuthUser, entity: string, id: number, action: string, detail?: unknown) {

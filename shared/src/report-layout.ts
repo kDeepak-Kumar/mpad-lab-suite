@@ -69,6 +69,7 @@ const STYLE_OK: Record<string, RegExp> = {
   'font-family': /^[\w ,'"-]{1,80}$/,
   'text-align': /^(left|center|right|justify)$/,
   'line-height': /^\d(\.\d{1,2})?$/,
+  'letter-spacing': /^\d(\.\d{1,2})?pt$/,
   color: /^(#[0-9a-f]{3,8}|rgb\(\d{1,3}, ?\d{1,3}, ?\d{1,3}\)|black|red|blue|green)$/i,
 };
 const escapeText = (s: string) => s.replace(/&(?!(#\d{1,6}|#x[0-9a-f]{1,6}|[a-z]{2,8});)/gi, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
