@@ -135,7 +135,7 @@ export function CompanySettings() {
           <SimpleGrid cols={{ base: 1, md: 2 }}>{T('Account name', 'bank.name')}{T('Bank', 'bank.bank')}{T('Branch', 'bank.branch')}{T('IFSC', 'bank.ifsc')}{T('Account number', 'bank.account')}{T('UPI ID (optional)', 'bank.upi')}</SimpleGrid>
         </>}
         {sec === "numbering" && <>
-          <Alert variant="light" mb="sm">Tokens: {'{SEQ}'} running number, {'{SEQ:4}'} zero-padded, {'{FY}'} 26-27, {'{YYYY}'} {'{YY}'} {'{MM}'}, {'{CLIENT}'} client short code. Numbers containing {'{FY}'} restart every April; with {'{YYYY}'} every January.</Alert>
+          <Alert variant="light" mb="sm">Tokens: {'{SEQ}'} running number, {'{SEQ:4}'} zero-padded, {'{FY}'} 26-27, {'{YYYY}'} {'{YY}'} {'{MM}'}, {'{CLIENT}'} client short code, {'{MATCODE}'} material code (CEM, CON, STL…), {'{Y1}'} last digit of the year and {'{ML}'} month letter (A = Jan … L = Dec) for compact codes such as 6K0456, {'{FP}'} F/P on the ULR. Numbers containing {'{FY}'} restart every April; with {'{YYYY}'} every January.</Alert>
           <Stack>
             {Object.keys(DEFAULT_NUMBERING).map((k) => {
               const f = v.numbering?.[k] ?? DEFAULT_NUMBERING[k];

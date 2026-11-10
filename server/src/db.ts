@@ -398,6 +398,18 @@ const migrations: Migration[] = [
       });
     },
   },
+  {
+    id: '014_report_details',
+    up: async (k) => {
+      // details printed in the standard report section, captured once at the source
+      for (const [col, len] of [['received_time', 5], ['customer_ref_date', 10], ['packing', 80], ['test_location', 80]] as const) {
+        if (!(await k.schema.hasColumn('samples', col))) await k.schema.alterTable('samples', (t) => { t.string(col, len).nullable(); });
+      }
+      for (const col of ['env_temp', 'env_rh']) {
+        if (!(await k.schema.hasColumn('tests', col))) await k.schema.alterTable('tests', (t) => { t.string(col, 12).nullable(); });
+      }
+    },
+  },
 ];
 
 /** Tables whose records show Created / Last modified dates (and that admins may correct). */

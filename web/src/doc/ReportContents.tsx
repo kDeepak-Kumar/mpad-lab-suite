@@ -89,7 +89,7 @@ export function ReportContents({ data, onChange, disabled }: { data: Record<stri
             {opts.includeExtra !== false && <>
               <Group gap="md" mt={6}>{extraKeys.map(([k, label]) => <Checkbox key={k} size="xs" disabled={disabled} label={label} checked={!(opts.extraHidden ?? []).includes(k)}
                 onChange={(e) => setOpts({ extraHidden: e.currentTarget.checked ? (opts.extraHidden ?? []).filter((x) => x !== k) : [...(opts.extraHidden ?? []), k] }, ['extra'])} />)}</Group>
-              <SegmentedControl mt={6} size="xs" disabled={disabled} data={[{ value: 'line', label: 'As a line' }, { value: 'table', label: 'As a table' }]} value={opts.extraStyle ?? 'line'} onChange={(v) => setOpts({ extraStyle: v as 'line' | 'table' }, ['extra'])} />
+              <SegmentedControl mt={6} size="xs" disabled={disabled} data={[{ value: 'line', label: 'One line in Sample details' }, { value: 'table', label: 'A row per field' }, { value: 'below', label: 'Below the results' }]} value={opts.extraStyle ?? 'line'} onChange={(v) => setOpts({ extraStyle: v as 'line' | 'table' | 'below' }, ['extra'])} />
             </>}
           </>}
       </Paper>

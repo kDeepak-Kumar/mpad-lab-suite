@@ -6,7 +6,7 @@ import { measureDocTrueSize, planPages, type PagePlan } from './paginate';
  * Preview helper: shows how the document will print (same plan as PDF / print / email) –
  * "1 page", "1 page – content at 95 %", or "2 pages" with a marker where each new page starts.
  */
-export function PagePlanOverlay({ rootRef }: { rootRef: RefObject<HTMLElement> }) {
+export function PagePlanOverlay({ rootRef, onPages }: { rootRef: RefObject<HTMLElement>; onPages?: (n: number) => void }) {
   const [page, setPage] = useState<HTMLElement | null>(null);
   const [plan, setPlan] = useState<PagePlan | null>(null);
   useEffect(() => {
@@ -18,7 +18,7 @@ export function PagePlanOverlay({ rootRef }: { rootRef: RefObject<HTMLElement> }
       if (el !== watched) { obs?.disconnect(); obs = new ResizeObserver(() => { if (measuring) return; clearTimeout(timer); timer = setTimeout(run, 300); }); obs.observe(el); watched = el; }
       try {
         measuring = true; setTimeout(() => { measuring = false; }, 50);
-        const L = measureDocTrueSize(el); const pl = planPages(L); setPlan(pl); setPage(el);
+        const L = measureDocTrueSize(el); const pl = planPages(L); setPlan(pl); setPage(el); onPages?.(pl.slices.length);
         const sig = el.querySelector(':scope > [data-block="signature"]') as HTMLElement | null;
         (window as any).__docPlan = { plan: pl, layout: L, signatureTop: sig ? sig.offsetTop : null, at: Date.now() }; // read by scripts/page-check.mjs
       } catch { /* ignore */ }

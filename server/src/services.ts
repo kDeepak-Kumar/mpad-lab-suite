@@ -185,9 +185,27 @@ export async function buildReportData(cid: number, testIds: number[]) {
     nablAll: nabl.length > 0 && nabl.every(Boolean),
     rows: rows.map(({ key: _k, ...r }) => r),
     tables, charts, details, borelogs, intros, notes, remarks: '',
-    quantity: s0?.quantity || '',
+    quantity: [...new Set(samples.map((x) => x.quantity).filter(Boolean))].join('; '),
+    receivedTime: s0?.received_time || '',
+    customerRefDate: s0?.customer_ref_date ? formatDate(s0.customer_ref_date) : '',
+    packing: s0?.packing || '',
+    testLocation: s0?.test_location || 'Laboratory (permanent facility)',
+    envText: envText(sorted, snaps),
     tests: snaps, customer, extra,
   };
+}
+
+/** Environmental conditions during testing: from the test record, else the observation sheet (temp / rh). */
+function envText(tests: Record<string, any>[], snaps: TestSnap[]): string {
+  const parts: string[] = [];
+  tests.forEach((t, i) => {
+    const s = snaps[i];
+    const temp = t.env_temp || s?.header.temp, rh = t.env_rh || s?.header.rh;
+    if (!temp && !rh) return;
+    const v = [temp && `${temp} °C`, rh && `${rh} % RH`].filter(Boolean).join(', ');
+    if (!parts.includes(v)) parts.push(v);
+  });
+  return parts.join('; ');
 }
 
 /** Client-specific additional information fields (defined on the client, values captured on each sample). */

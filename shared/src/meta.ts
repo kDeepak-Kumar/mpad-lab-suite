@@ -34,8 +34,10 @@ export const OBJECTS: ObjectDef[] = [
   ] },
   { key: 'sample', label: 'Sample', plural: 'Samples', fields: [
     f('accreditation', 'Report type', 'picklist', { picklist: 'accreditation', required: true, system: true }), f('material', 'Material', 'picklist', { picklist: 'material', required: true, system: true }),
-    f('received_date', 'Date received', 'date', { required: true, system: true }), f('quantity', 'Quantity received'), f('condition', 'Condition at lab', 'picklist', { picklist: 'sample_condition' }),
-    f('source', 'Source of sample', 'picklist', { picklist: 'sample_source' }), f('customer_ref', 'Customer reference'), f('sample_label', 'Sample ID (customer)'),
+    f('received_date', 'Date received', 'date', { required: true, system: true }), f('received_time', 'Time received', 'text', { help: 'HH:MM, e.g. 11:40' }),
+    f('quantity', 'Quantity received'), f('packing', 'Mode of packing', 'picklist', { picklist: 'sample_packing' }), f('condition', 'Condition on receipt', 'picklist', { picklist: 'sample_condition' }),
+    f('source', 'Source of sample', 'picklist', { picklist: 'sample_source' }), f('customer_ref', 'Customer reference'), f('customer_ref_date', 'Customer reference date', 'date'),
+    f('test_location', 'Test location', 'picklist', { picklist: 'test_location' }), f('sample_label', 'Sample ID (customer)'),
     f('specification', 'Specification'), f('description', 'Description / location', 'textarea'),
   ] },
   { key: 'catalog', label: 'Rate card item', plural: 'Rate card', fields: [
@@ -66,6 +68,8 @@ export const DEFAULT_PICKLISTS: Picklist[] = [
   pl('material', 'Material', ['Soil', 'Concrete', 'Cement', 'Steel', 'Aggregate', 'Sand', 'Brick / Block', 'Water', 'Bitumen', 'GSB', 'Rock', 'Service']),
   pl('sample_condition', 'Sample condition', ['Satisfactory', 'Good', 'Damaged', 'Insufficient quantity']),
   pl('sample_source', 'Sample source', ['Sample supplied by the customer', 'Collected by lab from site']),
+  pl('sample_packing', 'Mode of packing', ['Sealed bag', 'HDPE bag', 'Plastic container', 'PET bottle', 'Cloth bag', 'Wrapped / tagged', 'Loose', 'Not applicable']),
+  pl('test_location', 'Test location', ['Laboratory (permanent facility)', 'At site']),
   { key: 'client_type', label: 'Client type', values: [{ value: 'company', label: 'Company', active: true }, { value: 'government', label: 'Government', active: true }, { value: 'individual', label: 'Individual', active: true }, { value: 'walkin', label: 'Walk-in / cash', active: true }] },
   pl('unit', 'Pricing unit', ['Per sample', 'Per set', 'Per point', 'Per visit', 'Per borehole', 'Per metre', 'Per day', 'Lump sum']),
   pl('payment_mode', 'Payment mode', ['Bank transfer (NEFT/RTGS)', 'UPI', 'Cheque', 'Cash', 'DD']),

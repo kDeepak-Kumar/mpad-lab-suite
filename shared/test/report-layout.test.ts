@@ -103,37 +103,53 @@ describe('report formats', () => {
     expect(pickFormat(['PROCTOR-HEAVY', 'ATTERBERG'])).toBe('soil');
     expect(pickFormat(['NDT-RH'])).toBe('generic');
   });
-  it('cube report: one row per cube, merged grade / dates / average, customer from the master', () => {
-    const l = buildLayout({ data: { ...base, tests: [cube(1, 28, [879.8, 871.7, 842.4])], customer, options: {} } });
+  it('cube report: standard details section (band, customer, sample, testing) and one row per cube', () => {
+    const l = buildLayout({ data: { ...base, accreditation: 'NABL', ulr: 'TC752326000003170F', jobCodeText: 'Concrete : MPAD/0044/10/2026', receivedTime: '11:40', customerRefDate: '29-10-2026', envText: '27 °C, 65 % RH', testLocation: 'Laboratory (permanent facility)', tests: [cube(1, 28, [879.8, 871.7, 842.4])], customer, options: {} } });
     expect(l.format).toBe('cubes');
-    const header = l.sections[0] as TableSection;
-    const cust = header.rows.flat().find((c) => c.role === 'customer')!;
+    const band = l.sections[0] as TableSection;
+    expect(band.role).toBe('idband');
+    expect(band.rows[0].map((c) => htmlToText(c.h).split('\n')[0])).toEqual(['Test Report No.', 'ULR No.', 'Date of Issue', 'Page']);
+    expect(band.rows[0][0].h).toContain('{{number}}'); expect(band.rows[0][3].h).toContain('{{pageOf}}');
+    const det = l.sections[1] as TableSection;
+    const cust = det.rows.flat().find((c) => c.role === 'customer')!;
     expect(htmlToText(cust.h)).toContain('Example Infra Pvt Ltd');
-    expect(htmlToText(cust.h)).toContain('Project Name*: Pristinia');
-    expect(htmlToText(cust.h)).toContain('Customer Reference No*: EI/QC/Oct/2026');
     expect(htmlToText(cust.h)).not.toContain('R. Kumar'); // contact details only when asked for
-    expect(header.rows[0][2].h).toContain('{{number}}');
+    const t = all(l);
+    for (const x of ['CUSTOMER', 'SAMPLE', 'TESTING', 'Project / site*', 'Pristinia', 'Customer reference*', 'EI/QC/Oct/2026, dated 29-10-2026', 'Date & time of receipt', '20-10-2026, 11:40', 'Environmental conditions', '27 °C, 65 % RH', 'Test location', 'Test method', 'Condition on receipt']) expect(t).toContain(x);
+    expect(t).not.toContain('not covered under the scope of NABL');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
     expect(res.rows.length).toBe(4);
     expect(res.rows[1][1].rs).toBe(3); expect(htmlToText(res.rows[1][1].h)).toBe('M-30\nSlab RCC, Tower-A');
     expect(htmlToText(res.rows[1][7].h)).toBe('39.10'); expect(htmlToText(res.rows[1][8].h)).toBe('38.43'); // average of the unrounded strengths
     expect(res.rows[1][8].rs).toBe(3);
-    expect(all(l)).toContain('END OF REPORT');
+    expect(t).toContain('END OF REPORT');
+  });
+  it('non-NABL: no ULR cell, no empty rows, scope statement', () => {
+    const l = buildLayout({ data: { ...base, accreditation: 'Non-NABL', ulr: '', condition: '', tests: [cube(1, 7, [600, 610, 620])], customer, options: {} } });
+    const band = l.sections[0] as TableSection;
+    expect(band.cols.length).toBe(3);
+    expect(all(l)).not.toContain('ULR');
+    expect(all(l)).not.toContain('Condition on receipt'); // empty values leave no blank row
+    expect(all(l)).toContain('not covered under the scope of NABL accreditation');
+    const det = l.sections[1] as TableSection;
+    for (const r of det.rows) expect(r.filter((c) => !c.m).every((c) => htmlToText(c.h).trim() !== '')).toBe(true);
   });
   it('contact details and additional information can be switched on and off', () => {
     const data: any = { ...base, tests: [cube(1, 7, [600, 610, 620])], customer, extra: [{ key: 'vehicle', label: 'Vehicle No', value: 'TS 08 UH 9299' }, { key: 'inv', label: 'Invoice No', value: '6676' }], options: { includeContact: true } };
     const l = buildLayout({ data });
     expect(all(l)).toContain('Contact: R. Kumar, 90000 00000, qc@example.test');
-    expect(all(l)).toContain('Vehicle No*: TS 08 UH 9299, Invoice No*: 6676');
+    expect(all(l)).toContain('Additional details*|Vehicle No TS 08 UH 9299, Invoice No 6676');
     data.options = { includeContact: false, includeExtra: false };
     const l2 = refreshRoles(l, { data }, ['customer', 'extra']);
     expect(all(l2)).not.toContain('R. Kumar'); expect(all(l2)).not.toContain('Vehicle');
     data.options = { includeExtra: true, extraHidden: ['inv'], extraStyle: 'table' };
     const l3 = refreshRoles(l2, { data }, ['extra']);
-    expect(all(l3)).toContain('Vehicle No*\nTS 08 UH 9299'.replace('\n', '\n'));
+    expect(all(l3)).toContain('Vehicle No*|TS 08 UH 9299');
     expect(all(l3)).not.toContain('6676');
-    // the extra section goes back before the notes
-    const roles = l3.sections.map((s) => (s as any).role);
+    data.options = { includeExtra: true, extraStyle: 'below' };
+    const l4 = refreshRoles(l3, { data }, ['extra']);
+    expect(all(l4)).toContain('Vehicle No*: TS 08 UH 9299, Invoice No*: 6676');
+    const roles = l4.sections.map((s) => (s as any).role);
     expect(roles.indexOf('extra')).toBeLessThan(roles.indexOf('notes'));
   });
   it('details typed on the report (unlocked client name, dates) refresh the details box only', () => {
@@ -190,5 +206,16 @@ describe('report formats', () => {
     const l = buildLayout({ data: { ...base, rows: [{ name: 'MDD', unit: 'g/cc', method: 'IS 2720 (P-8)', spec: '--', values: ['1.96'] }], client: { name: 'Old Client', address: 'Addr' } } });
     expect(l.format).toBe('generic');
     expect(all(l)).toContain('Old Client'); expect(all(l)).toContain('1.96'); expect(all(l)).toContain('IS 2720 (P-8)');
+  });
+});
+
+describe('numbering helpers', () => {
+  it('formats compact and material-coded numbers, and shortens code ranges', async () => {
+    const { formatNumber, codeRange } = await import('../src/index');
+    expect(formatNumber('{Y1}{ML}{SEQ:4}', 136, { date: '2026-10-03' })).toBe('6J0136');
+    expect(formatNumber('MPAD/{MATCODE}/{SEQ:4}/{MM}/{FYFULL}', 456, { date: '2026-11-09', material: 'Cement' })).toBe('MPAD/CEM/0456/11/2026-27');
+    expect(formatNumber('TC7523{YY}0{SEQ:8}{FP}', 3170, { date: '2026-07-09', fp: 'P' })).toBe('TC752326000003170P');
+    expect(codeRange(['6J0136', '6J0137', '6J0138', '6J0142'])).toBe('6J0136 – 0138, 6J0142');
+    expect(codeRange(['MPAD/0044/10/2026'])).toBe('MPAD/0044/10/2026');
   });
 });

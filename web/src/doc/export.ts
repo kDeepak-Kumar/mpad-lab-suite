@@ -62,6 +62,7 @@ export async function pageImages(root: HTMLElement): Promise<HTMLCanvasElement[]
     const L = snap.layout, plan = planPages(L), k = snap.scale;
     const W = Math.round(L.width * k), H = Math.round(plan.pageH * k);
     const many = plan.slices.length > 1;
+    const ident = pageEl(root).dataset.ident ?? '';
     const out: HTMLCanvasElement[] = [];
     for (const [i, [a, b]] of plan.slices.entries()) {
       const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -74,7 +75,8 @@ export async function pageImages(root: HTMLElement): Promise<HTMLCanvasElement[]
       const sw = W * plan.scale;
       await drawRegion(g, snap, a, b, (W - sw) / 2, y, sw);
       if (plan.footH) await drawRegion(g, snap, L.footerTop, L.height, 0, H - plan.footH * k, W);
-      if (many) { g.fillStyle = '#444'; g.font = `${Math.round(9 * k)}px "Times New Roman", serif`; g.textAlign = 'right'; g.fillText(`Page ${i + 1} of ${plan.slices.length}`, W - L.width * 0.06 * k, H - (plan.footH + 5) * k); }
+      // every page after the first carries the report identification and page number (ISO/IEC 17025 cl. 7.8.2.1)
+      if (many) { g.fillStyle = '#444'; g.font = `${Math.round(9 * k)}px "Times New Roman", serif`; g.textAlign = 'right'; g.fillText(`${ident ? `${ident}  ·  ` : ''}Page ${i + 1} of ${plan.slices.length}`, W - L.width * 0.06 * k, H - (plan.footH + 5) * k); }
       out.push(c);
     }
     return out;

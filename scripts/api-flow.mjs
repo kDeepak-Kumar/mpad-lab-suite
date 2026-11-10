@@ -624,7 +624,7 @@ console.log('26. Test-specific report formats, split reports, client fields, edi
   const fx = await api('owner', 'PUT', `/clients/${client.id}/extra-fields`, { fields: [{ label: 'Vehicle No', type: 'text', onReport: true }, { label: 'Invoice No', type: 'text', onReport: true }, { label: 'Internal note', type: 'text', onReport: false }] });
   expect(fx.fields.map((f) => f.key).join() === 'vehicle_no,invoice_no,internal_note', 'client-specific additional fields saved with keys');
   const site = detail.sites[0];
-  const smp = await api('frontdesk', 'POST', '/samples', { client_id: client.id, site_id: site.id, material: 'Concrete', received_date: today, customer_ref: 'RPPL/QC/Oct/2026', specification: '150 x 150 x 150mm Size cube', condition: 'Satisfactory', source: 'Sample supplied by the customer', accreditation: cube.nabl ? 'NABL' : 'Non-NABL',
+  const smp = await api('frontdesk', 'POST', '/samples', { client_id: client.id, site_id: site.id, material: 'Concrete', received_date: today, customer_ref: 'RPPL/QC/Oct/2026', customer_ref_date: '2026-10-29', received_time: '11:40', packing: 'Sealed bag', test_location: 'Laboratory (permanent facility)', specification: '150 x 150 x 150mm Size cube', condition: 'Satisfactory', source: 'Sample supplied by the customer', accreditation: cube.nabl ? 'NABL' : 'Non-NABL',
     extra: { vehicle_no: 'TS 08 UH 9299', invoice_no: '6676', internal_note: 'not printed' }, tests: [1, 2, 3].map(() => ({ catalog_id: cube.id, assigned_to: tech.id })) });
   const sv = await api('frontdesk', 'GET', `/samples/${smp.id}`);
   expect(sv.extra.vehicle_no === 'TS 08 UH 9299' && sv.extraFields.length === 3, 'additional information captured on the sample');
@@ -632,7 +632,7 @@ console.log('26. Test-specific report formats, split reports, client fields, edi
   const ages = [3, 7, 28];
   for (const [i, t] of ts.entries()) {
     const loads = [[400, 410, 420], [600, 610, 620], [879.8, 871.7, 842.4]][i];
-    await api('tech', 'PUT', `/tests/${t.id}/observation`, { observation: { header: { grade: 'M30', age: ages[i], casting_date: today, element: 'Slab RCC, Tower-A' }, grids: { cubes: loads.map((load, k) => ({ id: `C${k + 1}`, l: 150, b: 150, h: 150, mass: 8.3, load })) }, constants: {}, equipment: {} }, started_at: today, completed_at: today });
+    await api('tech', 'PUT', `/tests/${t.id}/observation`, { observation: { header: { grade: 'M30', age: ages[i], casting_date: today, element: 'Slab RCC, Tower-A' }, grids: { cubes: loads.map((load, k) => ({ id: `C${k + 1}`, l: 150, b: 150, h: 150, mass: 8.3, load })) }, constants: {}, equipment: {} }, started_at: today, completed_at: today, env_temp: '27', env_rh: '65' });
     await api('tech', 'POST', `/tests/${t.id}/submit`);
   }
   for (const t of ts.slice(0, 2)) await api('reviewer', 'POST', `/tests/${t.id}/review`, { action: 'accept' });
@@ -643,13 +643,15 @@ console.log('26. Test-specific report formats, split reports, client fields, edi
   expect(two.ids.length === 2, 'one report per age (3-day and 7-day reports)');
   const r3 = await api('reviewer', 'GET', `/documents/${two.ids[0]}`);
   const L = r3.data.layout;
-  const txt = (h) => String(h ?? '').replace(/<br>/g, '\n').replace(/<[^>]+>/g, '');
+  const txt = (h) => String(h ?? '').replace(/<br>/g, '\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
   const flat = (l) => l.sections.map((s) => s.type === 'table' ? s.rows.map((r) => r.map((c) => txt(c.h)).join('|')).join('\n') : txt(s.h ?? '')).join('\n');
   expect(L.format === 'cubes' && /COMPRESSIVE STRENGTH TEST OF CONCRETE CUBES/.test(flat(L)), 'cube report uses the cube format');
   const res3 = L.sections.find((x) => x.role === 'results');
   expect(res3.rows.length === 4 && txt(res3.rows[1][4].h) === '3' && res3.rows[1][8].rs === 3, '3-day report holds only the 3-day set (3 cubes, average merged)');
-  expect(flat(L).includes(client.name) && flat(L).includes(`Project Name*: ${site.project || site.name}`) && flat(L).includes('Customer Reference No*: RPPL/QC/Oct/2026'), 'customer block from the client master, project and customer reference');
-  expect(flat(L).includes('Vehicle No*: TS 08 UH 9299, Invoice No*: 6676') && !flat(L).includes('not printed'), 'additional information printed; fields marked "not on report" are left off');
+  expect(flat(L).includes(client.name) && flat(L).includes(`Project / site*|${site.project || site.name}`) && flat(L).includes('Customer reference*|RPPL/QC/Oct/2026, dated 29-10-2026') && flat(L).includes('Date & time of receipt|') && flat(L).includes(', 11:40') && flat(L).includes('Mode of packing|Sealed bag') && flat(L).includes('Test location|Laboratory (permanent facility)') && flat(L).includes('Environmental conditions|27 °C, 65 % RH'), 'customer block from the client master, project and customer reference');
+  const band = L.sections[0];
+  expect(band.role === 'idband' && band.rows[0].some((c) => /ULR No\./.test(c.h)) === (r3.accreditation === 'NABL') && band.rows[0].some((c) => /\{\{pageOf\}\}/.test(c.h)), 'identification band: report no., ULR only on NABL reports, issue date, page');
+  expect(flat(L).includes('Additional details*|Vehicle No TS 08 UH 9299, Invoice No 6676') && !flat(L).includes('not printed'), 'additional information printed; fields marked "not on report" are left off');
   expect(!flat(L).includes(detail.contacts[0].name) || !r3.data.options.includeContact, 'contact details are off by default');
   // editing: sanitised, logged, protected fields ignored
   const edited = { ...L, edited: true, sections: [...L.sections, { id: 'x1', type: 'text', h: '<b>Note</b><script>alert(1)</script><img src=x onerror=alert(1)>' }] };

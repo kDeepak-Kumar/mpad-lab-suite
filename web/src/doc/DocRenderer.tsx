@@ -22,6 +22,8 @@ export interface RenderInput {
   onSealMove?: (pos: { x: number; y: number; w: number }) => void;
   /** Report body editing (word-processor style) – only for drafts. */
   layoutEdit?: LayoutEdit;
+  /** Number of printed pages (from the page planner), for "Page 1 of N" in the report details. */
+  pages?: number;
 }
 /** Template blocks whose content the report layout replaces. */
 const IN_LAYOUT = (b: Block) => ['reportInfo', 'results', 'remarks', 'charts', 'notes'].includes(b.type) || b.id === 'tableTitle' || b.id === 'end';
@@ -83,7 +85,7 @@ export function DocRenderer(p: RenderInput) {
   const layout = p.kind === 'report' && Array.isArray(p.data.layout?.sections) ? (p.data.layout as ReportLayout) : null;
   let layoutDone = false;
   return (
-    <div className="doc-page" style={{ ...page, position: 'relative' }}>
+    <div className="doc-page" style={{ ...page, position: 'relative' }} data-ident={p.kind === 'report' && p.number ? `Report No. ${p.number}` : undefined}>
       {isDraft && <div className="doc-watermark">DRAFT</div>}
       {p.data.sealPos && p.company.seal && <FreeSeal p={p} />}
       {t.blocks.filter((b) => b.visible).map((b) => {
@@ -91,7 +93,7 @@ export function DocRenderer(p: RenderInput) {
           if (layoutDone) return null;
           layoutDone = true;
           const rb = t.blocks.find((x) => x.type === 'results');
-          return layoutBlocks(layout.sections, { number: p.number ?? '', issueText: p.data.issueText ?? '' }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
+          return layoutBlocks(layout.sections, { number: p.number ?? '', issueText: p.data.issueText ?? '', pageOf: `Page 1 of ${p.pages ?? 1}` }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
         }
         const el = renderBlock(b, p, ctx);
         if (!el) return null;

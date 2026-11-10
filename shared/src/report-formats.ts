@@ -6,7 +6,7 @@
  */
 import type { ObservationInput, ObservationResult, ObservationTemplate } from './observation';
 import { formatValue, reportSpec } from './observation';
-import { formatDate } from './numbering';
+import { codeRange, formatDate } from './numbering';
 import { escapeHtml, newId, table, text, textToHtml, token, type Cell, type CellSpec, type ReportLayout, type Section, type TableSection } from './report-layout';
 
 // ---------------------------------------------------------------- snapshot of one test
@@ -61,7 +61,7 @@ export interface ReportOptions {
   includeExtra?: boolean;
   /** Additional-information keys left off the report. */
   extraHidden?: string[];
-  extraStyle?: 'line' | 'table';
+  extraStyle?: 'line' | 'table' | 'below';
   /** Tests (by id) and result rows (by row id) left off this report. */
   excluded?: string[];
   /** Force a format instead of the one picked from the tests. */
@@ -114,12 +114,12 @@ export function customerHtml(d: FormatInput['data']): string {
 
 /** Client-specific additional information (supplier, vehicle no., invoice no. …) as one line per sample, or a table. */
 export function extraSections(d: FormatInput['data']): Section[] {
-  if (d.options?.includeExtra === false) return [];
+  if (d.options?.includeExtra === false || d.options?.extraStyle !== 'below') return []; // normally shown in the report details
   const hidden = new Set(d.options?.extraHidden ?? []);
   const items = (d.extra ?? []).filter((x) => x.value && !hidden.has(x.key));
   if (!items.length) return [];
   const samples = uniq(items.map((x) => x.sample ?? ''));
-  if (d.options?.extraStyle === 'table') {
+  if (false) {
     const keys = uniq(items.map((x) => x.label));
     const rows: CellSpec[][] = [[...(samples.length > 1 ? [C('Sample')] : []), ...keys.map((k) => C(`${k}*`, { b: true }))]];
     for (const s of samples) rows.push([...(samples.length > 1 ? [C(s)] : []), ...keys.map((k) => C(items.find((x) => x.label === k && (x.sample ?? '') === s)?.value ?? '--'))]);
@@ -143,24 +143,98 @@ const endSection = () => text('*** END OF REPORT ***', { al: 'center', mt: 3, ro
 const title = (s: string, sub?: string) => text(`<u>${escapeHtml(s)}</u>${sub ? `<br><u>${escapeHtml(sub)}</u>` : ''}`, { al: 'center', heading: true, mt: 4, mb: 2, sz: 10.5, role: 'title' });
 const subTitle = (s: string) => text(escapeHtml(s), { heading: true, mt: 2, sz: 10.5 });
 
-/** Report details box: customer on the left, report details on the right (as on the laboratory's reports). */
-export function headerBox(d: FormatInput['data'], prefix: string, rows: [string, string | null | undefined][], opts: { customerWidth?: number } = {}): TableSection {
-  const items = rows.filter(([, v]) => v !== null && v !== undefined && v !== '') as [string, string][];
-  const all: [string, string][] = [[`Test Order/ Report No`, `${prefix ? `${prefix}: ` : ''}${token('number')}`], ...items];
-  const cw = opts.customerWidth ?? 44;
-  const grid: CellSpec[][] = all.map(([label, value], i) => {
-    const v: CellSpec = /\{\{\w+\}\}/.test(value) ? H(escapeHtml(value)) : C(value);
-    if (i === 0) return [{ t: 'Name and Address of the Customer', al: 'center' }, L(label), v];
-    if (i === 1) return [{ h: customerHtml(d), al: 'left', va: 'middle', rs: all.length - 1, role: 'customer' }, L(label), v];
-    return [null, L(label), v];
-  });
-  if (all.length === 1) grid.push([{ h: customerHtml(d), al: 'left', role: 'customer' }, '', '']);
-  return table([cw, (100 - cw) * 0.45, (100 - cw) * 0.55], grid, { role: 'header', sz: 10.5 });
+// ---------------------------------------------------------------- standard report details (approved Layout A)
+
+/** Customer name and address (and contact when chosen) – project and reference have their own cells. */
+export function customerNameHtml(d: FormatInput['data']): string {
+  const c: ReportCustomer = d.customer ?? { name: d.client?.name ?? '', address: d.client?.address ?? '' };
+  const un = (d.unlocked ?? {}) as Record<string, boolean>;
+  const name = un['client.name'] && d.client?.name ? d.client.name : c.name;
+  const address = un['client.address'] && d.client?.address !== undefined ? d.client.address : c.address;
+  const lines = [`<b>${h(name)}</b>`];
+  if (address) lines.push(h(address));
+  if (d.options?.includeContact && c.contact && (c.contact.name || c.contact.phone || c.contact.email)) lines.push(`Contact: ${h([c.contact.name, c.contact.phone, c.contact.email].filter(Boolean).join(', '))}`);
+  if (d.amendment) lines.push(`<b>Amendment ${h(d.amendment.revision)} of report ${h(d.amendment.of)}: ${h(d.amendment.reason)}</b>`);
+  return lines.join('<br>');
 }
-const commonRows = (d: FormatInput['data'], extra: [string, string | null | undefined][] = [], o: { method?: string } = {}): [string, string | null | undefined][] => [
-  ['ULR No.', d.ulr], ['Date of Sample Received', d.receivedText], ['Date of Test', d.testDatesText], ['Date of Issue', token('issueText')],
-  ['Specification*', d.specification], ['Condition of sample at Lab', d.condition], ['Source of sample', d.source], ...extra, ...(o.method ? [['Test Method', o.method] as [string, string]] : []),
-];
+
+/** Client-specific information shown in the Sample part of the details (each field, or all on one line). */
+function extraPairs(d: FormatInput['data']): [string, string][] {
+  if (d.options?.includeExtra === false || d.options?.extraStyle === 'below') return [];
+  const hidden = new Set(d.options?.extraHidden ?? []);
+  const items = (d.extra ?? []).filter((x) => x.value && !hidden.has(x.key));
+  if (!items.length) return [];
+  const multi = uniq(items.map((x) => x.sample ?? '')).length > 1;
+  if (d.options?.extraStyle === 'table') {
+    return uniq(items.map((x) => x.label)).map((label) => [`${label}*`, items.filter((x) => x.label === label).map((x) => `${multi && x.sample ? `${x.sample}: ` : ''}${x.value}`).join('; ')]);
+  }
+  const bySample = uniq(items.map((x) => x.sample ?? ''));
+  return [['Additional details*', bySample.map((sm) => `${multi && sm ? `${sm}: ` : ''}${items.filter((x) => (x.sample ?? '') === sm).map((x) => `${x.label} ${x.value}`).join(', ')}`).join('\n')]];
+}
+
+type Pair = [string, string | null | undefined, Partial<Cell>?];
+/** Two label/value pairs per row; an unpaired item takes the full width; empty items are left out (no blank rows). */
+function pairRows(left: Pair[], right: Pair[]): CellSpec[][] {
+  const ok = (p: Pair) => p[1] !== undefined && p[1] !== null && String(p[1]).trim() !== '';
+  const Lf = left.filter(ok), Rt = right.filter(ok);
+  const rows: CellSpec[][] = [];
+  const lab = (t: string): CellSpec => ({ t, al: 'left', bg: '#FAFAFB' });
+  const val = (p: Pair, extra: Partial<Cell> = {}): CellSpec => ({ h: /\{\{\w+\}\}/.test(String(p[1])) ? escapeHtml(String(p[1])) : textToHtml(p[1]), al: 'left', ...(p[2] ?? {}), ...extra });
+  for (let i = 0; i < Math.max(Lf.length, Rt.length); i++) {
+    const a = Lf[i], b = Rt[i];
+    if (a && b) rows.push([lab(a[0]), val(a), lab(b[0]), val(b)]);
+    else { const x = (a ?? b)!; rows.push([lab(x[0]), val(x, { cs: 3 }), null, null]); }
+  }
+  return rows;
+}
+
+/**
+ * Standard details section of every test report (NABL and non-NABL alike):
+ * an identification band (report no. | ULR – NABL only | date of issue | page) and one table with
+ * Customer, Sample and Testing parts. Data comes from the client master, the sample, the tests and the
+ * observation sheets; the section stays editable on the draft and edits never change those records.
+ */
+export function reportDetails(d: FormatInput['data'], tests: TestSnap[], o: { sample?: Pair[]; testing?: Pair[]; method?: string } = {}): Section[] {
+  const nabl = d.accreditation === 'NABL' && d.ulr;
+  const band: [string, string][] = [['Test Report No.', token('number')], ...(nabl ? [['ULR No.', String(d.ulr)] as [string, string]] : []), ['Date of Issue', token('issueText')], ['Page', token('pageOf')]];
+  const bandT = table(band.map(() => 100 / band.length), [band.map(([l, v]) => ({ h: `<span style="font-size: 8.5pt">${escapeHtml(l)}</span><br><b>${escapeHtml(v)}</b>`, al: 'left', bg: '#F1F3F6' } as CellSpec))], { role: 'idband', sz: 10.5, mt: 1 });
+  const c: ReportCustomer = d.customer ?? { name: d.client?.name ?? '', address: d.client?.address ?? '' };
+  const ref = d.customerRef !== undefined && d.customerRef !== null && d.customerRef !== '' ? d.customerRef : c.customerRef;
+  const refText = ref ? `${ref}${d.customerRefDate ? `, dated ${d.customerRefDate}` : ''}` : '';
+  const sec = (t: string): CellSpec[] => [{ h: `<b>${t}</b>`, al: 'left', cs: 4, bg: '#E3E8EF', role: 'sec' }, null, null, null];
+  const lab = (t: string): CellSpec => ({ t, al: 'left', bg: '#FAFAFB' });
+  const custRight: Pair[] = [['Project / site*', c.project], ['Customer reference*', refText]].filter((p) => p[1]) as Pair[];
+  const custRows: CellSpec[][] = custRight.length
+    ? custRight.map((p, i) => [i === 0 ? { ...lab('Name & address') as object, rs: custRight.length } as CellSpec : null, i === 0 ? { h: customerNameHtml(d), al: 'left', va: 'top', rs: custRight.length, role: 'customer' } : null, lab(p[0]), { h: textToHtml(p[1]), al: 'left' }])
+    : [[lab('Name & address'), { h: customerNameHtml(d), al: 'left', cs: 3, role: 'customer' }, null, null]];
+  const descr = d.specification || d.material || '';
+  const labels = (d.samples ?? []).map((x: any) => x.label).filter((x: string) => x && !/^Sample-\d+$/.test(x));
+  const sampleLeft: Pair[] = [
+    ['Job code / UIN', (d.samples ?? []).some((x: any) => x.code) ? codeRange((d.samples ?? []).map((x: any) => x.code).filter(Boolean)) : d.jobCodeText],
+    ['Sample description*', descr, { b: true }],
+    ['Sample ID*', labels.join(', ')],
+    ...extraPairs(d),
+    ...(o.sample ?? []),
+  ];
+  const sampleRight: Pair[] = [
+    ['Date & time of receipt', [d.receivedText, d.receivedTime].filter(Boolean).join(', ')],
+    ['Quantity received', d.quantity],
+    ['Mode of packing', d.packing],
+    ['Condition on receipt', d.condition],
+    ['Sampling', d.source],
+  ];
+  const method = o.method ?? uniq(tests.map((t) => t.method).filter(Boolean)).join('; ');
+  const testLeft: Pair[] = [['Period of testing', d.testDatesText], ['Test method', method], ...(o.testing ?? [])];
+  const testRight: Pair[] = [['Environmental conditions', d.envText], ['Test location', d.testLocation]];
+  const rows: CellSpec[][] = [sec('CUSTOMER'), ...custRows, sec('SAMPLE'), ...pairRows(sampleLeft, sampleRight)];
+  const tr = pairRows(testLeft, testRight);
+  if (tr.length) rows.push(sec('TESTING'), ...tr);
+  const details = table([17, 33, 19, 31], rows, { role: 'header', sz: 10.5, mt: 2 });
+  // the "* furnished by the customer" key is skipped when the report notes already carry it
+  const notesText = (Array.isArray(d.notes) ? d.notes : [d.notes ?? '']).join(' ');
+  const footText = [/furnished by the customer/i.test(notesText) ? '' : '* Details as furnished by the customer.', d.accreditation === 'NABL' || d.nablStatement === false ? '' : 'Tests in this report are not covered under the scope of NABL accreditation.'].filter(Boolean).join(' ');
+  return [bandT, details, ...(footText ? [text(footText, { sz: 8.5, mt: 0.5, role: 'detailsnote' })] : [])];
+}
 
 /** Generic results table: S.No | Test | Units | Results… | Requirements | Test method (columns re-ordered per format). */
 function resultsTable(tests: TestSnap[], d: FormatInput['data'], o: { order: ('sno' | 'test' | 'unit' | 'results' | 'spec' | 'method')[]; specLabel?: string; testLabel?: string; resultLabel?: string; sampleHeader?: boolean }): TableSection | null {
@@ -246,7 +320,7 @@ const cubes: Builder = (tests, d) => {
   }
   const method = uniq(tests.map((t) => t.method)).join('; ');
   return [
-    headerBox(d, 'Cubes', commonRows(d, [], { method: method.replace(/ : /g, ':') })),
+    ...reportDetails(d, tests),
     title('TEST REPORT ON COMPRESSIVE STRENGTH TEST OF CONCRETE CUBES'),
     table([6, 15, 11, 11, 9, 10, 10, 13, 15], rows, { head: 1, role: 'results', sz: 10 }),
     ...extraSections(d), ...remarksSection(d), ...notesSection(d),
@@ -275,7 +349,7 @@ const cores: Builder = (tests, d) => {
   }
   const method = uniq(tests.map((t) => t.method)).join('; ');
   return [
-    headerBox(d, 'Cores', commonRows(d, [], { method })),
+    ...reportDetails(d, tests),
     title('TEST REPORT ON COMPRESSIVE STRENGTH OF CONCRETE CORES'),
     table([6, 13, 15, 8, 8, 9, 13, 13, 15], rows, { head: 1, role: 'results', sz: 10 }),
     ...extraSections(d), ...remarksSection(d),
@@ -296,7 +370,7 @@ const STEEL_GRADE: Record<string, { ts: number; pct: number; ys: number; el: str
   'Fe 600': { ts: 660, pct: 6, ys: 600, el: '10.0', c: '0.320', s: '0.045', p: '0.045', ps: '0.085' },
 };
 const gradeKey = (g?: string) => { const m = /fe\s*(\d{3})\s*(d?)/i.exec(g ?? ''); return m ? `Fe ${m[1]}${m[2] ? 'D' : ''}` : ''; };
-const steelCommon = (tests: TestSnap[], d: FormatInput['data']) => commonRows(d, [['No. of samples tested', tests.length ? `${String(tests.length).padStart(2, '0')} only` : '']]);
+const steelCount = (tests: TestSnap[]): Pair[] => [['No. of samples tested', tests.length ? `${String(tests.length).padStart(2, '0')} only` : '']];
 
 const steelPhysical: Builder = (tests, d) => {
   const rows: CellSpec[][] = [
@@ -321,7 +395,7 @@ const steelPhysical: Builder = (tests, d) => {
   const gradeRows: CellSpec[][] = [[C('Grade'), H('Ultimate Tensile Strength (N/mm<sup>2</sup>) (Min.)', { cs: 2 }), null, H('0.2% Proof Stress / Yield Stress (N/mm<sup>2</sup>) (Min.)'), C('Elongation (%) (Min.)')]];
   for (const g of grades) { const x = STEEL_GRADE[g]; gradeRows.push([C(g), C(`${x.ts} or ${x.pct}% more than actual proof Stress whichever is Higher`, { cs: 2 }), null, C(String(x.ys)), C(x.el)]); }
   return [
-    headerBox(d, 'Steel P', steelCommon(tests, d)),
+    ...reportDetails(d, tests, { sample: steelCount(tests) }),
     title('TEST REPORT ON PHYSICAL PROPERTIES OF TMT BARS'),
     table([7, 7, 13, 12, 11, 12, 11, 13.5, 13.5], rows, { head: 1, role: 'results', sz: 10 }),
     ...extraSections(d),
@@ -346,7 +420,7 @@ const steelChemical: Builder = (tests, d) => {
   const req: CellSpec[][] = [[C('Requirement as per IS: 1786-2008 (RA 2018) (%max) with tolerance', { cs: 5 }), null, null, null, null], [C('Grade'), C('C % (Max.)'), C('P % (Max.)'), C('S % (Max.)'), C('P + S % (Max.)')]];
   for (const g of ['Fe 500', 'Fe 500D', 'Fe 550', 'Fe 550D', 'Fe 600']) { const x = STEEL_GRADE[g]; req.push([C(g), C(x.c), C(x.p), C(x.s), C(x.ps)]); }
   return [
-    headerBox(d, 'Steel C', steelCommon(tests, d)),
+    ...reportDetails(d, tests, { sample: steelCount(tests) }),
     title('TEST REPORT ON CHEMICAL ANALYSIS OF TMT BARS'),
     table([7, 8, 13, 15, 10, 10, 10, 12, 15], rows, { head: 1, role: 'results', sz: 10 }),
     ...extraSections(d), ...remarksSection(d),
@@ -386,7 +460,7 @@ const aggregate = (fine: boolean): Builder => (tests, d) => {
   const others = tests.filter((t) => !sieves.includes(t));
   const props = resultsTable(others, d, { order: ['test', 'results', 'spec', 'method'], testLabel: 'Test Conducted', specLabel: 'Requirements as per IS: 383-2016' });
   return [
-    headerBox(d, fine ? 'F Agg' : 'C Agg', commonRows(d, [['Make / Source*', d.make || '']])),
+    ...reportDetails(d, tests),
     title(fine ? 'TEST REPORT ON FINE AGGREGATE' : 'TEST REPORT ON COARSE AGGREGATE SAMPLE'),
     ...sieves.flatMap((t) => (fine ? sieveFine(t) : sieveCoarse(t))),
     ...(props ? [props] : []),
@@ -394,35 +468,19 @@ const aggregate = (fine: boolean): Builder => (tests, d) => {
   ];
 };
 
-/** Cement: the details box also carries the dates and the environmental conditions in a lower band. */
-function cementHeader(d: FormatInput['data'], prefix: string, tests: TestSnap[]): TableSection {
-  const env = tests.map((t) => [t.header.temp && `Temp.: ${t.header.temp}°C`, t.header.rh && `RH: ${t.header.rh}%`].filter(Boolean).join(', ')).find(Boolean) ?? '';
-  const right: [string, string][] = ([
-    ['Test Order / Report No.', `${prefix}: ${token('number')}`], ['ULR No.', d.ulr || ''], ['Condition of sample at lab', d.condition || ''],
-    ['Sample Specification*', d.specification || ''], ['Qty of sample Received', d.quantity || ''], ['Source of sample', d.source || ''],
-  ] as [string, string][]).filter(([k, v], i) => i === 0 || v || k === 'ULR No.');
-  const rows: CellSpec[][] = right.map(([k, v], i) => [
-    i === 0 ? C('Name and Address of the Customer', { cs: 2 }) : i === 1 ? { h: customerHtml(d), al: 'left', cs: 2, rs: right.length - 1, role: 'customer' } : null, null,
-    L(k), /\{\{/.test(v) ? H(escapeHtml(v)) : C(v),
-  ]);
-  rows.push([L('Date of Sample Received'), C(d.receivedText || ''), L('Environmental conditions'), C(env || '--')]);
-  rows.push([L('Date of Test'), C(d.testDatesText || ''), C(''), C('')]);
-  rows.push([L('Date of Issue'), H(token('issueText')), C(''), C('')]);
-  return table([24, 21, 22, 33], rows, { role: 'header', sz: 10.5 });
-}
 const cementPhysical: Builder = (tests, d) => {
   const t = resultsTable(tests, d, { order: ['sno', 'test', 'unit', 'results', 'spec', 'method'], testLabel: 'Test Parameter', specLabel: 'Requirements as per IS 269: 2015' });
-  return [cementHeader(d, 'Cement P', tests), title('TEST REPORT ON PHYSICAL PROPERTIES OF CEMENT'), ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...detailsSection(d), ...notesSection(d), endSection()];
+  return [...reportDetails(d, tests), title('TEST REPORT ON PHYSICAL PROPERTIES OF CEMENT'), ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...detailsSection(d), ...notesSection(d), endSection()];
 };
 const cementChemical: Builder = (tests, d) => {
   const t = resultsTable(tests, d, { order: ['sno', 'test', 'unit', 'results', 'spec', 'method'], testLabel: 'Test Conducted', specLabel: 'Requirements as per IS: 269: 2015 (RA 2020) Clause 6.1' });
-  return [cementHeader(d, 'Cement C', tests), title('TEST REPORT ON CHEMICAL PROPERTIES OF CEMENT'), ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...notesSection(d), endSection()];
+  return [...reportDetails(d, tests), title('TEST REPORT ON CHEMICAL PROPERTIES OF CEMENT'), ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...notesSection(d), endSection()];
 };
 const ggbs = (chemical: boolean): Builder => (tests, d) => {
   const t = resultsTable(tests, d, { order: chemical ? ['sno', 'test', 'unit', 'results', 'spec'] : ['sno', 'test', 'results', 'spec', 'method'], testLabel: chemical ? 'Test Conducted' : 'Test Parameters', specLabel: 'Requirements as per IS: 16714:2018' });
   const method = uniq(tests.map((x) => x.method)).join('; ');
   return [
-    headerBox(d, chemical ? 'GGBS C' : 'GGBS P', commonRows(d, [], { method: chemical ? method : undefined })),
+    ...reportDetails(d, tests),
     title(chemical ? 'TEST REPORT ON CHEMICAL PROPERTIES OF GGBS SAMPLE' : 'TEST REPORT ON PHYSICAL PROPERTIES OF GGBS', chemical ? '(GROUND GRANULATED BLAST FURNACE SLAG)' : undefined),
     ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...notesSection(d), endSection(),
   ];
@@ -431,7 +489,7 @@ const ggbs = (chemical: boolean): Builder => (tests, d) => {
 const soil: Builder = (tests, d) => {
   const t = resultsTable(tests, d, { order: ['sno', 'test', 'unit', 'method', 'results'], sampleHeader: true, resultLabel: 'Results' });
   return [
-    headerBox(d, 'Soil', commonRows(d)),
+    ...reportDetails(d, tests),
     text('<u>TABLE-1</u><br><u>TEST REPORT ON ' + escapeHtml(String(d.materialUpper || 'SOIL')) + '</u>', { al: 'center', heading: true, mt: 1, sz: 10.5, role: 'title' }),
     ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...detailsSection(d), ...notesSection(d), endSection(),
   ];
@@ -468,7 +526,7 @@ const fieldDensity: Builder = (tests, d) => {
   const first = 36, w = (100 - first) / n;
   const method = uniq(tests.map((t) => t.method)).join('<br>');
   return [
-    headerBox(d, 'Soil', [...commonRows(d), ['Test method', method.replace(/<br>/g, '\n')]]),
+    ...reportDetails(d, tests),
     title(cc ? 'TEST REPORT ON FIELD DRY DENSITY (FDD) & FIELD MOISTURE CONTENT (FMC) BY CORE CUTTER METHOD' : 'TEST REPORT ON FIELD DRY DENSITY (FDD) & FIELD MOISTURE CONTENT (FMC) BY SAND REPLACEMENT METHOD'),
     table([first, ...Array(n).fill(w)], rows, { head: 2, role: 'results', sz: 10 }),
     ...extraSections(d), ...remarksSection(d), ...notesSection(d), endSection(),
@@ -478,7 +536,7 @@ const fieldDensity: Builder = (tests, d) => {
 const generic: Builder = (tests, d) => {
   const t = resultsTable(tests, d, { order: ['sno', 'test', 'unit', 'method', 'spec', 'results'], sampleHeader: (d.samples ?? []).length > 0 });
   return [
-    headerBox(d, '', commonRows(d)),
+    ...reportDetails(d, tests),
     text('<u>TABLE-1</u><br><u>TEST REPORT ON ' + escapeHtml(String(d.materialUpper || '')) + '</u>', { al: 'center', heading: true, mt: 1, sz: 10.5, role: 'title' }),
     ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...detailsSection(d), ...notesSection(d), endSection(),
   ];
@@ -547,16 +605,19 @@ function legacyLayout(d: FormatInput['data']): Section[] {
     let k = 0;
     for (let i = t.head ?? 0; i < t.rows.length; i++, k++) { const mi = t.rows[0].findIndex((c) => /Test Method/.test(c.h)); if (mi >= 0 && !t.rows[i][mi].m) t.rows[i][mi].h = textToHtml(rows[k]?.method ?? ''); }
   }
-  return [headerBox(d, '', commonRows(d)), text(`<u>TEST REPORT ON ${escapeHtml(String(d.materialUpper || ''))}</u>`, { al: 'center', heading: true, mt: 2, role: 'title' }), ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...detailsSection(d), ...notesSection(d), endSection()];
+  return [...reportDetails(d, []), text(`<u>TEST REPORT ON ${escapeHtml(String(d.materialUpper || ''))}</u>`, { al: 'center', heading: true, mt: 2, role: 'title' }), ...(t ? [t] : []), ...extraSections(d), ...remarksSection(d), ...detailsSection(d), ...notesSection(d), endSection()];
 }
 
 /** Refresh the data-driven parts (customer box, additional information) of an edited layout without touching the rest. */
 export function refreshRoles(layout: ReportLayout, input: FormatInput, roles: ('customer' | 'extra' | 'notes' | 'remarks' | 'header')[]): ReportLayout {
   const d = input.data;
-  const fresh = roles.includes('header') ? buildLayout(input).sections.find((s) => s.type === 'table' && s.role === 'header') : undefined;
+  // the details section is rebuilt from the data (it also carries the customer and the additional information)
+  const rebuild = roles.includes('header') || roles.includes('extra') || roles.includes('customer');
+  const built = rebuild ? buildLayout(input).sections : [];
+  const freshOf = (role?: string) => built.find((x) => x.type !== 'auto' && x.role === role);
   let sections = layout.sections.map((s) => {
-    if (fresh && s.type === 'table' && s.role === 'header') return { ...fresh, id: s.id };
-    if (roles.includes('customer') && s.type === 'table') return { ...s, rows: s.rows.map((r) => r.map((c) => (c.role === 'customer' ? { ...c, h: customerHtml(d) } : c))) };
+    if (rebuild && s.type !== 'auto' && ['header', 'idband', 'detailsnote'].includes(s.role ?? '') && freshOf(s.role)) return { ...freshOf(s.role)!, id: s.id } as Section;
+    if (roles.includes('customer') && s.type === 'table') return { ...s, rows: s.rows.map((r) => r.map((c) => (c.role === 'customer' ? { ...c, h: customerNameHtml(d) } : c))) };
     return s;
   });
   for (const role of ['extra', 'notes', 'remarks'] as const) {

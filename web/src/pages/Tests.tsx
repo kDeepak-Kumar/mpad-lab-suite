@@ -44,7 +44,7 @@ export function TestSheetPage() {
   const nav = useNavigate();
   const { data: t, reload } = useApi<any>(`/tests/${id}`, [id]);
   const [obs, setObs] = useState<ObservationInput | null>(null);
-  const [dates, setDates] = useState<{ started_at: string; completed_at: string }>({ started_at: '', completed_at: '' });
+  const [dates, setDates] = useState<{ started_at: string; completed_at: string; env_temp: string; env_rh: string }>({ started_at: '', completed_at: '', env_temp: '', env_rh: '' });
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
@@ -56,7 +56,7 @@ export function TestSheetPage() {
     const base = emptyInput(tpl);
     const saved = t.observation as ObservationInput | null;
     setObs(saved ? { ...base, ...saved, grids: { ...base.grids, ...(saved.grids ?? {}) } } : base);
-    setDates({ started_at: t.started_at ?? localToday(), completed_at: t.completed_at ?? '' });
+    setDates({ started_at: t.started_at ?? localToday(), completed_at: t.completed_at ?? '', env_temp: t.env_temp ?? '', env_rh: t.env_rh ?? '' });
     setDirty(false);
   }, [t]);
 
@@ -88,7 +88,7 @@ export function TestSheetPage() {
   const save = async (reason?: string) => {
     setBusy(true);
     try {
-      const r = await api<any>(`/tests/${t.id}/observation`, { method: 'PUT', body: { observation: normalizeObservation(tpl!, obs).input, started_at: dates.started_at || null, completed_at: dates.completed_at || null, reason } });
+      const r = await api<any>(`/tests/${t.id}/observation`, { method: 'PUT', body: { observation: normalizeObservation(tpl!, obs).input, started_at: dates.started_at || null, completed_at: dates.completed_at || null, env_temp: dates.env_temp || null, env_rh: dates.env_rh || null, reason } });
       setDirty(false); ok('Observation sheet saved'); await reload(); return r;
     } finally { setBusy(false); }
   };
@@ -139,6 +139,8 @@ export function TestSheetPage() {
                 <SimpleGrid cols={{ base: 2, md: 4 }}>
                   <TextInput size="xs" type="date" label="Test started" value={dates.started_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, started_at: e.currentTarget.value }); setDirty(true); }} />
                   <TextInput size="xs" type="date" label="Test completed" value={dates.completed_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, completed_at: e.currentTarget.value }); setDirty(true); }} />
+                  {!tpl.headerFields.some((f) => f.key === 'temp') && <TextInput size="xs" label="Lab temperature (°C)" inputMode="decimal" placeholder="27" description="Printed under Environmental conditions" value={dates.env_temp} disabled={!editable} onChange={(e) => { setDates({ ...dates, env_temp: e.currentTarget.value }); setDirty(true); }} />}
+                  {!tpl.headerFields.some((f) => f.key === 'rh') && <TextInput size="xs" label="Relative humidity (%)" inputMode="decimal" placeholder="65" value={dates.env_rh} disabled={!editable} onChange={(e) => { setDates({ ...dates, env_rh: e.currentTarget.value }); setDirty(true); }} />}
                   {tpl.headerFields.map((f) => f.type === 'select'
                     ? <Select key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} data={f.options ?? []} value={(obs.header[f.key] as string) ?? (f.default !== undefined ? String(f.default) : null)} disabled={!editable} onChange={(v) => setHeader(f.key, v)} description={f.help} />
                     : <TextInput key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} type={f.type === 'date' ? 'date' : 'text'} inputMode={f.type === 'number' ? 'decimal' : undefined}

@@ -102,6 +102,7 @@ function DocumentView({ id }: { id: number }) {
   const [tab, setTab] = useState<string | null>('details');
   // report body editing: selection, undo / redo
   const [lsel, setLsel] = useState<LayoutSel | null>(null);
+  const [pages, setPages] = useState(1);
   const hist = useRef<{ undo: Section[][]; redo: Section[][]; at: number; key: string }>({ undo: [], redo: [], at: 0, key: '' });
   const [, bump] = useState(0);
   useValidSel(data?.layout?.sections, lsel, setLsel);
@@ -257,10 +258,10 @@ function DocumentView({ id }: { id: number }) {
               onRebuild={() => { if (!window.confirm('Rebuild the report layout from the format? Changes made by hand in the report will be replaced (you can still undo).')) return; hist.current.undo.push(layout!.sections); hist.current.redo = []; hist.current.key = ''; change({ ...data, layout: { ...buildLayout({ data }), edited: false } }); setLsel(null); }} />}
             <div className="doc-stage" onClick={() => { setSelected(null); setLsel(null); }}
               onKeyDown={layoutEditable ? (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undoLayout(); } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redoLayout(); } } : undefined}><FitWidth>
-              <DocRenderer template={template} layoutEdit={tab !== 'design' ? layoutEdit : undefined} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
+              <DocRenderer template={template} pages={pages} layoutEdit={tab !== 'design' ? layoutEdit : undefined} kind={doc.kind} data={{ ...data, date: doc.date }} company={doc.company} number={doc.number} status={doc.status} totals={totals ?? doc.totals}
                 issuer={doc.issuer} onSealMove={!issued && data.sealPos ? (pos) => placeSeal(pos) : undefined} verifyUrl={doc.verify ? `${window.location.origin}/verify/${doc.verify}` : null} selected={tab === 'design' ? selected : null} onSelect={tab === 'design' && editable ? (bid) => setSelected(bid) : undefined} />
             </FitWidth></div>
-            <PagePlanOverlay rootRef={printRef} />
+            <PagePlanOverlay rootRef={printRef} onPages={setPages} />
           </div>
         </Grid.Col>
       </Grid>

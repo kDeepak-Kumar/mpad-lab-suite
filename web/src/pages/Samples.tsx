@@ -107,7 +107,7 @@ export function SamplesPage() {
                 <RecordForm object="sample" value={edit} onChange={setEdit} cols={3} />
                 <div style={{ marginTop: 10 }}><ExtraValuesInput fields={sample.extraFields} value={edit.extra ?? {}} onChange={(x) => setEdit({ ...edit, extra: x })} /></div>
                 <Group justify="flex-end" mt="sm"><Button variant="default" onClick={() => setEdit(null)}>Cancel</Button>
-                  <Button onClick={async () => { const { accreditation, material, received_date, quantity, condition, source, customer_ref, sample_label, specification, description, custom: cu, extra } = edit; await api(`/samples/${sample.id}`, { method: 'PUT', body: { accreditation, material, received_date, quantity, condition, source, customer_ref, sample_label, specification, description, custom: cu, extra } }); ok('Sample updated'); setEdit(null); reloadSample(); reload(); }}>Save</Button></Group>
+                  <Button onClick={async () => { const { accreditation, material, received_date, received_time, quantity, packing, condition, source, customer_ref, customer_ref_date, test_location, sample_label, specification, description, custom: cu, extra } = edit; await api(`/samples/${sample.id}`, { method: 'PUT', body: { accreditation, material, received_date, received_time, quantity, packing, condition, source, customer_ref, customer_ref_date, test_location, sample_label, specification, description, custom: cu, extra } }); ok('Sample updated'); setEdit(null); reloadSample(); reload(); }}>Save</Button></Group>
               </Paper>
             ) : (
               <Paper withBorder p="sm">

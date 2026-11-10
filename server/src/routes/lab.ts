@@ -64,6 +64,8 @@ const sampleSchema = z.object({
   material: z.string().min(1), description: z.string().optional().nullable(), quantity: z.string().optional().nullable(),
   condition: z.string().optional().nullable(), source: z.string().optional().nullable(), received_date: isoDate,
   customer_ref: z.string().optional().nullable(), specification: z.string().optional().nullable(), sample_label: z.string().optional().nullable(),
+  received_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time received must be HH:MM').optional().nullable().or(z.literal('')),
+  customer_ref_date: isoDate.optional().nullable().or(z.literal('')), packing: z.string().max(80).optional().nullable(), test_location: z.string().max(80).optional().nullable(),
   retention_days: z.number().int().min(0).max(3650).nullable().optional(),
   /** Client-specific additional information (supplier, vehicle no., invoice no. …) – fields defined on the client. */
   extra: z.record(z.union([z.string().max(300), z.number(), z.null()])).optional(),
@@ -220,7 +222,8 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
   const admin = isAdmin(req.user);
   if (!['pending', 'in_progress', 'returned'].includes(t.status as string) && !(admin && t.status !== 'reported'))
     throw new HttpError(409, 'This observation sheet is locked. Ask the reviewer to return it for correction.');
-  const body = z.object({ observation: z.any(), started_at: z.string().nullable().optional(), completed_at: z.string().nullable().optional(), reason: z.string().optional() }).parse(req.body);
+  const body = z.object({ observation: z.any(), started_at: z.string().nullable().optional(), completed_at: z.string().nullable().optional(), reason: z.string().optional(),
+    env_temp: z.string().max(12).nullable().optional(), env_rh: z.string().max(12).nullable().optional() }).parse(req.body);
   const tpl = await getObsTemplate(cid, t.template_code as string, t.template_version as number);
   if (!body.observation || typeof body.observation !== 'object') throw new HttpError(400, 'Observation data is missing');
   const raw = body.observation as ObservationInput;
@@ -244,7 +247,7 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
   const changes = diffObservation(t.observation as ObservationInput | null, obs);
   await db('tests').where({ id }).update({
     observation: toJson(obs), results: toJson(res.results), checks: toJson(res.checks), status: t.status === 'pending' ? 'in_progress' : t.status,
-    started_at: body.started_at ?? t.started_at ?? today(), completed_at: body.completed_at ?? null, entered_by: t.entered_by && admin && t.status !== 'pending' ? t.entered_by : req.user.id,
+    started_at: body.started_at ?? t.started_at ?? today(), completed_at: body.completed_at ?? null, ...(body.env_temp !== undefined ? { env_temp: body.env_temp || null } : {}), ...(body.env_rh !== undefined ? { env_rh: body.env_rh || null } : {}), entered_by: t.entered_by && admin && t.status !== 'pending' ? t.entered_by : req.user.id,
   });
   if ((t.status === 'returned' || (admin && !['pending', 'in_progress'].includes(t.status as string))) && changes.length) await audit(db, req.user, 'test', id, 'correction', { changes, reason: body.reason ?? '' });
   else if (changes.length || !t.observation) await audit(db, req.user, 'test', id, t.observation ? 'observation edited' : 'observation started', { changes: changes.length });
