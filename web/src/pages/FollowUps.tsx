@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FormSheet } from '../components/Sheet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Badge, Button, Group, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
 import { IconCheck, IconPhone, IconPlus, IconRotate, IconBrandWhatsapp } from '@tabler/icons-react';
@@ -80,7 +81,7 @@ export function ActivityModal({ clientId, link, onClose }: { clientId?: number; 
     ok(v.type === 'Note' ? 'Note added' : 'Follow-up scheduled'); onClose(true);
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title="New follow-up / note" size="lg">
+    <FormSheet opened onClose={() => onClose(false)} title="New follow-up / note" size="lg">
       <Stack>
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <Select label="Type" data={TYPES} value={v.type} onChange={(x) => setV({ ...v, type: x ?? 'Call' })} allowDeselect={false} />
@@ -92,9 +93,9 @@ export function ActivityModal({ clientId, link, onClose }: { clientId?: number; 
           <TextInput type="date" label="Due date" value={v.due_date ?? ''} onChange={(e) => setV({ ...v, due_date: e.currentTarget.value })} />
           <Select label="Assign to" data={(users ?? []).filter((u) => u.active !== false).map((u) => ({ value: String(u.id), label: u.name }))} value={String(v.assigned_to)} onChange={(x) => setV({ ...v, assigned_to: x ? Number(x) : me.user.id })} />
         </SimpleGrid>}
-        <Group justify="flex-end"><Button disabled={v.subject.trim().length < 2} onClick={save}>{v.type === 'Note' ? 'Add note' : 'Schedule'}</Button></Group>
+        <Group className="form-actions" justify="flex-end"><Button disabled={v.subject.trim().length < 2} onClick={save}>{v.type === 'Note' ? 'Add note' : 'Schedule'}</Button></Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }
 

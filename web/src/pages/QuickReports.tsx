@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FormSheet } from '../components/Sheet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Badge, Button, Divider, Drawer, Group, Modal, MultiSelect, Paper, SegmentedControl, Select, SimpleGrid, Stack, Text, TextInput, Textarea, ThemeIcon } from '@mantine/core';
 import { IconBolt, IconCertificate, IconCircleCheck, IconFileAnalytics, IconLink, IconPencil, IconPlus, IconUserPlus } from '@tabler/icons-react';
@@ -62,7 +63,7 @@ function NewQuick({ onClose }: { onClose: (id?: number) => void }) {
     } catch { /* shown */ } finally { setBusy(false); }
   };
   return (
-    <Modal opened onClose={() => onClose()} title="New quick test report" size="xl">
+    <FormSheet opened onClose={() => onClose()} title="New quick test report" size="xl">
       <Stack>
         <Text fw={600} size="sm">Customer (as it should appear on the report)</Text>
         <SimpleGrid cols={{ base: 1, sm: 2 }}>{C('name', 'Customer name', { required: true, 'data-autofocus': true })}{C('project', 'Project / site')}{C('contact', 'Contact person')}{C('phone', 'Phone')}{C('email', 'Email')}{C('gstin', 'GSTIN')}</SimpleGrid>
@@ -76,9 +77,9 @@ function NewQuick({ onClose }: { onClose: (id?: number) => void }) {
           {V('specification', 'Specification / grade')}{V('source', 'Source')}
         </SimpleGrid>
         <MultiSelect label="Tests" placeholder={forMat.length ? 'Choose tests' : 'No tests with an observation sheet for this material'} searchable data={forMat.map((x) => ({ value: String(x.id), label: x.report_name || x.billing_name }))} value={tests} onChange={setTests} />
-        <Group justify="flex-end"><Button variant="default" onClick={() => onClose()}>Cancel</Button><Button loading={busy} disabled={!c.name?.trim() || !tests.length} onClick={save}>Start and enter observations</Button></Group>
+        <Group className="form-actions" justify="flex-end"><Button variant="default" onClick={() => onClose()}>Cancel</Button><Button loading={busy} disabled={!c.name?.trim() || !tests.length} onClick={save}>Start and enter observations</Button></Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }
 

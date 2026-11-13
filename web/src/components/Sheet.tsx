@@ -58,3 +58,23 @@ export function Facts({ items }: { items: [ReactNode, ReactNode][] }) {
   const shown = items.filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== false);
   return <dl className="kv">{shown.map(([k, v], i) => <div key={i} style={{ display: 'contents' }}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>;
 }
+
+/**
+ * Drop-in for a form pop-up: the same props as a Modal, shown as a side sheet over the page.
+ * The form's action row (className "form-actions") stays pinned at the bottom while the fields scroll.
+ */
+export function FormSheet({ opened = true, onClose, title, size, children }: { opened?: boolean; onClose: () => void; title: ReactNode; size?: string | number; children: ReactNode }) {
+  const phone = useMediaQuery('(max-width: 767px)');
+  const w = typeof size === 'number' ? size : size === 'xl' ? 720 : size === 'lg' ? 600 : 520;
+  return (
+    <Drawer opened={opened} onClose={onClose} withCloseButton={false} size={phone ? '100%' : w} padding={0} trapFocus returnFocus>
+      <div className="sheet fsheet">
+        <header className="sheet-head">
+          <div style={{ minWidth: 0, outline: 'none' }} tabIndex={-1} data-autofocus><div className="sheet-title">{title}</div></div>
+          <div className="sheet-tools"><Tooltip label="Close (Esc)"><ActionIcon variant="subtle" color="gray" size={34} radius={9} aria-label="Close" onClick={onClose}><IconX size={17} /></ActionIcon></Tooltip></div>
+        </header>
+        <div className="sheet-body" style={{ paddingTop: 18 }}>{children}</div>
+      </div>
+    </Drawer>
+  );
+}

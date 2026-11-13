@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FormSheet } from '../../components/Sheet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Badge, Button, CopyButton, FileButton, Group, Image, Modal, PasswordInput, SegmentedControl, Select, SimpleGrid, Stack, Switch, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
 import { IconCircleCheck, IconMailForward, IconCopy, IconCheck } from '@tabler/icons-react';
@@ -66,7 +67,7 @@ function UserModal({ user, canManage, admin, roles, onClose, onLink }: { user: a
   const st = strength(v.password ?? '');
   const roleOptions = roles.filter((r) => admin || r.key !== 'admin').map((r) => ({ value: r.key, label: r.label }));
   return (
-    <Modal opened onClose={() => onClose(false)} title={user.id ? `Edit ${user.name}` : 'Add user'} size="lg">
+    <FormSheet opened onClose={() => onClose(false)} title={user.id ? `Edit ${user.name}` : 'Add user'} size="lg">
       <Stack>
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           <TextInput label="Name" value={v.name ?? ''} onChange={(e) => setV({ ...v, name: e.currentTarget.value })} />
@@ -111,12 +112,12 @@ function UserModal({ user, canManage, admin, roles, onClose, onLink }: { user: a
           {v.signature && <Button size="xs" variant="subtle" color="red" onClick={() => setV({ ...v, signature: null })}>Remove</Button>}
         </Group>
         {canManage && <Switch label="Active (can sign in)" checked={v.active !== false} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} />}
-        <Group justify="space-between">
+        <Group className="form-actions" justify="space-between">
           {canManage && user.id && user.totp_enabled ? <Button variant="subtle" color="orange" onClick={async () => { if (!window.confirm(`Reset two-step verification for ${user.name}? They will set it up again at next sign-in (if required) and are signed out everywhere.`)) return; await api(`/account/admin/reset-2fa/${user.id}`, { method: 'POST' }); ok('Two-step verification reset'); onClose(true); }}>Reset two-step verification</Button> : <span />}
           <Button onClick={save} loading={busy} disabled={!v.name || !emailOk || (needPw && !(user.id && !v.password) && !passwordOk(v.password ?? ''))}>{!user.id && mode === 'invite' ? 'Create and send invitation' : 'Save'}</Button>
         </Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }
 

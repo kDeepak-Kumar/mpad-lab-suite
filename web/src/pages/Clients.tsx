@@ -1,4 +1,5 @@
 import { ExtraFieldsEditor } from '../components/ExtraFields';
+import { FormSheet } from '../components/Sheet';
 import { useEffect, useState } from 'react';
 import { trackRecent } from '../favorites';
 import { SharingButton, SharingModal } from '../components/Sharing';
@@ -94,9 +95,9 @@ function SiteModal({ clientId, site, onClose }: { clientId: number; site?: any; 
     ok('Site saved'); onClose(true);
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title={site?.id ? 'Edit site' : 'Add site / project'} size="lg">
-      <Stack><RecordForm object="site" value={v} onChange={setV} /><Group justify="flex-end"><Button onClick={save} disabled={!v.name}>Save</Button></Group></Stack>
-    </Modal>
+    <FormSheet opened onClose={() => onClose(false)} title={site?.id ? 'Edit site' : 'Add site / project'} size="lg">
+      <Stack><RecordForm object="site" value={v} onChange={setV} /><Group className="form-actions" justify="flex-end"><Button onClick={save} disabled={!v.name}>Save</Button></Group></Stack>
+    </FormSheet>
   );
 }
 function ContactModal({ clientId, sites, contact, onClose }: { clientId: number; sites: any[]; contact?: any; onClose: (saved: boolean) => void }) {
@@ -108,16 +109,16 @@ function ContactModal({ clientId, sites, contact, onClose }: { clientId: number;
     ok('Contact saved'); onClose(true);
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title={contact?.id ? 'Edit contact' : 'Add contact'} size="lg">
+    <FormSheet opened onClose={() => onClose(false)} title={contact?.id ? 'Edit contact' : 'Add contact'} size="lg">
       <Stack>
         <RecordForm object="contact" value={v} onChange={setV} />
         <SimpleGrid cols={2}>
           <Select label="Site" clearable placeholder="All sites" data={sites.map((s) => ({ value: String(s.id), label: s.name }))} value={v.site_id ? String(v.site_id) : null} onChange={(x) => setV({ ...v, site_id: x })} />
           <MultiSelect label="Receives" data={[{ value: 'quote', label: 'Quotations' }, { value: 'report', label: 'Reports' }, { value: 'invoice', label: 'Invoices' }]} value={v.receives ?? []} onChange={(x) => setV({ ...v, receives: x })} />
         </SimpleGrid>
-        <Group justify="flex-end"><Button onClick={save} disabled={!v.name}>Save</Button></Group>
+        <Group className="form-actions" justify="flex-end"><Button onClick={save} disabled={!v.name}>Save</Button></Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }
 

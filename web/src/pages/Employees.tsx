@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
+import { FormSheet } from '../components/Sheet';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Avatar, Badge, Button, FileButton, Grid, Group, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Tooltip } from '@mantine/core';
 import { IconCamera, IconEye, IconLock, IconPencil, IconPlus, IconUsersPlus } from '@tabler/icons-react';
 import { api, dmy, fileToDataUrl, ok, useApi } from '../api';
 import { useCan } from '../ctx';
 import { ListView, type Col } from '../components/ListView';
-import { Loading, PageHeader } from '../components/ui';
+import { Loading, PageHeader, Pill } from '../components/ui';
+import { RecordLayout, Block } from '../components/Record';
+import { Facts } from '../components/Sheet';
 import { Attachments } from '../components/Attachments';
 import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
 import { MonthGrid } from './Attendance';
@@ -52,7 +55,7 @@ export function EmployeeForm({ initial, onClose }: { initial?: any; onClose: (id
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   return (
-    <Modal opened onClose={() => onClose()} title={v.id ? `Edit ${v.name}` : 'New employee'} size="xl">
+    <FormSheet opened onClose={() => onClose()} title={v.id ? `Edit ${v.name}` : 'New employee'} size="xl">
       <Stack>
         <Group align="flex-start" wrap="nowrap">
           <Stack gap={4} align="center">
@@ -85,9 +88,9 @@ export function EmployeeForm({ initial, onClose }: { initial?: any; onClose: (id
         </SimpleGrid>
         <Textarea label="Notes" autosize value={v.notes ?? ''} onChange={(e) => setV({ ...v, notes: e.currentTarget.value })} />
         {err && <Alert color="red" variant="light">{err}</Alert>}
-        <Group justify="flex-end"><Button variant="default" onClick={() => onClose()}>Cancel</Button><Button loading={busy} disabled={!v.name?.trim()} onClick={save}>Save</Button></Group>
+        <Group className="form-actions" justify="flex-end"><Button variant="default" onClick={() => onClose()}>Cancel</Button><Button loading={busy} disabled={!v.name?.trim()} onClick={save}>Save</Button></Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }
 
@@ -104,36 +107,39 @@ export function EmployeeDetail() {
   if (!e) return <Loading />;
   const canManage = Boolean(e.canManage);
   const month = new Date().toISOString().slice(0, 7);
-  const info: [string, any][] = [['Employee code', e.code], ['Designation', e.designation], ['Department', e.department], ['Joined', dmy(e.date_of_joining)], ['Date of birth', dmy(e.date_of_birth)], ['Blood group', e.blood_group],
+  const _info: [string, any][] = [['Employee code', e.code], ['Designation', e.designation], ['Department', e.department], ['Joined', dmy(e.date_of_joining)], ['Date of birth', dmy(e.date_of_birth)], ['Blood group', e.blood_group],
     ['Phone', e.phone], ['Email', e.email], ['Emergency contact', e.emergency_contact], ['Experience', e.experience], ['App login', e.user ? `${e.user.name} (${e.user.email})` : '—']];
+  const side = <>
+    {(e.phone || e.email || e.emergency_contact || e.address) && <Block title="Contact">
+      <Facts items={[['Phone', e.phone], ['Email', e.email], ['Emergency', e.emergency_contact], ['Address', e.address && <span style={{ whiteSpace: 'pre-line' }}>{e.address}</span>]]} />
+    </Block>}
+    <Block title="Identity" action={<IconLock size={14} style={{ color: 'var(--muted)' }} />}>
+      <dl className="kv">
+        <dt>{e.id_type || 'ID'}</dt><dd style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span className="tnum">{full ?? e.id_number ?? '—'}</span>
+          {canManage && e.has_id_number && !full && <Tooltip label="Show the full number (recorded in the history)"><ActionIcon size="sm" variant="subtle" color="gray" aria-label="Show full ID number" onClick={async () => setFull((await api<any>(`/employees/${e.id}/reveal-id`, { method: 'POST' })).id_number)}><IconEye size={15} /></ActionIcon></Tooltip>}</dd>
+        <dt>PAN</dt><dd className="tnum">{e.pan || '—'}</dd>
+      </dl>
+    </Block>
+    <RecordInfo object="employee" id={e.id} />
+  </>;
   return (
-    <>
-      <PageHeader eyebrow="Employee" title={<Group gap="sm"><Avatar src={e.photo || null} size={44} radius="xl">{initials(e.name)}</Avatar>{e.name}{e.status === 'left' && <Badge color="gray">Left {dmy(e.left_on)}</Badge>}</Group>}
-        subtitle={[e.designation, e.department].filter(Boolean).join(' · ')}
-        actions={canManage && <Group gap="xs"><Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>Edit</Button><AdminDelete object="employee" id={e.id} compact onDeleted={() => nav('/employees')} /></Group>} />
+    <RecordLayout initials={initials(e.name)} eyebrow="Employee" title={e.name} fav={{ kind: 'page', sub: 'Employee' }}
+      meta={<>{[e.designation, e.department].filter(Boolean).length > 0 && <span>{[e.designation, e.department].filter(Boolean).join(' · ')}</span>}{e.code && <span className="tnum">{e.code}</span>}{e.status === 'left' ? <Pill tone="neu">Left {dmy(e.left_on)}</Pill> : <Pill tone="ok">Active</Pill>}</>}
+      actions={canManage && <><Button variant="default" leftSection={<IconPencil size={16} />} onClick={() => setEdit(true)}>Edit</Button><AdminDelete object="employee" id={e.id} compact onDeleted={() => nav('/employees')} /></>}
+      side={side}>
       <Tabs defaultValue="profile">
         <Tabs.List mb="md"><Tabs.Tab value="profile">Profile</Tabs.Tab><Tabs.Tab value="documents">Documents</Tabs.Tab><Tabs.Tab value="attendance">Attendance</Tabs.Tab></Tabs.List>
         <Tabs.Panel value="profile">
-          <Grid>
-            <Grid.Col span={{ base: 12, md: 7 }}>
-              <Paper withBorder p="md"><SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">{info.map(([k, v]) => <div key={k}><Text size="xs" c="dimmed">{k}</Text><Text size="sm">{v || '—'}</Text></div>)}</SimpleGrid>
-                {e.address && <><Text size="xs" c="dimmed" mt="sm">Address</Text><Text size="sm" style={{ whiteSpace: 'pre-line' }}>{e.address}</Text></>}</Paper>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, md: 5 }}>
-              <Paper withBorder p="md" mb="md"><Text size="xs" c="dimmed">Qualifications</Text><Text size="sm" style={{ whiteSpace: 'pre-line' }}>{e.qualifications || '—'}</Text></Paper>
-              <Paper withBorder p="md">
-                <Group gap={6} mb={6}><IconLock size={14} /><Text size="sm" fw={600}>Identity</Text></Group>
-                <Group justify="space-between"><div><Text size="xs" c="dimmed">{e.id_type || 'ID'}</Text><Text size="sm" ff="monospace">{full ?? e.id_number ?? '—'}</Text></div>
-                  {canManage && e.has_id_number && !full && <Tooltip label="Show the full number (recorded in the history)"><ActionIcon variant="light" onClick={async () => setFull((await api<any>(`/employees/${e.id}/reveal-id`, { method: 'POST' })).id_number)}><IconEye size={16} /></ActionIcon></Tooltip>}</Group>
-                <Text size="xs" c="dimmed" mt={6}>PAN</Text><Text size="sm" ff="monospace">{e.pan || '—'}</Text>
-              </Paper>
-            </Grid.Col>
-          </Grid>
-          {e.notes && <Paper withBorder p="md" mt="md"><Text size="xs" c="dimmed">Notes</Text><Text size="sm" style={{ whiteSpace: 'pre-line' }}>{e.notes}</Text></Paper>}
-          <RecordInfo object="employee" id={e.id} />
+          <div className="card" style={{ padding: '16px 18px' }}>
+            <Facts items={[['Employee code', e.code], ['Designation', e.designation], ['Department', e.department], ['Joined', dmy(e.date_of_joining)], ['Experience', e.experience],
+              ['Date of birth', dmy(e.date_of_birth)], ['Blood group', e.blood_group], ['App login', e.user ? `${e.user.name} (${e.user.email})` : 'No login']]} />
+          </div>
+          <div className="blk-head" style={{ marginTop: 20 }}><b>Qualifications</b></div>
+          <div className="card" style={{ padding: '14px 18px', whiteSpace: 'pre-line', fontSize: 13.5 }}>{e.qualifications || <Text size="sm" c="dimmed">None recorded.</Text>}</div>
+          {e.notes && <><div className="blk-head" style={{ marginTop: 20 }}><b>Notes</b></div><div className="card" style={{ padding: '14px 18px', whiteSpace: 'pre-line', fontSize: 13.5 }}>{e.notes}</div></>}
         </Tabs.Panel>
         <Tabs.Panel value="documents">
-          <Alert variant="light" icon={<IconLock size={16} />} mb="md">ID documents are visible only to HR / administrators and {me ? 'you' : 'this employee'}. Files are compressed to under 1 MB; every view is recorded.</Alert>
+          <Alert variant="light" color="gray" icon={<IconLock size={16} />} mb="md">ID documents are visible only to HR / administrators and {me ? 'you' : 'this employee'}. Files are compressed to under 1 MB; every view is recorded.</Alert>
           <SimpleGrid cols={{ base: 1, md: 2 }}>
             {[['id', 'Aadhaar / ID proof'], ['pan', 'PAN card'], ['certificate', 'Qualification & training certificates'], ['other', 'Other documents (offer letter, address proof…)']].map(([k, t]) => (
               <Paper key={k} withBorder p="sm"><Attachments entity="employee" entityId={e.id} kind={k} title={t} readOnly={!canManage} emptyText="Nothing uploaded" onChange={reload} /></Paper>
@@ -143,6 +149,6 @@ export function EmployeeDetail() {
         <Tabs.Panel value="attendance"><MonthGrid employeeId={e.id} initialMonth={month} /></Tabs.Panel>
       </Tabs>
       {edit && <EmployeeForm initial={e} onClose={(x) => { setEdit(false); if (x) reload(); }} />}
-    </>
+    </RecordLayout>
   );
 }

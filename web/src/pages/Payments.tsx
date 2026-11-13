@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FormSheet } from '../components/Sheet';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Checkbox, Group, Modal, NumberInput, Select, SimpleGrid, Stack, Table, Text, TextInput, Paper } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
@@ -45,10 +46,10 @@ function PaymentModal({ clientId, invoiceId, onClose }: { clientId: string | nul
     } finally { setBusy(false); }
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title="Record payment received" size="xl">
+    <FormSheet opened onClose={() => onClose(false)} title="Record payment received" size="xl">
       <Stack>
         <Select label="Client" searchable data={(clients ?? []).map((c) => ({ value: String(c.id), label: c.name }))} value={client} onChange={(x) => { setClient(x); setAlloc({}); }} />
-        <SimpleGrid cols={{ base: 2, md: 5 }}>
+        <SimpleGrid cols={{ base: 2, sm: 3 }}>
           <TextInput type="date" label="Date" value={v.date} onChange={(e) => setV({ ...v, date: e.currentTarget.value })} />
           <NumberInput label="Amount received (₹)" thousandSeparator="," decimalScale={2} value={v.amount} onChange={(x) => setV({ ...v, amount: Number(x) || 0 })} />
           <NumberInput label="TDS deducted (₹)" thousandSeparator="," decimalScale={2} value={v.tds} onChange={(x) => setV({ ...v, tds: Number(x) || 0 })} />
@@ -73,11 +74,11 @@ function PaymentModal({ clientId, invoiceId, onClose }: { clientId: string | nul
             </Table>
           </Paper>
         )}
-        <Group justify="space-between">
+        <Group className="form-actions" justify="space-between">
           <Text size="sm" c={allocated > v.amount + v.tds + 0.5 ? 'red' : 'dimmed'}>Applied ₹{money(allocated, 2)} of ₹{money(v.amount + v.tds, 2)} (amount + TDS)</Text>
           <Button loading={busy} disabled={!client || v.amount <= 0 || allocated > v.amount + v.tds + 0.5} onClick={save}>Save payment</Button>
         </Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }

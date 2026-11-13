@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FormSheet } from '../components/Sheet';
 import { useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Anchor, Badge, Button, FileButton, Group, Modal, NumberInput, Paper, SegmentedControl, Select, SimpleGrid, Stack, Switch, Table, Tabs, Text, TextInput, Textarea } from '@mantine/core';
 import { IconPlus, IconPaperclip, IconTrash, IconCash, IconBuildingStore } from '@tabler/icons-react';
@@ -95,7 +96,7 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
     } finally { setBusy(''); }
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title={v.id ? `Bill ${v.bill_no}` : 'Record a vendor bill'} size="lg">
+    <FormSheet opened onClose={() => onClose(false)} title={v.id ? `Bill ${v.bill_no}` : 'Record a vendor bill'} size="lg">
       <Stack>
         <SegmentedControl size="xs" fullWidth value={v.category} onChange={(c) => setV({ ...v, category: c })} data={CATEGORIES.map((c) => ({ value: c.value, label: c.label }))} />
         <Group align="flex-end" gap="xs" grow>
@@ -120,7 +121,7 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
           {files.map((f) => <Anchor key={f.id} size="xs" onClick={() => setViewing(f)}>{f.name} · {kb(f.size)}</Anchor>)}
         </Group>
         {v.id && <PaymentsList bill={v} onChange={() => undefined} />}
-        <Group justify="space-between">
+        <Group className="form-actions" justify="space-between">
           {v.id ? <Button variant="subtle" color="red" onClick={async () => { if (window.confirm('Delete this bill?')) { await api(`/purchases/${v.id}`, { method: 'DELETE' }); onClose(true); } }}>Delete</Button> : <span />}
           {v.id ? <AdminDelete object="purchase" id={v.id} compact onDeleted={() => onClose(true)} /> : null}
           <Button loading={Boolean(busy)} onClick={save} disabled={!v.vendor_id || !v.bill_no || !v.bill_date || v.taxable === '' || v.taxable === undefined}>{busy || 'Save bill'}</Button>
@@ -130,7 +131,7 @@ export function BillModal({ initial, onClose }: { initial: any; onClose: (saved:
       {preview && <UploadPreview packed={preview} onCancel={() => setPreview(null)} onConfirm={() => { setPending(preview); setPreview(null); }} confirmLabel="Use this copy" />}
       {viewing && <FilePreview name={viewing.name} mime={viewing.mime} url={`/api/files/${viewing.id}/download?inline=1`} onClose={() => setViewing(null)} />}
       {newVendor && <VendorModal initial={{ kind: v.category === 'subcontract' ? 'lab' : v.category === 'calibration' ? 'calibration' : 'supplier' }} onClose={async (id) => { setNewVendor(false); if (id) { await rv(); setV((x: any) => ({ ...x, vendor_id: String(id) })); } }} />}
-    </Modal>
+    </FormSheet>
   );
 }
 
@@ -190,7 +191,7 @@ export function VendorModal({ initial, onClose }: { initial: any; onClose: (id: 
     else { const r = await api<any>('/vendors', { body }); ok('Vendor added'); onClose(r.id); }
   };
   return (
-    <Modal opened onClose={() => onClose(null)} title={v.id ? v.name : 'New vendor'} size="lg">
+    <FormSheet opened onClose={() => onClose(null)} title={v.id ? v.name : 'New vendor'} size="lg">
       <Stack>
         <SegmentedControl size="xs" value={v.kind ?? 'lab'} onChange={(k) => setV({ ...v, kind: k })} data={[{ value: 'lab', label: 'Testing laboratory' }, { value: 'calibration', label: 'Calibration agency' }, { value: 'supplier', label: 'Supplier' }, { value: 'other', label: 'Other' }]} />
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
@@ -204,8 +205,8 @@ export function VendorModal({ initial, onClose }: { initial: any; onClose: (id: 
         <Textarea label="Address" autosize value={v.address ?? ''} onChange={(e) => setV({ ...v, address: e.currentTarget.value })} />
         {(v.kind ?? 'lab') === 'lab' && !v.nabl_cert && <Alert variant="light" color="orange" p="xs"><Text size="xs">For results that go on your NABL reports, sub-contract only to a laboratory accredited for those tests and record its certificate here.</Text></Alert>}
         {v.id ? <Group justify="space-between"><RecordInfo object="vendor" id={v.id} /><AdminDelete object="vendor" id={v.id} compact onDeleted={() => onClose(null)} /></Group> : null}
-        <Group justify="space-between">{v.id ? <Switch label="Active" checked={v.active !== false && v.active !== 0} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} /> : <span />}<Button onClick={save} disabled={!v.name || v.name.length < 2}>Save vendor</Button></Group>
+        <Group className="form-actions" justify="space-between">{v.id ? <Switch label="Active" checked={v.active !== false && v.active !== 0} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} /> : <span />}<Button onClick={save} disabled={!v.name || v.name.length < 2}>Save vendor</Button></Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }

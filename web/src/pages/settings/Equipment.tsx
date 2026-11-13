@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FormSheet } from '../../components/Sheet';
 import { Button, Group, Modal, NumberInput, SimpleGrid, Stack, Switch, Text } from '@mantine/core';
 import { IconUpload } from '@tabler/icons-react';
 import { EQUIPMENT_FIELDS } from '@suite/shared';
@@ -43,7 +44,7 @@ function EqModal({ item, onClose, readOnly }: { item: any; onClose: (s: boolean)
     ok('Equipment saved'); onClose(true);
   };
   return (
-    <Modal opened onClose={() => onClose(false)} title={item.id ? 'Edit equipment' : 'Add equipment'} size="lg">
+    <FormSheet opened onClose={() => onClose(false)} title={item.id ? 'Edit equipment' : 'Add equipment'} size="lg">
       <Stack>
         <RecordForm object="equipment" value={v} onChange={setV} disabled={readOnly} />
         {(() => {
@@ -63,9 +64,9 @@ function EqModal({ item, onClose, readOnly }: { item: any; onClose: (s: boolean)
         {v.id ? <Certificates equipmentId={v.id} readOnly={readOnly} /> : <Text size="xs" c="dimmed">Save the equipment first, then attach its calibration certificate.</Text>}
         <Switch label="Active" disabled={readOnly} checked={v.active !== false} onChange={(e) => setV({ ...v, active: e.currentTarget.checked })} />
         {item.id ? <RecordInfo object="equipment" id={item.id} /> : null}
-        <Group justify="flex-end">{item.id ? <AdminDelete object="equipment" id={item.id} compact onDeleted={() => onClose(true)} /> : null}{!readOnly && <Button onClick={save} disabled={!v.name}>Save</Button>}</Group>
+        <Group className="form-actions" justify="flex-end">{item.id ? <AdminDelete object="equipment" id={item.id} compact onDeleted={() => onClose(true)} /> : null}{!readOnly && <Button onClick={save} disabled={!v.name}>Save</Button>}</Group>
       </Stack>
-    </Modal>
+    </FormSheet>
   );
 }
 
