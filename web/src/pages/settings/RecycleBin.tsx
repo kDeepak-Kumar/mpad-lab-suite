@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Alert, Badge, Button, Group, SegmentedControl, Stack, Text, Tooltip } from '@mantine/core';
-import { IconRecycle, IconRestore, IconTrashX } from '@tabler/icons-react';
+import { Badge, Button, Group, SegmentedControl, Stack, Text, Tooltip } from '@mantine/core';
+import { IconLock, IconRecycle, IconRestore, IconTrashX } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { api, invalidate, ok, useApi } from '../../api';
 import { isAdmin, useMe } from '../../ctx';
 import { ListView, type Col } from '../../components/ListView';
-import { PageHeader } from '../../components/ui';
+import { Empty, PageHeader } from '../../components/ui';
 
 interface BinRow { id: number; object: string; record_id: number; label: string; summary: string; deleted_at: string; purge_after: string; reason: string | null; restored_at: string | null; purged_at: string | null; deleted_by_name: string | null; restored_by_name: string | null }
 const KIND: Record<string, string> = { sample: 'Sample', test: 'Observation sheet', quote: 'Quotation', invoice: 'Invoice', report: 'Test report', client: 'Client', workorder: 'Work order', payment: 'Payment', equipment: 'Equipment', vendor: 'Vendor', purchase: 'Vendor bill', outsource: 'Outsourced job', activity: 'Follow-up', catalog: 'Rate card item' };
@@ -19,7 +19,7 @@ export function RecycleBinPage() {
   const nav = useNavigate();
   const { data, reload } = useApi<{ rows: BinRow[]; keepDays: number }>(isAdmin(me) ? '/recycle' : null);
   const [busy, setBusy] = useState<number | null>(null);
-  if (!isAdmin(me)) return <Alert color="orange" m="md">Only System Administrators can open the Recycle Bin.</Alert>;
+  if (!isAdmin(me)) return <Empty title="Recycle Bin is for System Administrators" icon={<IconLock size={22} />}>Ask a System Administrator to restore a deleted record.</Empty>;
 
   const restore = async (r: BinRow) => {
     setBusy(r.id);

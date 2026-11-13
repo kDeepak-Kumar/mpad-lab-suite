@@ -10,7 +10,7 @@ type Msg = { role: 'user' | 'assistant'; content: string; mode?: string };
 const KEY = 'assistant-chat';
 const load = (): Msg[] => { try { return JSON.parse(sessionStorage.getItem(KEY) ?? '[]'); } catch { return []; } };
 
-/** The assistant: a floating button on every screen; the conversation stays while moving between pages. */
+/** The assistant panel: opened from "Ask AI" in the top bar or Ctrl+J; the conversation stays while moving between pages. Escape minimises it. */
 export function Assistant() {
   const me = useMe();
   const can = useCan();
@@ -43,13 +43,13 @@ export function Assistant() {
 
   if (!open) return null; // opened from the top bar (Ask AI) or with Ctrl+J
   return (
-    <Paper className="asst-panel no-print" shadow="xl" radius="lg">
+    <Paper className="asst-panel no-print" shadow="xl" radius="lg" role="dialog" aria-label="Assistant" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}>
       <Group className="asst-head" justify="space-between" wrap="nowrap">
-        <Group gap={8} wrap="nowrap"><span className="asst-badge"><IconSparkles size={16} /></span><div><Text fw={650} size="sm">Assistant</Text><Text size="xs" c="dimmed">Finds records and answers questions · uses your access</Text></div></Group>
+        <Group gap={8} wrap="nowrap"><span className="asst-badge"><IconSparkles size={16} /></span><div><Text fw={650} size="sm">Assistant</Text><Text size="xs" c="dimmed">Sees only what your role can see</Text></div></Group>
         <Group gap={2} wrap="nowrap">
-          {msgs.length > 0 && <Tooltip label="New conversation"><ActionIcon variant="subtle" color="gray" onClick={() => setMsgs([])}><IconRefresh size={16} /></ActionIcon></Tooltip>}
-          <Tooltip label="Minimise"><ActionIcon variant="subtle" color="gray" onClick={() => setOpen(false)}><IconMinus size={16} /></ActionIcon></Tooltip>
-          <Tooltip label="Close and clear"><ActionIcon variant="subtle" color="gray" onClick={() => { setOpen(false); setMsgs([]); }}><IconX size={16} /></ActionIcon></Tooltip>
+          {msgs.length > 0 && <Tooltip label="New conversation"><ActionIcon variant="subtle" color="gray" aria-label="New conversation" onClick={() => setMsgs([])}><IconRefresh size={16} /></ActionIcon></Tooltip>}
+          <Tooltip label="Minimise (Esc)"><ActionIcon variant="subtle" color="gray" aria-label="Minimise" onClick={() => setOpen(false)}><IconMinus size={16} /></ActionIcon></Tooltip>
+          <Tooltip label="Close and clear"><ActionIcon variant="subtle" color="gray" aria-label="Close and clear" onClick={() => { setOpen(false); setMsgs([]); }}><IconX size={16} /></ActionIcon></Tooltip>
         </Group>
       </Group>
       <ScrollArea className="asst-body" viewportRef={view}>

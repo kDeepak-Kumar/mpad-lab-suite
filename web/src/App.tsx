@@ -337,33 +337,40 @@ function NotificationBell({ reminders }: { reminders: any[] }) {
     setLocal((x) => ({ ...x, ...Object.fromEntries(refs.map((k) => [k, value])) }));
     await api(value ? '/notifications/read' : '/notifications/unread', { body: { refs }, quiet: true }).catch(() => undefined);
   };
-  const color = (l: string) => (l === 'danger' ? 'red' : l === 'warning' ? 'orange' : 'blue');
+  const tone = (l: string) => (l === 'danger' ? 'bad' : l === 'warning' ? 'warn' : 'info');
+  const [open, setOpen] = useState(false);
   const item = (r: any, i: number, done: boolean) => (
-    <Menu.Item key={r.ref ?? i} onClick={() => { if (r.ref && !done) mark([r.ref]); nav(r.link); }} style={{ opacity: done ? 0.6 : 1 }}
+    <Menu.Item key={r.ref ?? i} className={`nt-item${done ? ' done' : ''}`} onClick={() => { if (r.ref && !done) mark([r.ref]); nav(r.link); }}
       rightSection={r.ref && (
         <Tooltip label={done ? 'Mark as unread' : 'Mark as read'}>
-          <ActionIcon size="sm" variant="subtle" color="gray" onClick={(e) => { e.stopPropagation(); mark([r.ref], !done); }}>{done ? <IconMailOpened size={15} /> : <IconCheck size={15} />}</ActionIcon>
+          <ActionIcon size="sm" variant="subtle" color="gray" className="nt-act" aria-label={done ? 'Mark as unread' : 'Mark as read'} onClick={(e) => { e.stopPropagation(); mark([r.ref], !done); }}>{done ? <IconMailOpened size={15} /> : <IconCheck size={15} />}</ActionIcon>
         </Tooltip>
       )}>
-      <Group gap={6} wrap="nowrap">{!done && <span style={{ width: 7, height: 7, borderRadius: 4, background: `var(--mantine-color-${color(r.level)}-6)`, flex: 'none' }} />}<Text size="xs" c={color(r.level)} fw={600}>{r.kind}</Text></Group>
-      <Text size="sm">{r.text}</Text>
+      <div className="nt-row">
+        <span className={`nt-dot t-${tone(r.level)}`} aria-hidden />
+        <div style={{ minWidth: 0 }}>
+          <div className={`nt-kind t-${tone(r.level)}`}>{r.kind}</div>
+          <div className="nt-text">{r.text}</div>
+        </div>
+      </div>
     </Menu.Item>
   );
   return (
-    <Menu position="bottom-end" width={400} shadow="lg" closeOnItemClick>
+    <Menu position="bottom-end" width={380} shadow="lg" closeOnItemClick opened={open} onChange={setOpen}>
       <Menu.Target>
         <Indicator disabled={!unread.length} label={unread.length > 99 ? '99+' : unread.length} size={16} color="accent" offset={6} styles={{ indicator: { fontWeight: 600, fontSize: 10 } }}>
-          <Tooltip label="Notifications"><UnstyledButton className="iconbtn" aria-label="Notifications"><IconBell size={18} stroke={1.75} /></UnstyledButton></Tooltip>
+          <Tooltip label="Notifications" disabled={open}><UnstyledButton className="iconbtn" aria-label="Notifications"><IconBell size={18} stroke={1.75} /></UnstyledButton></Tooltip>
         </Indicator>
       </Menu.Target>
-      <Menu.Dropdown>
-        <Group justify="space-between" px="sm" py={6}>
-          <Text size="sm" fw={650}>Notifications</Text>
-          {unread.length > 0 && <Button size="compact-xs" variant="subtle" onClick={() => mark(unread.map((r) => r.ref).filter(Boolean))}>Mark all as read</Button>}
-        </Group>
+      <Menu.Dropdown className="nt-pop">
+        <div className="nt-head">
+          <span className="nt-title">Notifications{unread.length > 0 && <span className="cnt">{unread.length}</span>}</span>
+          {unread.length > 0 && <Button size="compact-xs" variant="subtle" color="gray" onClick={() => mark(unread.map((r) => r.ref).filter(Boolean))}>Mark all as read</Button>}
+        </div>
         <ScrollArea.Autosize mah={460}>
-          {!reminders.length && <Text size="sm" c="dimmed" p="sm">All clear.</Text>}
-          {reminders.length > 0 && !unread.length && <Text size="sm" c="dimmed" px="sm" pb="xs">You're all caught up.</Text>}
+          {!unread.length && (
+            <div className="nt-empty"><IconCheck size={18} /><div><b>{reminders.length ? 'You\'re all caught up' : 'All clear'}</b><span>New reminders and alerts appear here.</span></div></div>
+          )}
           {unread.slice(0, 20).map((r, i) => item(r, i, false))}
           {read.length > 0 && <><Menu.Divider /><Menu.Label>Earlier</Menu.Label>{read.slice(0, 15).map((r, i) => item(r, i, true))}</>}
         </ScrollArea.Autosize>

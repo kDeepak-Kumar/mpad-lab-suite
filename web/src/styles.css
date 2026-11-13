@@ -183,10 +183,11 @@ body.dragging-rows, body.dragging-rows * { cursor: grabbing !important; user-sel
 .set-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 9px; color: var(--ink-2); font-size: 13.5px; font-weight: 520; position: relative; }
 .set-item:hover { background: var(--hover); }
 .set-item.active { background: var(--sel); color: var(--ink); font-weight: 650; }
-.set-item.active::before { content: ''; position: absolute; left: -6px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--brand); }
-.set-ic { width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 12%, #fff); }
+.set-item.active::before { content: ''; position: absolute; left: -6px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.set-ic { width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--ink-2); background: var(--sunken); border: 1px solid var(--line); }
 .set-ic.big { width: 40px; height: 40px; border-radius: 11px; }
-.set-item.active .set-ic { background: var(--c); color: #fff; }
+.set-item.active .set-ic { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; }
+.set-ic.big { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; }
 .set-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-body { min-height: 60vh; }
 .set-savebar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 50; display: flex; align-items: center; gap: 24px; background: var(--ink); color: #fff; padding: 10px 12px 10px 18px; border-radius: 14px; box-shadow: 0 12px 32px rgba(28,25,23,.25); }
