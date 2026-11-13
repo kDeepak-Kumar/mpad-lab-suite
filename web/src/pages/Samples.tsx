@@ -1,16 +1,17 @@
 import { ExtraValuesInput } from '../components/ExtraFields';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Group, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Divider } from '@mantine/core';
-import { IconPlus, IconTruckDelivery } from '@tabler/icons-react';
+import { ActionIcon, Alert, Button, Group, Menu, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Tooltip } from '@mantine/core';
+import { IconArchive, IconCheck, IconDots, IconFileAnalytics, IconPencil, IconPlus, IconPrinter, IconTruckDelivery } from '@tabler/icons-react';
 import { JOB_STATUS } from './Outsourcing';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useCan, useFields, useMe, isAdmin } from '../ctx';
-import { PageHeader, StatusBadge, TypeBadge } from '../components/ui';
+import { PageHeader, Pill, SkeletonRows, StatusBadge, TypeBadge } from '../components/ui';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
 import { RecordForm, missingRequired } from '../components/RecordForm';
 import { WhatsAppButton, WhatsAppModal } from '../components/WhatsApp';
 import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
+import { Facts, FormSection, QuickView, Sheet } from '../components/Sheet';
 
 export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?: number; client_id?: number; site_id?: number | null; customer_ref?: string; quoteCatalogIds?: number[]; accreditation?: string }; onClose: (saved: boolean) => void }) {
   const me = useMe();
@@ -31,7 +32,8 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
   const chosen = testable.filter((c) => tests.includes(String(c.id)));
   const outOfScope = v.accreditation === 'NABL' ? chosen.filter((c) => !c.nabl) : [];
   const missing = missingRequired(fields as never, v);
-  const save = async () => {
+  const [savedAny, setSavedAny] = useState(false);
+  const save = async (another: boolean) => {
     setBusy(true);
     try {
       const { quoteCatalogIds, ...rest } = v;
@@ -39,30 +41,54 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
         ...rest, client_id: Number(v.client_id), site_id: v.site_id ? Number(v.site_id) : null, work_order_id: v.work_order_id ? Number(v.work_order_id) : null,
         tests: tests.map((id) => ({ catalog_id: Number(id), assigned_to: tech ? Number(tech) : null })),
       } });
-      ok(`Sample ${r.code} registered${r.ulr ? ` · ULR ${r.ulr}` : ''}`); onClose(true);
+      ok(`Sample ${r.code} registered${r.ulr ? ` · ULR ${r.ulr}` : ''}`);
+      if (!another) { onClose(true); return; }
+      // next sample from the same delivery: keep the client, site, work order, report type and receipt details
+      setSavedAny(true); setTests([]); setV({ ...v, description: '', sample_label: '', quantity: '', extra: {} });
     } finally { setBusy(false); }
   };
+  const S_SAMPLE = ['material', 'description', 'specification', 'sample_label', 'quantity', 'packing', 'condition'];
+  const S_RECEIPT = ['received_date', 'received_time', 'source', 'customer_ref', 'customer_ref_date', 'test_location'];
+  const needs = (keys: string[] | null) => (fields as any[]).some((f) => missing.includes(f.label) && (keys ? keys.includes(f.key) : ![...S_SAMPLE, ...S_RECEIPT, 'accreditation'].includes(f.key)));
+  const blockers = [!v.client_id && 'Client', !tests.length && 'Tests', ...missing].filter(Boolean) as string[];
+  const blocked = blockers.length > 0 || (outOfScope.length > 0 && !isAdmin(me));
   return (
-    <Modal opened onClose={() => onClose(false)} title="Register sample (inward)" size="xl">
-      <Stack>
-        <SegmentedControl fullWidth value={v.accreditation} onChange={(x) => setV({ ...v, accreditation: x })} data={[{ value: 'NABL', label: 'NABL report (ULR, NABL letterhead)' }, { value: 'Non-NABL', label: 'Non-NABL report' }]} />
-        <SimpleGrid cols={{ base: 1, sm: 3 }}>
-          <Select label="Client" required searchable data={(clients ?? []).map((c) => ({ value: String(c.id), label: c.name }))} value={v.client_id ? String(v.client_id) : null} onChange={(x) => setV({ ...v, client_id: x, site_id: null, work_order_id: null })} disabled={!!preset?.work_order_id} />
-          <Select label="Site" clearable data={(client?.sites ?? []).map((s: any) => ({ value: String(s.id), label: s.name }))} value={v.site_id ? String(v.site_id) : null} onChange={(x) => setV({ ...v, site_id: x })} />
-          <Select label="Work order" clearable data={(wos ?? []).filter((w) => String(w.client_id) === String(v.client_id)).map((w) => ({ value: String(w.id), label: `${w.number}${w.site_name ? ' · ' + w.site_name : ''}` }))} value={v.work_order_id ? String(v.work_order_id) : null} onChange={(x) => setV({ ...v, work_order_id: x })} disabled={!!preset?.work_order_id} />
-        </SimpleGrid>
-        <Divider label="Sample details" labelPosition="left" />
-        <RecordForm object="sample" value={v} onChange={setV} cols={3} exclude={['accreditation']} />
-        <ExtraValuesInput clientId={v.client_id} value={v.extra ?? {}} onChange={(x) => setV({ ...v, extra: x })} />
-        <NumberInput mt="sm" w={260} label="Retain sample for (days)" description="Blank = default for this material (Settings → Defaults)" min={0} max={3650} value={v.retention_days ?? ''} onChange={(x) => setV({ ...v, retention_days: x === '' ? null : Number(x) })} />
-        <Divider label="Tests" labelPosition="left" />
-        <MultiSelect label="Tests to perform" required searchable data={testable.filter((c) => !v.material || c.material === v.material || tests.includes(String(c.id))).map((c) => ({ value: String(c.id), label: `${c.report_name || c.billing_name} (${c.method || c.code})${c.nabl ? '' : ' · Non-NABL'}` }))} value={tests} onChange={setTests} />
-        {outOfScope.length > 0 && <Alert color={isAdmin(me) ? 'orange' : 'red'} variant="light">Not in NABL scope: {outOfScope.map((c) => c.report_name || c.billing_name).join(', ')}. {isAdmin(me) ? 'As System Admin you may still register them.' : 'Register those as a separate Non-NABL sample.'}</Alert>}
-        <Select label="Assign to technician" clearable data={(users ?? []).filter((u) => ['technician', 'reviewer', 'owner', 'admin', 'signatory'].includes(u.role)).map((u) => ({ value: String(u.id), label: u.name }))} value={tech} onChange={setTech} />
-        <Text size="xs" c="dimmed">The job code{v.accreditation === 'NABL' ? ' and ULR' : ''} are generated on save. Due dates follow each test’s turnaround in the rate card.</Text>
-        <Group justify="flex-end"><Button loading={busy} disabled={!v.client_id || !tests.length || missing.length > 0 || (outOfScope.length > 0 && !isAdmin(me))} onClick={save}>Register sample</Button></Group>
-      </Stack>
-    </Modal>
+    <Sheet title="Register sample" subtitle={<>The job code{v.accreditation === 'NABL' ? ' and ULR are' : ' is'} assigned when you save.</>} onClose={() => onClose(savedAny)}
+      footer={<>
+        <span className="grow">{blockers.length ? `Still needed: ${blockers.slice(0, 4).join(', ')}${blockers.length > 4 ? '…' : ''}` : 'Due dates follow each test’s turnaround in the rate card.'}</span>
+        <Button variant="subtle" color="gray" onClick={() => onClose(savedAny)}>Cancel</Button>
+        {!preset?.work_order_id && <Button variant="default" loading={busy} disabled={blocked} onClick={() => save(true)}>Save & add another</Button>}
+        <Button loading={busy} disabled={blocked} onClick={() => save(false)}>Register sample</Button>
+      </>}>
+      <FormSection n={1} title="Client & site" hint="From the client master">
+        <Stack gap="sm">
+          <SegmentedControl value={v.accreditation} onChange={(x) => setV({ ...v, accreditation: x })} data={[{ value: 'NABL', label: 'NABL report' }, { value: 'Non-NABL', label: 'Non-NABL report' }]} style={{ alignSelf: 'flex-start' }} aria-label="Report type" />
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+            <Select label="Client" required searchable data={(clients ?? []).map((c) => ({ value: String(c.id), label: c.name }))} value={v.client_id ? String(v.client_id) : null} onChange={(x) => setV({ ...v, client_id: x, site_id: null, work_order_id: null })} disabled={!!preset?.work_order_id} />
+            <Select label="Site / project" clearable placeholder={v.client_id ? 'Optional' : 'Choose a client first'} disabled={!v.client_id} data={(client?.sites ?? []).map((s: any) => ({ value: String(s.id), label: s.name }))} value={v.site_id ? String(v.site_id) : null} onChange={(x) => setV({ ...v, site_id: x })} />
+            <Select label="Work order" clearable placeholder="Optional" data={(wos ?? []).filter((w) => String(w.client_id) === String(v.client_id)).map((w) => ({ value: String(w.id), label: `${w.number}${w.site_name ? ' · ' + w.site_name : ''}` }))} value={v.work_order_id ? String(v.work_order_id) : null} onChange={(x) => setV({ ...v, work_order_id: x })} disabled={!!preset?.work_order_id || !v.client_id} />
+          </SimpleGrid>
+        </Stack>
+      </FormSection>
+      <FormSection n={2} title="Sample & tests" hint="What came in and what to test">
+        <Stack gap="sm">
+          <RecordForm object="sample" value={v} onChange={setV} cols={2} only={S_SAMPLE} />
+          <MultiSelect label="Tests to perform" required searchable placeholder={tests.length ? undefined : 'Pick from the rate card'} data={testable.filter((c) => !v.material || c.material === v.material || tests.includes(String(c.id))).map((c) => ({ value: String(c.id), label: `${c.report_name || c.billing_name} (${c.method || c.code})${c.nabl ? '' : ' · Non-NABL'}` }))} value={tests} onChange={setTests} />
+          {outOfScope.length > 0 && <Alert color={isAdmin(me) ? 'orange' : 'red'} variant="light">Not in NABL scope: {outOfScope.map((c) => c.report_name || c.billing_name).join(', ')}. {isAdmin(me) ? 'As System Admin you may still register them.' : 'Register those as a separate Non-NABL sample.'}</Alert>}
+          <Select label="Assign to technician" clearable placeholder="Optional" data={(users ?? []).filter((u) => ['technician', 'reviewer', 'owner', 'admin', 'signatory'].includes(u.role)).map((u) => ({ value: String(u.id), label: u.name }))} value={tech} onChange={setTech} />
+        </Stack>
+      </FormSection>
+      <FormSection n={3} title="Receipt" hint="Date, time, source and customer reference" collapsible defaultOpen={needs(S_RECEIPT)}>
+        <RecordForm object="sample" value={v} onChange={setV} cols={2} only={S_RECEIPT} />
+      </FormSection>
+      <FormSection n={4} title="More details" hint="Other fields, client-specific information, retention" collapsible defaultOpen={needs(null)}>
+        <Stack gap="sm">
+          <RecordForm object="sample" value={v} onChange={setV} cols={2} exclude={['accreditation', ...S_SAMPLE, ...S_RECEIPT]} />
+          <ExtraValuesInput clientId={v.client_id} value={v.extra ?? {}} onChange={(x) => setV({ ...v, extra: x })} />
+          <NumberInput w={260} label="Retain sample for (days)" description="Blank = default for this material (Settings → Defaults)" min={0} max={3650} value={v.retention_days ?? ''} onChange={(x) => setV({ ...v, retention_days: x === '' ? null : Number(x) })} />
+        </Stack>
+      </FormSection>
+    </Sheet>
   );
 }
 
@@ -77,60 +103,75 @@ export function SamplesPage() {
   const [edit, setEdit] = useState<any>(null);
   const [waSample, setWaSample] = useState<any>(null);
   const [dispose, setDispose] = useState<any>(null);
+  const done = (s: any) => s.tests.filter((t: any) => ['accepted', 'reported'].includes(t.status)).length;
   const cols: Col[] = [
-    { key: 'code', label: 'Job code', render: (s) => <Text size="sm" fw={550}>{s.code}</Text> },
+    { key: 'code', label: 'Job code', render: (s) => <span className="tnum" style={{ whiteSpace: 'nowrap' }}>{s.code}</span> },
     { key: 'accreditation', label: 'Type', type: 'badge' },
-    { key: 'ulr', label: 'ULR', render: (s) => <Text size="xs">{s.ulr}</Text> },
-    { key: 'received_date', label: 'Received', type: 'date' },
-    { key: 'client_name', label: 'Client', filter: 'select' },
-    { key: 'site_name', label: 'Site', filter: 'select' },
+    { key: 'client_name', label: 'Client · site', filter: 'select', render: (s) => <div className="lv-two" title={`${s.client_name}${s.site_name ? ' · ' + s.site_name : ''}`}><div>{s.client_name}</div>{s.site_name && <small>{s.site_name}</small>}</div> },
     { key: 'material', label: 'Material', filter: 'select' },
-    { key: 'tests', label: 'Tests', value: (s) => s.tests.map((t: any) => t.report_name || t.billing_name).join(', '),
-      render: (s) => <Group gap={4}>{s.tests.map((t: any, i: number) => <Badge key={i} size="xs" variant="light" color={t.status === 'reported' ? 'teal' : t.status === 'accepted' ? 'green' : 'gray'} style={{ textTransform: 'none' }}>{t.report_name || t.billing_name}</Badge>)}</Group> },
+    { key: 'tests', label: 'Tests done', value: (s) => s.tests.map((t: any) => t.report_name || t.billing_name).join(', '),
+      render: (s) => (s.tests.length ? <Tooltip multiline maw={320} label={s.tests.map((t: any) => `${['accepted', 'reported'].includes(t.status) ? '✓' : '·'} ${t.report_name || t.billing_name}`).join('\n')} styles={{ tooltip: { whiteSpace: 'pre-line' } }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}><span className="bar" style={{ width: 64 }}><span className={done(s) === s.tests.length ? 'ok' : ''} style={{ width: `${(100 * done(s)) / s.tests.length}%` }} /></span><span className="tnum" style={{ fontSize: 12, color: 'var(--muted)' }}>{done(s)} / {s.tests.length}</span></span></Tooltip> : '') },
     { key: 'status', label: 'Status', type: 'status' },
-    { key: 'disposal', label: 'Disposal', filter: 'select', value: (s) => (s.disposed_at ? 'Disposed' : s.dispose_after && s.dispose_after <= localToday() ? 'Due' : 'Retained'),
-      render: (s) => (s.disposed_at ? <Badge size="sm" variant="light" color="gray">Disposed {dmy(s.disposed_at)}</Badge> : s.dispose_after ? <Badge size="sm" variant="light" color={s.dispose_after <= localToday() ? 'orange' : 'teal'}>{s.dispose_after <= localToday() ? 'Due' : 'Keep till'} {dmy(s.dispose_after)}</Badge> : '') },
+    { key: 'received_date', label: 'Received', type: 'date' },
+    { key: 'site_name', label: 'Site', filter: 'select', hidden: true },
+    { key: 'ulr', label: 'ULR', hidden: true },
+    { key: 'disposal', label: 'Disposal', filter: 'select', hidden: true, value: (s) => (s.disposed_at ? 'Disposed' : s.dispose_after && s.dispose_after <= localToday() ? 'Due' : 'Retained'),
+      render: (s) => (s.disposed_at ? <Pill tone="neu">Disposed {dmy(s.disposed_at)}</Pill> : s.dispose_after ? <Pill tone={s.dispose_after <= localToday() ? 'warn' : 'neu'}>{s.dispose_after <= localToday() ? 'Due' : 'Keep till'} {dmy(s.dispose_after)}</Pill> : '') },
     { key: 'quantity', label: 'Quantity', hidden: true }, { key: 'condition', label: 'Condition', hidden: true }, { key: 'customer_ref', label: 'Customer ref', hidden: true },
     ...custom,
   ];
+  const close = () => { setEdit(null); setSp({}); };
+  const ready = sample?.tests?.some((t: any) => t.status === 'accepted');
+  const saveEdit = async () => { const { accreditation, material, received_date, received_time, quantity, packing, condition, source, customer_ref, customer_ref_date, test_location, sample_label, specification, description, custom: cu, extra } = edit; await api(`/samples/${sample.id}`, { method: 'PUT', body: { accreditation, material, received_date, received_time, quantity, packing, condition, source, customer_ref, customer_ref_date, test_location, sample_label, specification, description, custom: cu, extra } }); ok('Sample updated'); setEdit(null); reloadSample(); reload(); };
+  const panel = !openId ? undefined : !sample || String(sample.id) !== openId ? <QuickView title={<div className="skel" style={{ height: 22, width: 160 }} />} onClose={close}><SkeletonRows rows={5} /></QuickView> : (
+    <QuickView onClose={close} badges={<><StatusBadge status={sample.status} /><TypeBadge value={sample.accreditation} /></>} title={<span className="tnum">{sample.code}</span>}
+      subtitle={[sample.material, sample.description].filter(Boolean).join(' · ')}
+      tools={<Menu position="bottom-end" width={230}>
+        <Menu.Target><Tooltip label="More actions"><ActionIcon variant="subtle" color="gray" size={32} radius={9} aria-label="More actions"><IconDots size={16} /></ActionIcon></Tooltip></Menu.Target>
+        <Menu.Dropdown>
+          {can('sample.edit') && !edit && <Menu.Item leftSection={<IconPencil size={15} />} onClick={() => setEdit({ ...sample })}>Edit details</Menu.Item>}
+          <Menu.Item leftSection={<IconPrinter size={15} />} onClick={() => printLabel(sample)}>Print sample label</Menu.Item>
+          {can('sample.edit') && (sample.disposed_at
+            ? <Menu.Item leftSection={<IconArchive size={15} />} onClick={async () => { await api(`/samples/${sample.id}/disposal`, { method: 'DELETE' }); reloadSample(); reload(); }}>Undo disposal</Menu.Item>
+            : <Menu.Item leftSection={<IconArchive size={15} />} onClick={() => setDispose({ date: localToday(), method: 'Discarded as per lab procedure', note: '' })}>Record disposal</Menu.Item>)}
+        </Menu.Dropdown>
+      </Menu>}
+      footer={edit ? <><Button variant="subtle" color="gray" onClick={() => setEdit(null)} style={{ marginLeft: 'auto' }}>Cancel</Button><Button onClick={saveEdit}>Save</Button></> : <>
+        <AdminDelete object="sample" id={sample.id} compact onDeleted={() => { close(); reload(); }} />
+        <WhatsAppButton label="Acknowledge" variant="default" onClick={() => setWaSample(sample)} />
+        {ready && can('prepareReports') ? <Button color="accent" style={{ marginLeft: 'auto' }} leftSection={<IconFileAnalytics size={16} />} onClick={() => nav('/reports/prepare')}>Prepare report</Button>
+          : can('sample.edit') ? <Button variant="default" style={{ marginLeft: 'auto' }} leftSection={<IconPencil size={15} />} onClick={() => setEdit({ ...sample })}>Edit details</Button> : null}
+      </>}>
+      {edit ? <>
+        <RecordForm object="sample" value={edit} onChange={setEdit} cols={2} />
+        <ExtraValuesInput fields={sample.extraFields} value={edit.extra ?? {}} onChange={(x) => setEdit({ ...edit, extra: x })} />
+      </> : <>
+        <Facts items={[['Client', sample.client?.id ? <a className="lnk" onClick={() => nav(`/clients/${sample.client.id}`)}>{sample.client.name}</a> : sample.client?.name], ['Site', sample.site?.name ?? sample.site_name], ['ULR', sample.ulr && <span className="tnum">{sample.ulr}</span>],
+          ['Received', [dmy(sample.received_date), sample.received_time].filter(Boolean).join(', ')], ['Quantity', sample.quantity], ['Packing', sample.packing], ['Condition', sample.condition], ['Source', sample.source],
+          ['Customer ref', [sample.customer_ref, sample.customer_ref_date && `dated ${dmy(sample.customer_ref_date)}`].filter(Boolean).join(', ')], ['Specification', sample.specification],
+          ...(sample.extraFields ?? []).map((f: any) => [f.label, sample.extra?.[f.key]] as [string, any]),
+          ['Retention', sample.disposed_at ? `Disposed ${dmy(sample.disposed_at)} – ${sample.disposal_method}${sample.disposal_note ? ` (${sample.disposal_note})` : ''}` : sample.dispose_after ? `${sample.retention_days} days · keep till ${dmy(sample.dispose_after)}` : null]]} />
+        <div>
+          <div className="qv-sec"><b>Tests</b><span>{done(sample)} of {sample.tests.length} accepted</span></div>
+          {sample.tests.map((t: any) => { const ok2 = ['accepted', 'reported'].includes(t.status); return (
+            <a key={t.id} className="qv-row" onClick={() => nav(`/tests/${t.id}`)} role="link" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && nav(`/tests/${t.id}`)}>
+              <span className={`qv-tick${ok2 ? ' on' : ''}`}>{ok2 && <IconCheck size={12} stroke={2.6} />}</span>
+              <span style={{ flex: 1, minWidth: 0 }}><span className="qv-row-t">{t.report_name || t.billing_name}</span><small>{[t.assignee, t.due_date && `due ${dmy(t.due_date)}`].filter(Boolean).join(' · ')}</small></span>
+              <StatusBadge status={t.status} />
+            </a>); })}
+        </div>
+        <SampleOutsourcing sample={sample} />
+        <RecordInfo object="sample" id={sample.id} />
+      </>}
+    </QuickView>
+  );
   return (
     <>
-      <PageHeader title="Sample register" subtitle="Every sample received, its job code, ULR and test status" actions={can('sample.create') && <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>Register sample</Button>} />
-      <ListView id="samples" rows={data} columns={cols} onRow={(s) => setSp({ open: String(s.id) })}
-        quickFilters={[{ label: 'NABL', filters: [{ key: 'accreditation', op: 'in', value: ['NABL'] }] }, { label: 'Non-NABL', filters: [{ key: 'accreditation', op: 'in', value: ['Non-NABL'] }] }, { label: 'In testing', filters: [{ key: 'status', op: 'in', value: ['registered', 'in_test'] }] }]} />
+      <PageHeader title="Samples" subtitle="Every sample received, its tests and where it stands" actions={can('sample.create') && <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>Register sample</Button>} />
+      <ListView id="samples" rows={data} columns={cols} onRow={(s) => { setEdit(null); setSp({ open: String(s.id) }); }} panel={panel} activeId={openId} onClosePanel={close}
+        quickFilters={[{ label: 'In testing', filters: [{ key: 'status', op: 'in', value: ['registered', 'in_test'] }] }, { label: 'NABL', filters: [{ key: 'accreditation', op: 'in', value: ['NABL'] }] }, { label: 'Non-NABL', filters: [{ key: 'accreditation', op: 'in', value: ['Non-NABL'] }] }]} />
       {sp.get('new') === '1' && <NewSampleModal preset={sp.get('client') ? { client_id: Number(sp.get('client')) } : undefined} onClose={(saved) => { setSp({}); if (saved) reload(); }} />}
-      <Modal opened={!!openId} onClose={() => setSp({})} title={sample ? <Group gap="xs">Sample {sample.code}<TypeBadge value={sample.accreditation} /><StatusBadge status={sample.status} /></Group> : 'Sample'} size="xl">
-        {sample && (
-          <Stack>
-            {edit ? (
-              <Paper withBorder p="md">
-                <RecordForm object="sample" value={edit} onChange={setEdit} cols={3} />
-                <div style={{ marginTop: 10 }}><ExtraValuesInput fields={sample.extraFields} value={edit.extra ?? {}} onChange={(x) => setEdit({ ...edit, extra: x })} /></div>
-                <Group justify="flex-end" mt="sm"><Button variant="default" onClick={() => setEdit(null)}>Cancel</Button>
-                  <Button onClick={async () => { const { accreditation, material, received_date, received_time, quantity, packing, condition, source, customer_ref, customer_ref_date, test_location, sample_label, specification, description, custom: cu, extra } = edit; await api(`/samples/${sample.id}`, { method: 'PUT', body: { accreditation, material, received_date, received_time, quantity, packing, condition, source, customer_ref, customer_ref_date, test_location, sample_label, specification, description, custom: cu, extra } }); ok('Sample updated'); setEdit(null); reloadSample(); reload(); }}>Save</Button></Group>
-              </Paper>
-            ) : (
-              <Paper withBorder p="sm">
-                <SimpleGrid cols={2} spacing={4}>
-                  {[['Client', sample.client?.name], ['ULR', sample.ulr || '—'], ['Received', dmy(sample.received_date)], ['Retention', sample.disposed_at ? `Disposed ${dmy(sample.disposed_at)} – ${sample.disposal_method}${sample.disposal_note ? ` (${sample.disposal_note})` : ''}` : sample.dispose_after ? `${sample.retention_days} days · keep till ${dmy(sample.dispose_after)}` : '—'], ['Material', sample.material], ['Quantity', sample.quantity], ['Condition', sample.condition], ['Source', sample.source], ['Customer ref', sample.customer_ref], ['Description', sample.description], ...(sample.extraFields ?? []).map((f: any) => [f.label, sample.extra?.[f.key]])].map(([k, val]) => <Text key={k} size="sm"><Text span c="dimmed">{k}: </Text>{val}</Text>)}
-                </SimpleGrid>
-              </Paper>
-            )}
-            <SampleOutsourcing sample={sample} />
-            <ListView id="sample-tests" rows={sample.tests} onRow={(t) => nav(`/tests/${t.id}`)} columns={[{ key: 'test', label: 'Test', value: (t) => t.report_name || t.billing_name }, { key: 'assignee', label: 'Assigned' }, { key: 'due_date', label: 'Due', type: 'date' }, { key: 'status', label: 'Status', type: 'status' }]} />
-            <Group justify="flex-end">
-              {can('sample.edit') && !edit && <Button variant="default" onClick={() => setEdit({ ...sample })}>Edit details</Button>}
-              <Button variant="default" onClick={() => printLabel(sample)}>Print sample label</Button>
-              {can('sample.edit') && (sample.disposed_at
-                ? <Button variant="subtle" color="gray" onClick={async () => { await api(`/samples/${sample.id}/disposal`, { method: 'DELETE' }); reloadSample(); reload(); }}>Undo disposal</Button>
-                : <Button variant="default" onClick={() => setDispose({ date: localToday(), method: 'Discarded as per lab procedure', note: '' })}>Record disposal</Button>)}
-              <WhatsAppButton label="Acknowledge on WhatsApp" variant="light" onClick={() => setWaSample(sample)} />
-              <AdminDelete object="sample" id={sample.id} compact onDeleted={() => { setSp({}); reload(); }} />
-            </Group>
-            <RecordInfo object="sample" id={sample.id} />
-          </Stack>
-        )}
-      </Modal>
       <Modal opened={Boolean(dispose)} onClose={() => setDispose(null)} title={`Record disposal · ${sample?.code ?? ''}`}>
         {dispose && <Stack>
           <TextInput type="date" label="Date" value={dispose.date} onChange={(e) => setDispose({ ...dispose, date: e.currentTarget.value })} />

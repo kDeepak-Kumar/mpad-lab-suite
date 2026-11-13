@@ -33,10 +33,13 @@ export function FieldInput({ f, value, onChange, disabled, error }: { f: FieldDe
  * Metadata-driven form: standard + custom fields, in the admin's layout order,
  * respecting field-level security. Custom values live under `value.custom`.
  */
-export function RecordForm({ object, value, onChange, cols = 2, exclude = [], disabled, errors }: {
+export function RecordForm({ object, value, onChange, cols = 2, exclude = [], only, disabled, errors }: {
   object: string; value: Record<string, any>; onChange: (v: Record<string, any>) => void; cols?: number; exclude?: string[]; disabled?: boolean; errors?: Record<string, string>;
+  /** Show just these fields (a step of a longer form); `exclude` lists the ones shown elsewhere. */
+  only?: string[];
 }) {
-  const fields = useFields(object).filter((f) => !exclude.includes(f.key)) as F[];
+  const fields = useFields(object).filter((f) => !exclude.includes(f.key) && (!only || only.includes(f.key))) as F[];
+  if (!fields.length) return null;
   const get = (f: F) => (f.custom ? value.custom?.[f.key] : value[f.key]);
   const set = (f: F, v: unknown) => onChange(f.custom ? { ...value, custom: { ...(value.custom ?? {}), [f.key]: v } } : { ...value, [f.key]: v });
   const wide = (f: F) => f.type === 'textarea';

@@ -1,12 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from 'react';
 import { Navigate, NavLink as RLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { ActionIcon, AppShell, Avatar, Burger, Button, Center, Group, Indicator, Loader, Menu, NavLink, ScrollArea, Text, Badge, Tooltip, Kbd, UnstyledButton } from '@mantine/core';
+import { ActionIcon, AppShell, Button, Center, Group, Indicator, Loader, Menu, ScrollArea, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { Spotlight, spotlight, type SpotlightActionData } from '@mantine/spotlight';
 import {
   IconSmartHome, IconChartDonut3, IconBuildingSkyscraper, IconFileDollar, IconClipboardCheck, IconCalendarEvent, IconTestPipe, IconFlask2, IconFileAnalytics,
   IconCertificate, IconRuler2, IconFileInvoice, IconWallet, IconBook2, IconTable, IconBuilding, IconTags, IconAdjustmentsAlt, IconRecycle, IconChartBar, IconBolt, IconId, IconCalendarCheck,
-  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened,
+  IconLogout, IconPlus, IconTemplate, IconUserCog, IconSearch, IconTruckDelivery, IconShoppingCart, IconFileSearch, IconLayoutSidebar, IconBell, IconSparkles, IconMenu2, IconChevronRight, IconReceiptTax, IconCheck, IconMailOpened, IconSettings, IconUsersGroup, IconDots, IconShieldLock, IconSignature, IconClockHour4,
 } from '@tabler/icons-react';
 import { api, signOut, useApi } from './api';
 import { applyBrand } from './brand';
@@ -16,8 +16,8 @@ import { MeCtx, MetaCtx, hasTab, useCan, useMe, type Me, type Meta } from './ctx
 import { Login, SetPasswordPage } from './pages/Login';
 import { VerifyPage } from './pages/Verify';
 import { Loading } from './components/ui';
-import { SideNav, type NavItem } from './components/SideNav';
-import { FavProvider } from './favorites';
+import { SideNav, matchNav, type NavItem } from './components/SideNav';
+import { FavProvider, useRecent } from './favorites';
 import { IdleGuard } from './components/IdleGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -65,37 +65,44 @@ const Required2fa = page(() => import('./pages/Account'), 'Required2fa');
 export { useMe };
 export const hasRole = (me: Me, ...roles: string[]) => Boolean(me.role?.admin || me.user.role === 'owner' || roles.includes(me.user.role));
 
+/**
+ * The left menu. Related pages share one entry and appear as tabs above the page (`sub`), so the menu stays short
+ * while every page keeps its address and its permission (`tab`).
+ */
 const NAV: NavItem[] = [
   { label: 'Home', to: '/', tab: 'home', icon: IconSmartHome },
-  { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartDonut3 },
-  { label: 'Clients', to: '/clients', tab: 'clients', icon: IconBuildingSkyscraper, section: 'Sales & CRM' },
-  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar, section: 'Sales & CRM' },
-  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardCheck, section: 'Sales & CRM' },
-  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconCalendarEvent, section: 'Sales & CRM' },
-  { label: 'Contract review', to: '/contract-review', tab: 'quotes', icon: IconFileSearch, section: 'Sales & CRM' },
-  { label: 'Sample register', to: '/samples', tab: 'samples', icon: IconTestPipe, section: 'Laboratory' },
+  { label: 'Samples', to: '/samples', tab: 'samples', icon: IconTestPipe, section: 'Laboratory' },
   { label: 'Tests & observations', to: '/tests', tab: 'tests', icon: IconFlask2, section: 'Laboratory' },
-  { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare', icon: IconFileAnalytics, section: 'Laboratory' },
-  { label: 'Quick test report', to: '/reports/quick', tab: 'tests', icon: IconBolt, section: 'Laboratory' },
+  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconCertificate, section: 'Laboratory', sub: [
+    { label: 'All reports', to: '/reports', tab: 'reports' }, { label: 'Prepare report', to: '/reports/prepare', tab: 'prepare' }, { label: 'Quick test report', to: '/reports/quick', tab: 'tests' }] },
   { label: 'Outsourced tests', to: '/outsourcing', tab: 'outsourcing', icon: IconTruckDelivery, section: 'Laboratory' },
-  { label: 'Test reports', to: '/reports', tab: 'reports', icon: IconCertificate, section: 'Laboratory' },
   { label: 'Equipment', to: '/equipment', tab: 'equipment', icon: IconRuler2, section: 'Laboratory' },
-  { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconFileInvoice, section: 'Accounts' },
-  { label: 'Invoice analytics', to: '/invoices/analytics', tab: 'invoices', icon: IconChartBar, section: 'Accounts' },
+  { label: 'Clients', to: '/clients', tab: 'clients', icon: IconBuildingSkyscraper, section: 'Sales' },
+  { label: 'Quotations', to: '/quotes', tab: 'quotes', icon: IconFileDollar, section: 'Sales', sub: [
+    { label: 'Quotations', to: '/quotes', tab: 'quotes' }, { label: 'Contract review', to: '/contract-review', tab: 'quotes' }] },
+  { label: 'Work orders', to: '/workorders', tab: 'workorders', icon: IconClipboardCheck, section: 'Sales' },
+  { label: 'Follow-ups', to: '/followups', tab: 'followups', icon: IconCalendarEvent, section: 'Sales' },
+  { label: 'Invoices', to: '/invoices', tab: 'invoices', icon: IconFileInvoice, section: 'Accounts', sub: [
+    { label: 'Invoices', to: '/invoices', tab: 'invoices' }, { label: 'Invoice analytics', to: '/invoices/analytics', tab: 'invoices' }] },
   { label: 'Payments', to: '/payments', tab: 'payments', icon: IconWallet, section: 'Accounts' },
-  { label: 'Ledgers', to: '/ledger', tab: 'ledger', icon: IconBook2, section: 'Accounts' },
   { label: 'Purchases', to: '/purchases', tab: 'purchases', icon: IconShoppingCart, section: 'Accounts' },
-  { label: 'GST returns', to: '/gst', tab: 'gst', icon: IconReceiptTax, section: 'Accounts' },
-  { label: 'Registers', to: '/registers', tab: 'registers', icon: IconTable, section: 'Accounts' },
-  { label: 'Employees', to: '/employees', tab: 'employees', icon: IconId, section: 'People' },
-  { label: 'Attendance', to: '/attendance', tab: 'employees', icon: IconCalendarCheck, section: 'People' },
-  { label: 'Company & branding', to: '/settings/company', tab: 'company', icon: IconBuilding, section: 'Administration' },
-  { label: 'Rate card', to: '/settings/catalog', tab: 'catalog', icon: IconTags, section: 'Administration' },
-  { label: 'Templates', to: '/settings/templates', tab: 'templates', icon: IconTemplate, section: 'Administration' },
-  { label: 'Users', to: '/settings/users', tab: 'users', icon: IconUserCog, section: 'Administration' },
-  { label: 'Setup', to: '/setup', tab: 'setup', icon: IconAdjustmentsAlt, section: 'Administration' },
-  { label: 'Recycle Bin', to: '/settings/recycle-bin', tab: '__admin', icon: IconRecycle, section: 'Administration' },
+  { label: 'Ledgers & GST', to: '/ledger', tab: 'ledger', icon: IconBook2, section: 'Accounts', sub: [
+    { label: 'Ledgers', to: '/ledger', tab: 'ledger' }, { label: 'GST returns', to: '/gst', tab: 'gst' }, { label: 'Registers', to: '/registers', tab: 'registers' }] },
+  { label: 'Analytics & AI', to: '/analytics', tab: 'analytics', icon: IconChartDonut3, section: 'Insights & team' },
+  { label: 'People', to: '/employees', tab: 'employees', icon: IconUsersGroup, section: 'Insights & team', sub: [
+    { label: 'Employees', to: '/employees', tab: 'employees' }, { label: 'Attendance', to: '/attendance', tab: 'employees' }] },
+  { label: 'Settings', to: '/settings/company', tab: 'company', icon: IconSettings, foot: true, sub: [
+    { label: 'Company & branding', to: '/settings/company', tab: 'company' }, { label: 'Rate card', to: '/settings/catalog', tab: 'catalog' }, { label: 'Templates', to: '/settings/templates', tab: 'templates' },
+    { label: 'Users', to: '/settings/users', tab: 'users' }, { label: 'Setup', to: '/setup', tab: 'setup' }, { label: 'Recycle Bin', to: '/settings/recycle-bin', tab: '__admin' }] },
 ];
+/** The menu a user may see: pages without access drop out, and an entry opens its first permitted page. */
+function navFor(me: Me): NavItem[] {
+  return NAV.flatMap((n) => {
+    if (!n.sub) return hasTab(me, n.tab) ? [n] : [];
+    const sub = n.sub.filter((s) => hasTab(me, s.tab));
+    return sub.length ? [{ ...n, sub, to: sub[0].to }] : [];
+  });
+}
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -122,15 +129,25 @@ function MetaLoader() {
 function Shell() {
   const me = useMe();
   const [opened, { toggle, close }] = useDisclosure();
-  const [mini, setMini] = useLocalStorage({ key: 'nav-mini', defaultValue: false });
+  const [miniPref, setMini] = useLocalStorage({ key: 'nav-mini', defaultValue: false });
+  // a docked quick view asks for room: the menu folds to icons while it is open and comes back afterwards
+  const [autoMini, setAutoMini] = useState(false);
+  useEffect(() => { const on = (e: Event) => setAutoMini(Boolean((e as CustomEvent).detail)); window.addEventListener('nav:auto-mini', on); return () => window.removeEventListener('nav:auto-mini', on); }, []);
+  const mini = miniPref || autoMini;
   const nav = useNavigate();
   const loc = useLocation();
   useEffect(close, [loc.pathname]);
   useEffect(() => { applyBrand(me.company.theme); }, [JSON.stringify(me.company.theme ?? null)]);
   const { data: dash } = useApi<any>('/dashboard');
-  const items = NAV.filter((n) => hasTab(me, n.tab));
+  const c = dash?.counts ?? {};
+  const waiting: Record<string, [number, boolean]> = { '/tests': [(c.myTests || 0) + (c.toReview || 0), (c.myTests || 0) > 0], '/reports': [(c.reportsToVerify || 0) + (c.reportsToIssue || 0), true], '/quotes': [c.quotesAwaiting || 0, false] };
+  const items = navFor(me).map((n) => (waiting[n.to]?.[0] ? { ...n, count: waiting[n.to][0], mine: waiting[n.to][1] } : n));
+  const pages = items.flatMap((n) => (n.sub ? n.sub.map((s) => ({ ...s, icon: n.icon })) : [n]));
+  const here = matchNav(items, loc.pathname);
+  const recent = useRecent().filter((r) => r.to !== loc.pathname).slice(0, 5);
   const logout = () => signOut();
   const reminders: any[] = dash?.reminders ?? [];
+  const initials = me.user.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
   // command palette: navigate, create and search records
   const [query, setQuery] = useState('');
@@ -157,58 +174,77 @@ function Shell() {
     ...(hasTab(me, 'clients') ? [{ id: 'nc', label: 'New client', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/clients?new=1') }] : []),
     ...(hasTab(me, 'invoices') ? [{ id: 'ni', label: 'New invoice', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/invoices/new') }] : []),
     ...(hasTab(me, 'payments') ? [{ id: 'np', label: 'Record payment', group: 'Create', leftSection: <IconPlus size={18} />, onClick: () => nav('/payments?new=1') }] : []),
-    ...items.map((n) => ({ id: `go${n.to}`, label: n.label, group: 'Go to', leftSection: <n.icon size={18} />, onClick: () => nav(n.to) })),
+    ...(query ? [] : recent.map((r) => ({ id: `r${r.to}`, label: r.label, description: r.sub, group: 'Recently viewed', leftSection: <IconClockHour4 size={18} />, onClick: () => nav(r.to) }))),
+    ...pages.map((n) => ({ id: `go${n.to}`, label: n.label, group: 'Go to', leftSection: <n.icon size={18} />, onClick: () => nav(n.to) })),
   ];
 
-  const width = mini ? 68 : 252;
+  const width = mini ? 64 : 248;
+  const userMenu = (
+    <Menu.Dropdown>
+      <Menu.Label>{me.user.name} · {me.role.label}</Menu.Label>
+      <Menu.Item leftSection={<IconShieldLock size={16} />} onClick={() => nav('/account')}>My account & security</Menu.Item>
+      <Menu.Item leftSection={<IconSignature size={16} />} onClick={() => nav('/settings/users?me=1')}>My profile & signature</Menu.Item>
+      <Menu.Item leftSection={<IconId size={16} />} onClick={() => nav('/employees/me')}>My employee record & attendance</Menu.Item>
+      <Menu.Divider />
+      <Menu.Item leftSection={<IconLogout size={16} />} onClick={logout}>Sign out</Menu.Item>
+    </Menu.Dropdown>
+  );
   return (
     <ChatProvider meId={me.user.id}>
-    <AppShell header={{ height: 56 }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} styles={{ main: { background: 'var(--bg)' },  header: { borderBottom: '1px solid var(--line)' } }}>
+    <AppShell layout="alt" header={{ height: 'calc(var(--topbar-h) + var(--shell-gap))' as any }} navbar={{ width, breakpoint: 'sm', collapsed: { mobile: !opened } }} padding={{ base: 'sm', sm: 'lg' }} transitionDuration={220}>
       <Assistant />
       <IdleGuard minutes={me.security?.idleMinutes ?? 10} warnAfter={me.security?.idleWarnAfter ?? 7} />
-      <AppShell.Header className="no-print">
-        <Group h="100%" px="md" justify="space-between" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap">
-            <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={() => setMini(!mini)}>{mini ? <IconLayoutSidebarLeftExpand size={20} /> : <IconLayoutSidebarLeftCollapse size={20} />}</ActionIcon>
-            <Group gap="xs" hiddenFrom="sm" wrap="nowrap">{me.company.logo && <img src={me.company.logo} alt="" style={{ height: 28 }} />}<Text fw={700} size="sm" visibleFrom="xs" lineClamp={1}>{me.company.name}</Text></Group>
-          </Group>
-          <UnstyledButton onClick={() => spotlight.open()} visibleFrom="sm" style={{ border: '1px solid #d0d5dd', borderRadius: 8, padding: '6px 10px', width: 360, background: '#f9fafb' }}>
-            <Group justify="space-between"><Group gap={8}><IconSearch size={16} color="#667085" /><Text size="sm" c="dimmed">Search, create or ask AI…</Text></Group><Kbd size="xs">Ctrl K</Kbd></Group>
-          </UnstyledButton>
-          <Group gap="sm" wrap="nowrap">
-            <ActionIcon variant="subtle" color="gray" hiddenFrom="sm" onClick={() => spotlight.open()}><IconSearch size={20} /></ActionIcon>
+      <div className="shell-frame no-print" aria-hidden="true"><i /></div>
+      <AppShell.Header className="no-print shell-header" withBorder={false}>
+        <div className="topbar">
+          <Tooltip label={mini ? 'Expand the menu' : 'Collapse the menu'}><UnstyledButton className="iconbtn" visibleFrom="sm" aria-label="Toggle the menu" onClick={() => { setAutoMini(false); setMini(!mini); }}><IconLayoutSidebar size={18} stroke={1.75} /></UnstyledButton></Tooltip>
+          <Group gap={8} hiddenFrom="sm" wrap="nowrap" style={{ minWidth: 0 }}>{me.company.logo ? <img src={me.company.logo} alt="" style={{ height: 28, borderRadius: 7 }} /> : <span className="sn-logo" style={{ width: 28, height: 28 }}>{me.company.name.slice(0, 2).toUpperCase()}</span>}</Group>
+          <nav className="crumbs" aria-label="Breadcrumb">
+            {here ? <>
+              {here.item.section && <span className="hide-mobile">{here.item.section}</span>}
+              {here.item.section && <IconChevronRight size={13} className="hide-mobile" />}
+              {here.sub && here.item.sub!.length > 1 && here.sub.label !== here.item.label ? <><RLink to={here.item.to} className="hide-mobile">{here.item.label}</RLink><IconChevronRight size={13} className="hide-mobile" /><b>{here.sub.label}</b></> : <b>{here.item.label}</b>}
+            </> : <b>{loc.pathname.startsWith('/account') ? 'My account' : loc.pathname.startsWith('/documents') ? 'Document' : ''}</b>}
+          </nav>
+          <div className="tb-right">
+            {<Tooltip label="Ask the assistant (Ctrl+J)"><UnstyledButton className="ai-pill" onClick={() => window.dispatchEvent(new Event('assistant:toggle'))} aria-label="Ask AI"><IconSparkles size={15} /><span>Ask AI</span><kbd className="hide-mobile">Ctrl J</kbd></UnstyledButton></Tooltip>}
+            <Tooltip label="Search (Ctrl+K)"><UnstyledButton className="iconbtn" hiddenFrom="sm" aria-label="Search" onClick={() => spotlight.open()}><IconSearch size={18} stroke={1.75} /></UnstyledButton></Tooltip>
             <QuickCreate />
             <ChatButton />
             <NotificationBell reminders={reminders} />
-            <Menu position="bottom-end" shadow="lg">
-              <Menu.Target><Avatar color="brand" radius="xl" style={{ cursor: 'pointer' }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar></Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Label>{me.user.name}<br /><Badge size="xs" variant="light" color={me.role.admin ? 'red' : 'brand'}>{me.role.label}</Badge></Menu.Label>
-                <Menu.Item onClick={() => nav('/account')}>My account & security</Menu.Item>
-                <Menu.Item onClick={() => nav('/settings/users?me=1')}>My profile & signature</Menu.Item>
-                <Menu.Item onClick={() => nav('/employees/me')}>My employee record & attendance</Menu.Item>
-                <Menu.Item leftSection={<IconLogout size={16} />} onClick={logout}>Sign out</Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          </Group>
-        </Group>
+            <Menu position="bottom-end" width={250}><Menu.Target><UnstyledButton className="sn-av" hiddenFrom="sm" aria-label="Account menu" style={{ marginLeft: 6 }}>{initials}</UnstyledButton></Menu.Target>{userMenu}</Menu>
+          </div>
+        </div>
       </AppShell.Header>
-      <AppShell.Navbar className="no-print sn-shell">
+      <AppShell.Navbar className="no-print sn-shell" withBorder={false}>
         <AppShell.Section className={`sn-brand${mini ? ' mini' : ''}`}>
-          {me.company.logo ? <img src={me.company.logo} alt="" /> : null}
-          {!mini && <div style={{ minWidth: 0 }}><div className="sn-brand-name">{me.company.name}</div><div className="sn-brand-sub">Lab Suite</div></div>}
+          {me.company.logo ? <img src={me.company.logo} alt="" /> : <span className="sn-logo">{me.company.name.slice(0, 2).toUpperCase()}</span>}
+          {!mini && <div style={{ minWidth: 0 }}><div className="sn-brand-name" title={me.company.name}>{me.company.name}</div><div className="sn-brand-sub">Lab Suite</div></div>}
         </AppShell.Section>
-        <AppShell.Section grow component={ScrollArea} px={8} pt={0}><SideNav items={items} mini={mini} all={NAV} /></AppShell.Section>
-        <AppShell.Section className="sn-foot">
-          <UnstyledButton className={`sn-user${mini ? ' mini' : ''}`} onClick={() => nav('/account')}>
-            <Avatar radius="xl" size={30} styles={{ root: { background: 'var(--sn-acc)' }, placeholder: { background: 'transparent', color: 'var(--sn-acc-ink)', fontWeight: 700 } }}>{me.user.name.slice(0, 2).toUpperCase()}</Avatar>
-            {!mini && <div style={{ minWidth: 0, flex: 1 }}><Text size="sm" fw={600} truncate>{me.user.name}</Text><Text size="xs" className="sn-user-role" truncate>{me.role.label}</Text></div>}
-          </UnstyledButton>
-          {!mini && <Tooltip label="Collapse sidebar"><ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={() => setMini(true)}><IconLayoutSidebarLeftCollapse size={18} /></ActionIcon></Tooltip>}
+        <AppShell.Section px={mini ? 0 : 8} visibleFrom="sm">
+          {mini ? <Tooltip label="Search (Ctrl+K)" position="right"><UnstyledButton className="sn-link mini" style={{ margin: '0 auto 6px' }} aria-label="Search" onClick={() => spotlight.open()}><span className="sn-ic"><IconSearch size={18} stroke={1.75} /></span></UnstyledButton></Tooltip>
+            : <UnstyledButton className="cmdk" onClick={() => spotlight.open()}><IconSearch size={15} /><span>Search or jump to…</span><kbd>Ctrl K</kbd></UnstyledButton>}
+        </AppShell.Section>
+        <AppShell.Section grow component={ScrollArea} px={mini ? 0 : 8} pt={0} scrollbarSize={6}><SideNav items={items} mini={mini} /></AppShell.Section>
+        <AppShell.Section px={mini ? 0 : 8} pt={6}><SideNav items={items} mini={mini} part="foot" /></AppShell.Section>
+        <AppShell.Section className="sn-foot" visibleFrom="sm">
+          <Menu position="top-start" width={250}>
+            <Menu.Target>
+              <UnstyledButton className={`sn-user${mini ? ' mini' : ''}`} aria-label="Account menu">
+                <span className="sn-av">{initials}</span>
+                {!mini && <><div style={{ minWidth: 0, flex: 1 }}><Text size="sm" fw={600} truncate lh={1.3}>{me.user.name}</Text><Text size="xs" className="sn-user-role" truncate lh={1.3}>{me.role.label}</Text></div><IconDots size={16} style={{ opacity: .6, flex: 'none' }} /></>}
+              </UnstyledButton>
+            </Menu.Target>
+            {userMenu}
+          </Menu>
         </AppShell.Section>
       </AppShell.Navbar>
-      <AppShell.Main>
+      <AppShell.Main className="shell-main">
+        {here?.item.sub && here.item.sub.length > 1 && !/\/(new|\d+)$/.test(loc.pathname) && !/^\/settings\/templates\/./.test(loc.pathname) && (
+          <nav className="subnav no-print" aria-label={here.item.label}>
+            {here.item.sub.map((x) => <RLink key={x.to} to={x.to} end className={x === here.sub ? 'on' : ''}>{x.label}</RLink>)}
+          </nav>
+        )}
         <ErrorBoundary resetKey={loc.pathname + loc.search}>
         <Suspense fallback={<Loading />}>
           <Routes>
@@ -269,15 +305,15 @@ function Shell() {
 function BottomNav({ items, onMore }: { items: NavItem[]; onMore: () => void }) {
   const loc = useLocation();
   const prefer = ['/', '/samples', '/tests', '/reports', '/quotes', '/invoices', '/clients'];
-  const pick = prefer.map((to) => items.find((n) => n.to === to)).filter(Boolean).slice(0, 4) as NavItem[];
+  const pick = prefer.map((to) => items.find((n) => n.to === to || n.sub?.some((x) => x.to === to))).filter(Boolean).slice(0, 4) as NavItem[];
   const short: Record<string, string> = { '/': 'Home', '/samples': 'Samples', '/tests': 'Tests', '/reports': 'Reports', '/quotes': 'Quotes', '/invoices': 'Invoices', '/clients': 'Clients' };
   return (
     <nav className="bottom-nav no-print">
       {pick.map((n) => {
         const active = n.to === '/' ? loc.pathname === '/' : loc.pathname.startsWith(n.to);
-        return <RLink key={n.to} to={n.to} className={active ? 'active' : ''}><n.icon size={22} stroke={1.7} /><span>{short[n.to] ?? n.label}</span></RLink>;
+        return <RLink key={n.to} to={n.to} className={active ? 'active' : ''}><n.icon size={18} stroke={1.75} /><span>{short[n.to] ?? n.label}</span></RLink>;
       })}
-      <button type="button" onClick={onMore}><IconMenu2 size={22} stroke={1.7} /><span>More</span></button>
+      <button type="button" onClick={onMore}><IconMenu2 size={18} stroke={1.75} /><span>More</span></button>
     </nav>
   );
 }
@@ -312,8 +348,8 @@ function NotificationBell({ reminders }: { reminders: any[] }) {
   return (
     <Menu position="bottom-end" width={400} shadow="lg" closeOnItemClick>
       <Menu.Target>
-        <Indicator disabled={!unread.length} label={unread.length} size={16} color="red" offset={4}>
-          <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Notifications"><IconBell size={20} /></ActionIcon>
+        <Indicator disabled={!unread.length} label={unread.length > 99 ? '99+' : unread.length} size={16} color="accent" offset={6} styles={{ indicator: { fontWeight: 600, fontSize: 10 } }}>
+          <Tooltip label="Notifications"><UnstyledButton className="iconbtn" aria-label="Notifications"><IconBell size={18} stroke={1.75} /></UnstyledButton></Tooltip>
         </Indicator>
       </Menu.Target>
       <Menu.Dropdown>
@@ -347,7 +383,7 @@ function QuickCreate() {
   if (!items.length) return null;
   return (
     <Menu shadow="lg" position="bottom-end" width={210}>
-      <Menu.Target><Button size="xs" radius="xl" leftSection={<IconPlus size={14} />} visibleFrom="sm">New</Button></Menu.Target>
+      <Menu.Target><Tooltip label="Create new"><UnstyledButton className="iconbtn" aria-label="Create new"><IconPlus size={18} stroke={1.75} /></UnstyledButton></Tooltip></Menu.Target>
       <Menu.Dropdown>
         <Menu.Label>Create</Menu.Label>
         {items.map((i) => <Menu.Item key={i.to} leftSection={<i.icon size={16} />} onClick={() => nav(i.to)}>{i.label}</Menu.Item>)}

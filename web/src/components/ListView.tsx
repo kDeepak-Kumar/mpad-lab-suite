@@ -3,11 +3,11 @@ import { useLocalStorage, useMediaQuery } from '@mantine/hooks';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { FavStar } from '../favorites';
 import { moveItem, useDragReorder } from './useDragReorder';
-import { ActionIcon, Badge, Button, Group, Menu, MultiSelect, Pagination, Paper, Popover, ScrollArea, SegmentedControl, Select, SimpleGrid, Stack, Text, TextInput, Tooltip, Modal, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, Checkbox, Drawer, Group, Menu, MultiSelect, Pagination, Popover, ScrollArea, SegmentedControl, Select, SimpleGrid, Stack, Text, TextInput, Tooltip, Modal, UnstyledButton } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconCheck, IconChevronDown, IconColumns3, IconDeviceFloppy, IconDownload, IconFilter, IconGripVertical, IconLayoutKanban, IconLayoutList, IconLayoutRows, IconLock, IconPencil, IconPin, IconPinnedOff, IconPlus, IconSearch, IconSettings2, IconTable, IconTrash, IconUsersGroup, IconX } from '@tabler/icons-react';
 import { api, dmy, downloadCsv, money, ok } from '../api';
 import { useCan, useMe, useMeta } from '../ctx';
-import { StatusBadge } from './ui';
+import { Empty, StatusBadge, TypeBadge } from './ui';
 
 export type ColType = 'text' | 'money' | 'number' | 'date' | 'status' | 'badge' | 'picklist';
 export interface Col<T = any> {
@@ -31,9 +31,15 @@ const workKey = (id: string, view: string) => `lv-work:${id}:${view}`;
 const readWork = (id: string, view: string): ViewDef | null => { try { return JSON.parse(localStorage.getItem(workKey(id, view)) ?? 'null'); } catch { return null; } };
 const writeWork = (id: string, view: string, v: ViewDef | null) => { try { if (v) localStorage.setItem(workKey(id, view), JSON.stringify(v)); else localStorage.removeItem(workKey(id, view)); } catch { /* storage unavailable */ } };
 
-export function ListView<T extends Record<string, any>>({ id, rows, columns: columnsIn, onRow, loading, actions, empty, pageSize = 50, quickFilters }: {
+export function ListView<T extends Record<string, any>>({ id, rows, columns: columnsIn, onRow, loading, actions, empty, pageSize = 50, quickFilters, embedded, bulk, panel, activeId, onClosePanel }: {
   id: string; rows: T[] | null; columns: Col<T>[]; onRow?: (r: T) => void; loading?: boolean; actions?: ReactNode; empty?: ReactNode; pageSize?: number;
   quickFilters?: { label: string; filters: Filter[] }[];
+  /** A short related list inside a record page: no toolbar of its own (search appears once it has more than a handful of rows). */
+  embedded?: boolean;
+  /** Extra actions for the selected rows, shown in the bar that appears when rows are ticked. */
+  bulk?: (selected: T[], clear: () => void) => ReactNode;
+  /** Quick view of the record with `activeId`, docked beside the list (a drawer on narrow screens). */
+  panel?: ReactNode; activeId?: string | number | null; onClosePanel?: () => void;
 }) {
   const { meta, reload: reloadMeta } = useMeta();
   const me = useMe();
@@ -65,6 +71,15 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
   const [saveOpen, setSaveOpen] = useState<null | 'new' | 'rename'>(null);
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const phone = useMediaQuery('(max-width: 767px)');
+  const narrow = useMediaQuery('(max-width: 1180px)');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const rowId = (r: T, i: number) => String(r.id ?? i);
+  // While a quick view is docked the menu folds to icons, so the list keeps its room.
+  useEffect(() => {
+    if (!panel || narrow) return;
+    window.dispatchEvent(new CustomEvent('nav:auto-mini', { detail: true })); document.body.classList.add('has-qv');
+    return () => { window.dispatchEvent(new CustomEvent('nav:auto-mini', { detail: false })); document.body.classList.remove('has-qv'); };
+  }, [Boolean(panel), narrow]);
   const current = saved.find((x) => x.key === view);
   const def = current?.data as ViewDef | undefined;
   const groupCols = columns.filter((c) => ['status', 'badge', 'picklist'].includes(c.type ?? '') || c.filter === 'select').sort((a, b) => Number(b.type === 'status') - Number(a.type === 'status'));
@@ -138,7 +153,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
       case 'money': return v === null || v === undefined || v === '' ? '' : `₹${money(Number(v))}`;
       case 'date': return dmy(v as string);
       case 'status': return <StatusBadge status={v as string} />;
-      case 'badge': case 'picklist': return v ? <Badge variant="light" color={v === 'NABL' ? 'teal' : 'gray'} size="sm" style={{ textTransform: 'none' }}>{String(v)}</Badge> : '';
+      case 'badge': case 'picklist': return v ? (v === 'NABL' || v === 'Non-NABL' ? <TypeBadge value={String(v)} /> : <span className="tag t-non">{String(v)}</span>) : '';
       default: return v === null || v === undefined ? '' : String(v);
     }
   };
@@ -164,115 +179,172 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
   };
   const viewLabel = view === '__all' ? 'All records' : def?.name ?? 'All records';
   const favRef = view === '__all' || !def ? null : `${loc.pathname}?view=${encodeURIComponent(view)}`;
-  const pad = density === 'compact' ? '5px 12px' : undefined;
+
+  const sameFilters = (f: Filter[]) => JSON.stringify(filters) === JSON.stringify(f);
+  const matches = (f: Filter[]) => (rows ?? []).filter((r) => f.every((x) => { const c = columns.find((k) => k.key === x.key); if (!c) return true; const v = getVal(c, r); return x.op === 'in' ? x.value.includes(String(v ?? '')) : x.op === 'min' ? Number(v) >= Number(x.value) : x.op === 'max' ? Number(v) <= Number(x.value) : x.op === 'contains' ? String(v ?? '').toLowerCase().includes(String(x.value).toLowerCase()) : true; })).length;
+  const quickActive = quickFilters?.find((q) => sameFilters(q.filters));
+  const chips = quickActive ? [] : filters;
+  const selectable = !embedded && !phone && display === 'table';
+  const selected = filtered.filter((r, i) => picked.has(rowId(r, i)));
+  const allOnPage = pageRows.length > 0 && pageRows.every((r, i) => picked.has(rowId(r, i)));
+  const toggle = (k: string) => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const clearPicked = () => setPicked(new Set());
+  const showSearch = !embedded || (rows?.length ?? 0) > 8;
+  const from = filtered.length ? (page - 1) * pageSize + 1 : 0, to = Math.min(filtered.length, page * pageSize);
+  const align = (c: Col<T>) => c.align ?? (c.type === 'money' || c.type === 'number' ? 'right' : 'left');
+  const emptyState = rows && !filtered.length ? (rows.length
+    ? <Empty icon={<IconSearch size={20} stroke={1.6} />} title="No records match" action={<Button size="xs" variant="default" onClick={() => { setFilters([]); setSearch(''); }}>Clear search and filters</Button>}>Try a different search, or remove a filter.</Empty>
+    : <Empty title={embedded ? undefined : 'Nothing here yet'}>{empty ?? (embedded ? 'Nothing here yet.' : 'Records will appear here once they are created.')}</Empty>) : null;
+
+  const viewMenu = (
+    <Menu width={290} position="bottom-start">
+      <Menu.Target>
+        <UnstyledButton className="lv-viewpick" aria-label="List views">
+          <IconLayoutList size={15} stroke={1.75} />
+          <span className="lv-viewname">{viewLabel}</span>
+          {pinned === view && <Tooltip label="Your default view"><IconPin size={13} /></Tooltip>}
+          <IconChevronDown size={13} />
+        </UnstyledButton>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>List views</Menu.Label>
+        <Menu.Item onClick={() => setView('__all')} rightSection={view === '__all' ? <IconCheck size={14} /> : null}>All records</Menu.Item>
+        {saved.map((v) => <Menu.Item key={v.key} onClick={() => setView(v.key)} leftSection={v.owner_id === null ? <Tooltip label="Shared with everyone"><IconUsersGroup size={14} /></Tooltip> : <Tooltip label="Only you"><IconLock size={14} /></Tooltip>} rightSection={<Group gap={4}>{pinned === v.key && <IconPin size={13} />}{view === v.key && <IconCheck size={14} />}</Group>}>{(v.data as ViewDef).name}</Menu.Item>)}
+        <Menu.Divider />
+        {pinned === view ? <Menu.Item leftSection={<IconPinnedOff size={14} />} onClick={() => pin(null)}>Unpin “{viewLabel}” as my default</Menu.Item>
+          : <Menu.Item leftSection={<IconPin size={14} />} onClick={() => pin(view)}>Pin “{viewLabel}” as my default</Menu.Item>}
+        <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => setSaveOpen('new')}>New view from current filters…</Menu.Item>
+        {mineOrAdmin && <Menu.Item leftSection={<IconPencil size={14} />} onClick={() => setSaveOpen('rename')}>Rename / sharing…</Menu.Item>}
+        {mineOrAdmin && <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={async () => { if (!window.confirm(`Delete the view “${def!.name}”?`)) return; await api(`/meta/listview/${encodeURIComponent(view)}`, { method: 'DELETE' }); reloadMeta(); setView('__all'); }}>Delete view</Menu.Item>}
+      </Menu.Dropdown>
+    </Menu>
+  );
+  const filterPopover = (
+    <Popover width={340} position="bottom-end">
+      <Popover.Target><Button size="xs" variant="default" className={filters.length && !quickActive ? 'lv-on' : undefined} leftSection={<IconFilter size={14} />}>Filter{chips.length ? ` · ${chips.length}` : ''}</Button></Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap={8} mah={420} style={{ overflow: 'auto' }}>
+          {columns.filter((c) => c.key !== '_actions').map((c) => {
+            const k = filterKind(c);
+            if (k === 'select') return <MultiSelect key={c.key} size="xs" label={c.label} data={distinct(c)} value={fval(c.key, 'in') ?? []} onChange={(v) => setFilter(c.key, 'in', v)} searchable clearable comboboxProps={{ withinPortal: false }} />;
+            if (k === 'date') return <Group key={c.key} grow gap={6}><TextInput size="xs" type="date" label={`${c.label} from`} value={fval(c.key, 'from') ?? ''} onChange={(e) => setFilter(c.key, 'from', e.currentTarget.value)} /><TextInput size="xs" type="date" label="to" value={fval(c.key, 'to') ?? ''} onChange={(e) => setFilter(c.key, 'to', e.currentTarget.value)} /></Group>;
+            if (k === 'number') return <Group key={c.key} grow gap={6}><TextInput size="xs" label={`${c.label} min`} value={fval(c.key, 'min') ?? ''} onChange={(e) => setFilter(c.key, 'min', e.currentTarget.value)} /><TextInput size="xs" label="max" value={fval(c.key, 'max') ?? ''} onChange={(e) => setFilter(c.key, 'max', e.currentTarget.value)} /></Group>;
+            return <TextInput key={c.key} size="xs" label={c.label} placeholder="contains…" value={fval(c.key, 'contains') ?? ''} onChange={(e) => setFilter(c.key, 'contains', e.currentTarget.value)} />;
+          })}
+          {filters.length > 0 && <Button size="xs" variant="subtle" color="red" onClick={() => setFilters([])}>Clear all filters</Button>}
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
+  );
+
+  const table = (
+    <div className={`lv-scroll${embedded ? ' lv-embedded' : ''}`}>
+      <table className="lv-table">
+        <thead><tr>
+          {selectable && <th className="lv-check"><Checkbox size="xs" aria-label="Select all on this page" checked={allOnPage} indeterminate={!allOnPage && pageRows.some((r, i) => picked.has(rowId(r, i)))} onChange={() => setPicked((p) => { const n = new Set(p); pageRows.forEach((r, i) => (allOnPage ? n.delete(rowId(r, i)) : n.add(rowId(r, i)))); return n; })} /></th>}
+          {shown.map((c) => (
+            <th key={c.key} className={c.key !== '_actions' ? 'sortable' : undefined} style={{ width: c.width, textAlign: align(c) }} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
+              onClick={() => c.key !== '_actions' && setSort((x) => (x?.key === c.key ? (x.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 }))}>
+              {c.label}{sort?.key === c.key && (sort.dir === 1 ? <IconArrowUp size={12} style={{ verticalAlign: -2, marginLeft: 3 }} /> : <IconArrowDown size={12} style={{ verticalAlign: -2, marginLeft: 3 }} />)}
+            </th>))}
+        </tr></thead>
+        <tbody>
+          {loading && !rows && Array.from({ length: 7 }).map((_, i) => <tr key={i}>{selectable && <td className="lv-check" />}{shown.map((c) => <td key={c.key}><div className="skel" style={{ height: 12, width: `${45 + ((i * 17 + c.key.length * 7) % 45)}%`, marginLeft: align(c) === 'right' ? 'auto' : undefined }} /></td>)}</tr>)}
+          {pageRows.map((r, i) => {
+            const k = rowId(r, i), on = picked.has(k), active = activeId !== undefined && activeId !== null && String(activeId) === k;
+            return (
+              <tr key={k} className={`${onRow ? 'row-click' : ''}${on || active ? ' sel' : ''}`} onClick={onRow ? () => onRow(r) : undefined} aria-selected={on || undefined}>
+                {selectable && <td className="lv-check" onClick={(e) => e.stopPropagation()}><Checkbox size="xs" aria-label="Select row" checked={on} onChange={() => toggle(k)} /></td>}
+                {shown.map((c) => { const v = cell(c, r); const plain = typeof v === 'string' || typeof v === 'number';
+                  return <td key={c.key} className={plain ? 'lv-clip' : undefined} title={plain && String(v).length > 28 ? String(v) : undefined} style={{ textAlign: align(c), fontVariantNumeric: c.type === 'money' || c.type === 'number' || c.type === 'date' ? 'tabular-nums' : undefined, whiteSpace: ['badge', 'status', 'picklist', 'money', 'date'].includes(c.type ?? '') ? 'nowrap' : undefined }}>{v}</td>; })}
+              </tr>
+            );
+          })}
+          {emptyState && <tr className="lv-emptyrow"><td colSpan={shown.length + (selectable ? 1 : 0)}>{emptyState}</td></tr>}
+        </tbody>
+        {totalsCols.length > 0 && filtered.length > 1 && (
+          <tfoot><tr>{selectable && <td />}{shown.map((c, i) => <td key={c.key} style={{ textAlign: c.type === 'money' ? 'right' : 'left' }}>
+            {c.type === 'money' ? `₹${money(filtered.reduce((a, r) => a + Number(getVal(c, r) ?? 0), 0))}` : i === 0 ? 'Total' : ''}</td>)}</tr></tfoot>
+        )}
+      </table>
+    </div>
+  );
 
   return (
-    <Paper withBorder radius="lg" style={{ overflow: 'hidden' }} className={density === 'compact' ? 'lv-compact' : undefined}>
-      <Group px="sm" pt="sm" pb={6} gap="xs" justify="space-between" wrap="wrap">
-        <Group gap={6} wrap="nowrap">
-          <Menu shadow="lg" width={280} position="bottom-start">
-            <Menu.Target>
-              <UnstyledButton className="lv-viewpick">
-                <IconLayoutList size={16} />
-                <Text fw={650} size="sm" truncate maw={220}>{viewLabel}</Text>
-                {pinned === view && <Tooltip label="Your default view"><IconPin size={13} color="var(--mantine-color-blue-6)" /></Tooltip>}
-                {current && <Badge size="xs" variant="light" color={current.owner_id === null ? 'teal' : 'gray'}>{current.owner_id === null ? 'Shared' : 'Private'}</Badge>}
-                <IconChevronDown size={14} />
-              </UnstyledButton>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>List views</Menu.Label>
-              <Menu.Item onClick={() => setView('__all')} rightSection={view === '__all' ? <IconCheck size={14} /> : null}>All records</Menu.Item>
-              {saved.map((v) => <Menu.Item key={v.key} onClick={() => setView(v.key)} leftSection={v.owner_id === null ? <IconUsersGroup size={14} /> : <IconLock size={14} />} rightSection={<Group gap={4}>{pinned === v.key && <IconPin size={13} color="var(--mantine-color-blue-6)" />}{view === v.key && <IconCheck size={14} />}</Group>}>{(v.data as ViewDef).name}</Menu.Item>)}
-              <Menu.Divider />
-              {pinned === view ? <Menu.Item leftSection={<IconPinnedOff size={14} />} onClick={() => pin(null)}>Unpin “{viewLabel}” as my default</Menu.Item>
-                : <Menu.Item leftSection={<IconPin size={14} />} onClick={() => pin(view)}>Pin “{viewLabel}” as my default</Menu.Item>}
-              <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => setSaveOpen('new')}>New view from current filters…</Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
-          {favRef && def && <FavStar kind="listview" refKey={favRef} label={def.name} sub={document.title.split('·')[0]?.trim() || undefined} />}
-          {dirty && <Group gap={4} className="lv-dirty"><Text size="xs" c="orange.7" fw={600}>Unsaved changes</Text>
-            <Button size="compact-xs" onClick={() => (mineOrAdmin ? setChoiceOpen(true) : setSaveOpen('new'))}>Save…</Button>
-            <Button size="compact-xs" variant="subtle" color="gray" onClick={resetWork}>Reset</Button></Group>}
-        </Group>
-        <Group gap={6}>
-          <Text size="xs" c="dimmed">{filtered.length} of {rows?.length ?? 0} items{sort ? ` · sorted by ${columns.find((c) => c.key === sort.key)?.label}` : ''}</Text>
-        </Group>
-      </Group>
-      <Group px="sm" pb="sm" gap="xs" justify="space-between" style={{ borderBottom: '1px solid var(--line)' }} wrap="wrap">
-        <Group gap="xs" wrap="wrap">
-          <TextInput size="xs" w={phone ? '100%' : 230} style={phone ? { flex: '1 1 100%' } : undefined} placeholder="Search this list" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
-            rightSection={search ? <ActionIcon size="xs" variant="subtle" onClick={() => setSearch('')}><IconX size={12} /></ActionIcon> : null} />
-          {quickFilters?.map((q) => <Button key={q.label} size="compact-xs" variant={JSON.stringify(filters) === JSON.stringify(q.filters) ? 'filled' : 'light'} onClick={() => setFilters(JSON.stringify(filters) === JSON.stringify(q.filters) ? [] : q.filters)}>{q.label}</Button>)}
-          <Popover width={340} position="bottom-start" shadow="lg">
-            <Popover.Target><Button size="compact-sm" variant={filters.length ? 'light' : 'default'} leftSection={<IconFilter size={14} />}>Filters{filters.length ? ` (${filters.length})` : ''}</Button></Popover.Target>
-            <Popover.Dropdown>
-              <Stack gap={8} mah={420} style={{ overflow: 'auto' }}>
-                {columns.filter((c) => c.key !== '_actions').map((c) => {
-                  const k = filterKind(c);
-                  if (k === 'select') return <MultiSelect key={c.key} size="xs" label={c.label} data={distinct(c)} value={fval(c.key, 'in') ?? []} onChange={(v) => setFilter(c.key, 'in', v)} searchable clearable comboboxProps={{ withinPortal: false }} />;
-                  if (k === 'date') return <Group key={c.key} grow gap={6}><TextInput size="xs" type="date" label={`${c.label} from`} value={fval(c.key, 'from') ?? ''} onChange={(e) => setFilter(c.key, 'from', e.currentTarget.value)} /><TextInput size="xs" type="date" label="to" value={fval(c.key, 'to') ?? ''} onChange={(e) => setFilter(c.key, 'to', e.currentTarget.value)} /></Group>;
-                  if (k === 'number') return <Group key={c.key} grow gap={6}><TextInput size="xs" label={`${c.label} min`} value={fval(c.key, 'min') ?? ''} onChange={(e) => setFilter(c.key, 'min', e.currentTarget.value)} /><TextInput size="xs" label="max" value={fval(c.key, 'max') ?? ''} onChange={(e) => setFilter(c.key, 'max', e.currentTarget.value)} /></Group>;
-                  return <TextInput key={c.key} size="xs" label={c.label} placeholder="contains…" value={fval(c.key, 'contains') ?? ''} onChange={(e) => setFilter(c.key, 'contains', e.currentTarget.value)} />;
-                })}
-                {filters.length > 0 && <Button size="xs" variant="subtle" color="red" onClick={() => setFilters([])}>Clear all filters</Button>}
-              </Stack>
-            </Popover.Dropdown>
-          </Popover>
-          {filters.map((f) => {
+    <div className={`lv${density === 'compact' ? ' lv-compact' : ''}${embedded ? ' lv-emb' : ''}${panel && !narrow ? ' lv-split' : ''}`}>
+      <div className="lv-main">
+      {(!embedded || showSearch) && (
+        <div className="lv-bar">
+          {!embedded && viewMenu}
+          {!embedded && quickFilters && quickFilters.length > 0 && (
+            <div className="lv-seg" role="tablist" aria-label="Quick filters">
+              <button type="button" role="tab" aria-selected={!filters.length} className={!filters.length ? 'on' : ''} onClick={() => setFilters([])}>All{rows ? <span className="n">{rows.length}</span> : null}</button>
+              {quickFilters.map((q) => <button key={q.label} type="button" role="tab" aria-selected={sameFilters(q.filters)} className={sameFilters(q.filters) ? 'on' : ''} onClick={() => { setFilters(sameFilters(q.filters) ? [] : q.filters); setPage(1); }}>{q.label}{rows ? <span className="n">{matches(q.filters)}</span> : null}</button>)}
+            </div>
+          )}
+          {!embedded && favRef && def && <FavStar kind="listview" refKey={favRef} label={def.name} sub={document.title.split('·')[0]?.trim() || undefined} />}
+          <div className="lv-tools">
+            {showSearch && <TextInput size="xs" className="lv-search" placeholder={embedded ? 'Search' : 'Search this list'} aria-label="Search this list" leftSection={<IconSearch size={14} />} value={search} onChange={(e) => { setSearch(e.currentTarget.value); setPage(1); }}
+              rightSection={search ? <ActionIcon size="xs" variant="subtle" color="gray" aria-label="Clear search" onClick={() => setSearch('')}><IconX size={12} /></ActionIcon> : null} />}
+            {!embedded && filterPopover}
+            {!embedded && !phone && groupCols.length > 0 && (
+              <SegmentedControl size="xs" value={display} onChange={(v) => { setDisplay(v as never); if (v === 'kanban' && !groupBy) setGroupBy(groupCols[0].key); }}
+                data={[{ value: 'table', label: <Tooltip label="Table"><span style={{ display: 'flex' }}><IconTable size={15} /></span></Tooltip> }, { value: 'kanban', label: <Tooltip label="Board"><span style={{ display: 'flex' }}><IconLayoutKanban size={15} /></span></Tooltip> }]} />
+            )}
+            {!embedded && display === 'kanban' && !phone && <Select size="xs" w={160} aria-label="Group the board by" leftSection={<Text size="xs" c="dimmed" pl={4}>by</Text>} leftSectionWidth={28} data={groupCols.map((c) => ({ value: c.key, label: c.label }))} value={groupBy} onChange={setGroupBy} allowDeselect={false} />}
+            {!embedded && (
+              <Menu width={250} position="bottom-end">
+                <Menu.Target><Tooltip label="Fields, row height, export"><ActionIcon className="hide-mobile" variant="default" size={30} aria-label="List options"><IconColumns3 size={15} /></ActionIcon></Tooltip></Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>This list</Menu.Label>
+                  <Menu.Item leftSection={<IconColumns3 size={14} />} onClick={() => setFieldsOpen(true)}>Select fields to display…</Menu.Item>
+                  <Menu.Item leftSection={<IconLayoutRows size={14} />} onClick={() => setDensity(density === 'compact' ? 'comfortable' : 'compact')}>{density === 'compact' ? 'Comfortable rows' : 'Compact rows'}</Menu.Item>
+                  <Menu.Item leftSection={<IconDownload size={14} />} onClick={exportRows}>Export these rows (CSV)</Menu.Item>
+                  <Menu.Divider />
+                  <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => setSaveOpen('new')}>Save as a new view…</Menu.Item>
+                  {mineOrAdmin && <Menu.Item leftSection={<IconDeviceFloppy size={14} />} onClick={saveCurrent} disabled={!dirty}>Save changes to “{def!.name}”</Menu.Item>}
+                </Menu.Dropdown>
+              </Menu>
+            )}
+            {actions}
+          </div>
+        </div>
+      )}
+      {!embedded && (chips.length > 0 || dirty) && (
+        <div className="lv-chips">
+          {chips.map((f) => {
             const c = columns.find((x) => x.key === f.key);
-            const label = f.op === 'in' ? f.value.join(', ') : f.op === 'contains' ? `“${f.value}”` : `${{ from: '≥', to: '≤', min: '≥', max: '≤' }[f.op as 'from']} ${f.op === 'from' || f.op === 'to' ? dmy(f.value) : f.value}`;
-            return <Badge key={f.key + f.op} variant="light" size="lg" style={{ textTransform: 'none', fontWeight: 500 }} rightSection={<IconX size={12} style={{ cursor: 'pointer' }} onClick={() => setFilters((fs) => fs.filter((x) => x !== f))} />}>{c?.label}: {label}</Badge>;
+            const label = f.op === 'in' ? f.value.join(', ') : f.op === 'contains' ? `“${f.value}”` : `${{ from: 'from', to: 'to', min: '≥', max: '≤' }[f.op as 'from']} ${f.op === 'from' || f.op === 'to' ? dmy(f.value) : f.value}`;
+            return <span key={f.key + f.op} className="lv-chip"><span>{c?.label}: {label}</span><button type="button" aria-label={`Remove filter ${c?.label}`} onClick={() => setFilters((fs) => fs.filter((x) => x !== f))}><IconX size={12} /></button></span>;
           })}
-        </Group>
-        <Group gap={6}>
-          {!phone && groupCols.length > 0 && (
-            <SegmentedControl size="xs" value={display} onChange={(v) => { setDisplay(v as never); if (v === 'kanban' && !groupBy) setGroupBy(groupCols[0].key); }}
-              data={[{ value: 'table', label: <Tooltip label="Table"><span style={{ display: 'flex' }}><IconTable size={15} /></span></Tooltip> }, { value: 'kanban', label: <Tooltip label="Kanban board"><span style={{ display: 'flex' }}><IconLayoutKanban size={15} /></span></Tooltip> }]} />
-          )}
-          {display === 'kanban' && !phone && <Select size="xs" w={170} leftSection={<Text size="xs" c="dimmed" pl={4}>by</Text>} leftSectionWidth={28} data={groupCols.map((c) => ({ value: c.key, label: c.label }))} value={groupBy} onChange={setGroupBy} allowDeselect={false} />}
-          <Tooltip label="Select fields to display"><ActionIcon className="hide-mobile" variant="default" size="md" onClick={() => setFieldsOpen(true)}><IconColumns3 size={16} /></ActionIcon></Tooltip>
-          <Menu shadow="lg" width={240}>
-            <Menu.Target><Tooltip label="List view controls"><ActionIcon className="hide-mobile" variant="default" size="md"><IconSettings2 size={16} /></ActionIcon></Tooltip></Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>List view controls</Menu.Label>
-              <Menu.Item leftSection={<IconPlus size={14} />} onClick={() => setSaveOpen('new')}>New view…</Menu.Item>
-              {mineOrAdmin && <Menu.Item leftSection={<IconDeviceFloppy size={14} />} onClick={saveCurrent} disabled={!dirty}>Save changes to “{def!.name}”</Menu.Item>}
-              {mineOrAdmin && <Menu.Item leftSection={<IconPencil size={14} />} onClick={() => setSaveOpen('rename')}>Rename / sharing…</Menu.Item>}
-              <Menu.Item leftSection={<IconColumns3 size={14} />} onClick={() => setFieldsOpen(true)}>Select fields to display…</Menu.Item>
-              <Menu.Item leftSection={<IconLayoutRows size={14} />} onClick={() => setDensity(density === 'compact' ? 'comfortable' : 'compact')}>{density === 'compact' ? 'Comfortable rows' : 'Compact rows'}</Menu.Item>
-              {mineOrAdmin && <><Menu.Divider /><Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={async () => { if (!window.confirm(`Delete the view “${def!.name}”?`)) return; await api(`/meta/listview/${encodeURIComponent(view)}`, { method: 'DELETE' }); reloadMeta(); setView('__all'); }}>Delete view</Menu.Item></>}
-            </Menu.Dropdown>
-          </Menu>
-          <Button className="hide-mobile" size="compact-sm" variant="default" leftSection={<IconDownload size={14} />} onClick={exportRows}>Export</Button>
-          {actions}
-        </Group>
-      </Group>
-      {phone ? <CardList shown={shown} rows={pageRows} cell={cell} onRow={onRow} loading={Boolean(loading && !rows)} emptyText={rows && !filtered.length ? (rows.length ? 'No records match these filters.' : empty ?? 'Nothing here yet.') : null} />
-      : display === 'kanban' && groupBy ? <Kanban rows={filtered} shown={shown} columns={columns} groupBy={groupBy} cell={cell} onRow={onRow} />
-      : <div className="lv-scroll">
-        <table className="lv-table">
-          <thead><tr>{shown.map((c) => (
-            <th key={c.key} className={c.key !== '_actions' ? 'sortable' : undefined} style={{ width: c.width, padding: pad, textAlign: c.align ?? (c.type === 'money' || c.type === 'number' ? 'right' : 'left') }}
-              onClick={() => c.key !== '_actions' && setSort((s) => (s?.key === c.key ? (s.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 }))}>
-              {c.label}{sort?.key === c.key && (sort.dir === 1 ? <IconArrowUp size={12} style={{ verticalAlign: -2, marginLeft: 3 }} /> : <IconArrowDown size={12} style={{ verticalAlign: -2, marginLeft: 3 }} />)}
-            </th>))}</tr></thead>
-          <tbody>
-            {loading && !rows && Array.from({ length: 6 }).map((_, i) => <tr key={i}>{shown.map((c) => <td key={c.key}><div style={{ height: 12, borderRadius: 4, background: '#eef1f5', width: `${50 + ((i * 17 + c.key.length * 7) % 45)}%` }} /></td>)}</tr>)}
-            {pageRows.map((r, i) => (
-              <tr key={(r.id as string) ?? i} className={onRow ? 'row-click' : undefined} onClick={onRow ? () => onRow(r) : undefined}>
-                {shown.map((c) => <td key={c.key} style={{ padding: pad, textAlign: c.align ?? (c.type === 'money' || c.type === 'number' ? 'right' : 'left'), fontVariantNumeric: c.type === 'money' || c.type === 'number' ? 'tabular-nums' : undefined, whiteSpace: ['badge', 'status', 'picklist', 'money', 'date'].includes(c.type ?? '') ? 'nowrap' : undefined }}>{cell(c, r)}</td>)}
-              </tr>
-            ))}
-            {rows && !filtered.length && <tr><td colSpan={shown.length}><Text c="dimmed" ta="center" size="sm" p="lg">{rows.length ? 'No records match these filters.' : empty ?? 'Nothing here yet.'}</Text></td></tr>}
-          </tbody>
-          {totalsCols.length > 0 && filtered.length > 1 && (
-            <tfoot><tr>{shown.map((c, i) => <td key={c.key} style={{ padding: '9px 12px', fontWeight: 650, textAlign: c.type === 'money' ? 'right' : 'left', background: '#f9fafb', borderTop: '1px solid var(--line)' }}>
-              {c.type === 'money' ? `₹${money(filtered.reduce((a, r) => a + Number(getVal(c, r) ?? 0), 0))}` : i === 0 ? 'Total' : ''}</td>)}</tr></tfoot>
-          )}
-        </table>
-      </div>}
-      {display !== 'kanban' && pages > 1 && <Group justify="center" p="xs" style={{ borderTop: '1px solid var(--line)' }}><Pagination size="sm" total={pages} value={page} onChange={setPage} /></Group>}
+          {chips.length > 0 && <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setFilters([])}>Clear</Button>}
+          {dirty && view !== '__all' && <span className="lv-dirty"><Text size="xs" c="dimmed">Unsaved changes to this view</Text>
+            <Button size="compact-xs" variant="default" onClick={() => (mineOrAdmin ? setChoiceOpen(true) : setSaveOpen('new'))}>Save…</Button>
+            <Button size="compact-xs" variant="subtle" color="gray" onClick={resetWork}>Reset</Button></span>}
+          {dirty && view === '__all' && (chips.length > 0 || search) && <Button size="compact-xs" variant="subtle" color="gray" leftSection={<IconPlus size={12} />} onClick={() => setSaveOpen('new')}>Save as view</Button>}
+        </div>
+      )}
+      {phone ? <CardList shown={shown} rows={pageRows} cell={cell} onRow={onRow} loading={Boolean(loading && !rows)} emptyText={emptyState} />
+      : display === 'kanban' && groupBy && !embedded ? <Kanban rows={filtered} shown={shown} columns={columns} groupBy={groupBy} cell={cell} onRow={onRow} />
+      : table}
+      {!embedded && display !== 'kanban' && rows && filtered.length > 0 && (
+        <div className="lv-foot">
+          <Text size="xs" c="dimmed" className="tnum">{pages > 1 ? `${from}–${to} of ${filtered.length}` : `${filtered.length} ${filtered.length === 1 ? 'record' : 'records'}`}{filtered.length !== rows.length ? ` · filtered from ${rows.length}` : ''}{sort ? ` · sorted by ${columns.find((c) => c.key === sort.key)?.label}` : ''}</Text>
+          {pages > 1 && <Pagination size="sm" total={pages} value={page} onChange={setPage} radius="md" />}
+        </div>
+      )}
+      {embedded && pages > 1 && <div className="lv-foot"><Text size="xs" c="dimmed" className="tnum">{from}–{to} of {filtered.length}</Text><Pagination size="sm" total={pages} value={page} onChange={setPage} radius="md" /></div>}
+      {selectable && selected.length > 0 && (
+        <div className="lv-bulk no-print" role="toolbar" aria-label="Actions for the selected rows">
+          <b className="tnum">{selected.length} selected</b><span className="lv-bulk-sep" />
+          {bulk?.(selected, clearPicked)}
+          <button type="button" onClick={() => downloadCsv(`${id}-selected-${new Date().toLocaleDateString('en-CA')}.csv`, shown.filter((c) => c.key !== '_actions').map((c) => ({ key: c.key, label: c.label })), selected.map((r) => Object.fromEntries(shown.map((c) => [c.key, getVal(c, r)]))))}><IconDownload size={14} />Export</button>
+          <Tooltip label="Clear selection"><button type="button" className="x" aria-label="Clear selection" onClick={clearPicked}><IconX size={15} /></button></Tooltip>
+        </div>
+      )}
+      </div>
+      {panel && !narrow && <aside className="lv-panel" aria-label="Quick view">{panel}</aside>}
+      {panel && narrow && <Drawer opened onClose={() => onClosePanel?.()} withCloseButton={false} size={phone ? '100%' : 460} padding={0}>{panel}</Drawer>}
       <SaveViewModal mode={saveOpen} onClose={() => setSaveOpen(null)} onSave={saveOpen === 'rename' ? rename : saveNew} canShare={can('manageCustomization')}
         initial={saveOpen === 'rename' && current && def ? { name: def.name, shared: current.owner_id === null } : undefined} />
       <Modal opened={choiceOpen} onClose={() => setChoiceOpen(false)} title="Save your changes" size="sm">
@@ -283,7 +355,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
         </Stack>
       </Modal>
       {fieldsOpen && <FieldsModal columns={columns} visible={visible} onClose={() => setFieldsOpen(false)} onApply={(v) => { setVisible(v); setFieldsOpen(false); }} defaults={defaults} />}
-    </Paper>
+    </div>
   );
 }
 
@@ -301,7 +373,7 @@ function FieldsModal({ columns, visible, defaults, onClose, onApply }: { columns
           <Text size="xs" fw={650} c="dimmed" mb={6}>AVAILABLE FIELDS</Text>
           <TextInput size="xs" placeholder="Search fields" leftSection={<IconSearch size={13} />} value={q} onChange={(e) => setQ(e.currentTarget.value)} mb={6} />
           <ScrollArea h={340} className="lv-fieldbox">
-            {avail.map((c) => <UnstyledButton key={c.key} className="lv-field" onClick={() => setV([...v, c.key])}><Text size="sm" style={{ flex: 1 }}>{c.label}</Text><IconPlus size={14} color="var(--brand)" /></UnstyledButton>)}
+            {avail.map((c) => <UnstyledButton key={c.key} className="lv-field" onClick={() => setV([...v, c.key])}><Text size="sm" style={{ flex: 1 }}>{c.label}</Text><IconPlus size={14} /></UnstyledButton>)}
             {!avail.length && <Text size="xs" c="dimmed" p="sm">All fields are shown.</Text>}
           </ScrollArea>
         </div>
@@ -340,14 +412,14 @@ function Kanban<T extends Record<string, any>>({ rows, shown, columns, groupBy, 
         return (
           <div key={lane} className="kb-lane">
             <div className="kb-head">
-              <Group gap={6} wrap="nowrap">{g.type === 'status' ? <StatusBadge status={lane} /> : <Text fw={650} size="sm">{lane}</Text>}<Badge size="xs" variant="light" color="gray">{items.length}</Badge></Group>
+              <Group gap={6} wrap="nowrap">{g.type === 'status' ? <StatusBadge status={lane} /> : <Text fw={600} size="sm">{lane}</Text>}<span className="cnt">{items.length}</span></Group>
               {moneyCol && <Text size="xs" c="dimmed" fw={600}>₹{money(items.reduce((a, r) => a + Number(getVal(moneyCol, r) ?? 0), 0))}</Text>}
             </div>
             <div className="kb-cards">
               {items.slice(0, 100).map((r, i) => (
                 <div key={(r.id as string) ?? i} className={`kb-card${onRow ? ' row-click' : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
                   <Text fw={620} size="sm" lineClamp={2}>{title ? cell(title, r) : ''}</Text>
-                  {rest.slice(0, 3).map((c) => { const v = cell(c, r); return v === '' || v == null ? null : <Text key={c.key} size="xs" c="dimmed" lineClamp={1}><span style={{ color: '#98a2b3' }}>{c.label}:</span> <span style={{ color: '#344054' }}>{v}</span></Text>; })}
+                  {rest.slice(0, 3).map((c) => { const v = cell(c, r); return v === '' || v == null ? null : <Text key={c.key} size="xs" c="dimmed" lineClamp={1}><span style={{ color: 'var(--muted)' }}>{c.label}</span> <span style={{ color: 'var(--ink-2)' }}>{v}</span></Text>; })}
                 </div>
               ))}
               {items.length > 100 && <Text size="xs" c="dimmed" ta="center">+{items.length - 100} more – filter to narrow down</Text>}
@@ -398,20 +470,20 @@ function CardList<T extends Record<string, any>>({ shown, rows, cell, onRow, loa
   const plain = shown.filter((c) => !badges.includes(c) && c.key !== '_actions');
   const [title, ...rest] = plain;
   const actions = shown.find((c) => c.key === '_actions');
-  if (loading) return <Stack p="sm" gap="xs">{[0, 1, 2].map((i) => <div key={i} style={{ height: 64, borderRadius: 10, background: '#eef1f5' }} />)}</Stack>;
+  if (loading) return <Stack p="sm" gap="xs">{[0, 1, 2, 3].map((i) => <div key={i} className="skel" style={{ height: 64, borderRadius: 10 }} />)}</Stack>;
   return (
     <div className="lv-cards">
       {rows.map((r, i) => (
         <div key={(r.id as string) ?? i} className={`lv-card${onRow ? ' row-click' : ''}`} onClick={onRow ? () => onRow(r) : undefined}>
           <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xs">
-            <Text fw={650} size="sm" style={{ minWidth: 0, wordBreak: 'break-word' }}>{title ? cell(title, r) : ''}</Text>
+            <Text fw={600} size="sm" style={{ minWidth: 0, wordBreak: 'break-word' }}>{title ? cell(title, r) : ''}</Text>
             <Group gap={4} wrap="nowrap">{badges.map((c) => <span key={c.key}>{cell(c, r)}</span>)}</Group>
           </Group>
-          {rest.slice(0, 3).map((c) => { const v = cell(c, r); return v === '' || v === null || v === undefined ? null : <Text key={c.key} size="xs" c="dimmed" lineClamp={2}><span style={{ color: '#98a2b3' }}>{c.label}:</span> <span style={{ color: '#344054' }}>{v}</span></Text>; })}
+          {rest.slice(0, 3).map((c) => { const v = cell(c, r); return v === '' || v === null || v === undefined ? null : <Text key={c.key} size="xs" c="dimmed" lineClamp={2}><span style={{ color: 'var(--muted)' }}>{c.label}</span> <span style={{ color: 'var(--ink-2)' }}>{v}</span></Text>; })}
           {actions && <div style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>{cell(actions, r)}</div>}
         </div>
       ))}
-      {emptyText && <Text c="dimmed" ta="center" size="sm" p="lg">{emptyText}</Text>}
+      {emptyText}
     </div>
   );
 }

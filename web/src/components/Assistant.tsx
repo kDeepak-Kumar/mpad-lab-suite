@@ -21,7 +21,7 @@ export function Assistant() {
   const [busy, setBusy] = useState(false);
   const view = useRef<HTMLDivElement>(null);
   useEffect(() => { try { sessionStorage.setItem(KEY, JSON.stringify(msgs.slice(-30))); } catch { /* ignore */ } setTimeout(() => view.current?.scrollTo({ top: 1e6, behavior: 'smooth' }), 30); }, [msgs, open]);
-  useEffect(() => { const k = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); setOpen((o) => !o); } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); setOpen((o) => !o); } }; const t = () => setOpen((o) => !o); window.addEventListener('keydown', k); window.addEventListener('assistant:toggle', t); return () => { window.removeEventListener('keydown', k); window.removeEventListener('assistant:toggle', t); }; }, []);
 
   const send = async (text: string) => {
     const t = text.trim(); if (!t || busy) return;
@@ -41,11 +41,7 @@ export function Assistant() {
     'How do I register a sample?',
   ].filter(Boolean) as string[];
 
-  if (!open) return (
-    <Tooltip label="Ask the assistant (Ctrl+J)" position="left">
-      <UnstyledButton className="asst-fab no-print" onClick={() => setOpen(true)} aria-label="Open assistant"><IconSparkles size={22} /></UnstyledButton>
-    </Tooltip>
-  );
+  if (!open) return null; // opened from the top bar (Ask AI) or with Ctrl+J
   return (
     <Paper className="asst-panel no-print" shadow="xl" radius="lg">
       <Group className="asst-head" justify="space-between" wrap="nowrap">

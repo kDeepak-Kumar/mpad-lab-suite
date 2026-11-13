@@ -4,13 +4,15 @@ import { useEffect, useState } from 'react';
 export interface BrandTheme { primary: string; sidebar: string; accent: string }
 
 export const BRAND_PRESETS: { key: string; label: string; theme: BrandTheme }[] = [
-  { key: 'mpad', label: 'Charcoal & gold (from the MPAD logo)', theme: { primary: '#1f2a3a', sidebar: '#13161d', accent: '#e9c33b' } },
+  { key: 'stone', label: 'Stone & burnt orange (standard)', theme: { primary: '#1c1917', sidebar: '#f3f1ec', accent: '#c2410c' } },
+  { key: 'mpad', label: 'Charcoal & gold', theme: { primary: '#1f2a3a', sidebar: '#14171e', accent: '#e9c33b' } },
   { key: 'navy', label: 'Deep blue', theme: { primary: '#2a5bd7', sidebar: '#1b2a6b', accent: '#ffc53d' } },
-  { key: 'classic', label: 'Classic blue (previous look)', theme: { primary: '#2a78d6', sidebar: '#f8fafc', accent: '#2a78d6' } },
   { key: 'teal', label: 'Lab teal', theme: { primary: '#0e8577', sidebar: '#0d2e2b', accent: '#5eead4' } },
   { key: 'maroon', label: 'Maroon', theme: { primary: '#9b2c2c', sidebar: '#2a1215', accent: '#f6ad55' } },
 ];
 export const DEFAULT_BRAND = BRAND_PRESETS[0].theme;
+/** The colours every company had before the redesign; a company that never chose its own gets the new standard look. */
+const LEGACY_DEFAULT: BrandTheme = { primary: '#1f2a3a', sidebar: '#13161d', accent: '#e9c33b' };
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -18,11 +20,14 @@ const hex = (c: number[]) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(
 const mix = (a: string, b: string, t: number) => { const x = rgb(a), y = rgb(b); return hex(x.map((v, i) => v + (y[i] - v) * t)); };
 export const luminance = (h: string) => { const [r, g, b] = rgb(h).map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 export const isLight = (h: string) => luminance(h) > 0.4;
-export const valid = (t?: Partial<BrandTheme> | null): BrandTheme => ({
-  primary: t?.primary && HEX.test(t.primary) ? t.primary : DEFAULT_BRAND.primary,
-  sidebar: t?.sidebar && HEX.test(t.sidebar) ? t.sidebar : DEFAULT_BRAND.sidebar,
-  accent: t?.accent && HEX.test(t.accent) ? t.accent : DEFAULT_BRAND.accent,
-});
+export const valid = (t?: Partial<BrandTheme> | null): BrandTheme => {
+  const v = {
+    primary: t?.primary && HEX.test(t.primary) ? t.primary.toLowerCase() : DEFAULT_BRAND.primary,
+    sidebar: t?.sidebar && HEX.test(t.sidebar) ? t.sidebar.toLowerCase() : DEFAULT_BRAND.sidebar,
+    accent: t?.accent && HEX.test(t.accent) ? t.accent.toLowerCase() : DEFAULT_BRAND.accent,
+  };
+  return v.primary === LEGACY_DEFAULT.primary && v.sidebar === LEGACY_DEFAULT.sidebar && v.accent === LEGACY_DEFAULT.accent ? DEFAULT_BRAND : v;
+};
 
 /** Ten Mantine shades with the chosen colour at shade 6. */
 export function shades(base: string) {
@@ -39,16 +44,21 @@ export function applyBrand(t: Partial<BrandTheme> | null | undefined, persist = 
   const v = valid(t);
   const root = document.documentElement.style;
   const lightNav = isLight(v.sidebar);
+  // the left menu sits on the app canvas: a light menu colour becomes the canvas itself
   root.setProperty('--sn-bg', v.sidebar);
-  root.setProperty('--sn-bg2', lightNav ? mix(v.sidebar, '#000000', 0.03) : mix(v.sidebar, '#000000', 0.25));
-  root.setProperty('--sn-ink', lightNav ? '#344054' : 'rgba(255,255,255,.86)');
-  root.setProperty('--sn-ink-strong', lightNav ? '#101828' : '#ffffff');
-  root.setProperty('--sn-muted', lightNav ? '#8a94a6' : 'rgba(255,255,255,.5)');
-  root.setProperty('--sn-hover', lightNav ? 'rgba(16,24,40,.05)' : 'rgba(255,255,255,.08)');
-  root.setProperty('--sn-line', lightNav ? '#e4e8ee' : 'rgba(255,255,255,.1)');
+  root.setProperty('--canvas', lightNav ? v.sidebar : '#f3f1ec');
+  root.setProperty('--sn-ink', lightNav ? '#44403c' : 'rgba(255,255,255,.86)');
+  root.setProperty('--sn-ink-strong', lightNav ? '#1c1917' : '#ffffff');
+  root.setProperty('--sn-muted', lightNav ? '#6b655e' : 'rgba(255,255,255,.58)');
+  root.setProperty('--sn-hover', lightNav ? 'rgba(28,25,23,.055)' : 'rgba(255,255,255,.08)');
+  root.setProperty('--sn-line', lightNav ? '#e0dbd1' : 'rgba(255,255,255,.12)');
+  root.setProperty('--sn-active', lightNav ? v.primary : 'rgba(255,255,255,.16)');
+  root.setProperty('--sn-active-ink', lightNav ? (isLight(v.primary) ? '#1c1917' : '#ffffff') : '#ffffff');
+  root.setProperty('--sn-card', lightNav ? '#ffffff' : 'rgba(255,255,255,.07)');
   root.setProperty('--sn-acc', v.accent);
-  root.setProperty('--sn-acc-ink', isLight(v.accent) ? '#111827' : '#ffffff');
-  root.setProperty('--sn-active', lightNav ? `color-mix(in srgb, ${v.accent} 12%, #fff)` : 'rgba(255,255,255,.12)');
+  root.setProperty('--sn-acc-ink', isLight(v.accent) ? '#1c1917' : '#ffffff');
+  root.setProperty('--accent', v.accent);
+  root.setProperty('--accent-on', isLight(v.accent) ? '#1c1917' : '#ffffff');
   root.setProperty('--brand-accent', v.accent);
   document.documentElement.dataset.nav = lightNav ? 'light' : 'dark';
   if (persist) try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* storage unavailable */ }

@@ -10,7 +10,7 @@ export function BrandColours({ value, logo, onChange }: { value?: Partial<BrandT
   useEffect(() => { if (logo) logoColours(logo).then(setFromLogo).catch(() => setFromLogo([])); }, [logo]);
   useEffect(() => { applyBrand(t, false); }, [t.primary, t.sidebar, t.accent]);
   useEffect(() => () => applyBrand(storedBrand(), false), []); // leaving without saving restores the saved colours
-  const swatches = [...new Set([...fromLogo, '#13161d', '#1f2a3a', '#1b2a6b', '#2a5bd7', '#2a78d6', '#0e8577', '#9b2c2c', '#e9c33b', '#ffc53d', '#f8fafc'])];
+  const swatches = [...new Set([...fromLogo, '#1c1917', '#f3f1ec', '#c2410c', '#14171e', '#1f2a3a', '#1b2a6b', '#2a5bd7', '#2a78d6', '#0e8577', '#9b2c2c', '#e9c33b', '#ffc53d', '#f8fafc'])];
   const same = (a: BrandTheme) => a.primary === t.primary && a.sidebar === t.sidebar && a.accent === t.accent;
   const field = (k: keyof BrandTheme, label: string, hint: string) => (
     <ColorInput label={label} description={hint} format="hex" swatches={swatches} swatchesPerRow={7} value={t[k]} onChange={(c) => /^#[0-9a-f]{6}$/i.test(c) && onChange({ ...t, [k]: c.toLowerCase() })} />
@@ -37,7 +37,7 @@ export function BrandColours({ value, logo, onChange }: { value?: Partial<BrandT
       </SimpleGrid>
       <Stack gap={4} mt="sm">
         {fromLogo.length > 0 && <Group gap={6}><IconWand size={14} /><Text size="xs" c="dimmed">From your logo:</Text>{fromLogo.map((c) => <span key={c} title={c} style={{ width: 18, height: 18, borderRadius: 5, background: c, border: '1px solid #d0d5dd', display: 'inline-block' }} />)}<Text size="xs" c="dimmed">(click a colour field to use them)</Text></Group>}
-        <Group><Button size="xs" variant="subtle" color="gray" onClick={() => onChange(DEFAULT_BRAND)}>Reset to logo colours</Button></Group>
+        <Group><Button size="xs" variant="subtle" color="gray" onClick={() => onChange(DEFAULT_BRAND)}>Reset to the standard colours</Button></Group>
       </Stack>
     </Paper>
   );

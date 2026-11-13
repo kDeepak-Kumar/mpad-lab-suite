@@ -75,15 +75,19 @@ for (const t of obs) await visit(o, `/settings/templates/obs/${encodeURIComponen
 for (const path of ['/clients', '/quotes', '/invoices', '/samples', '/equipment', '/settings/catalog', '/purchases', '/outsourcing']) {
   await visit(o, path);
   try {
-    await o.locator('button:has(.tabler-icon-columns-3)').first().click(); await o.waitForTimeout(300);
+    await o.getByLabel('List options').click(); await o.getByRole('menuitem', { name: /Select fields/ }).click(); await o.waitForTimeout(300);
     await o.locator('.lv-field.on button').first().click(); await o.getByRole('button', { name: 'Apply' }).click(); await check(o, `${path} fields changed`);
-    await o.getByRole('button', { name: 'Save…' }).click(); await o.getByLabel('List name').fill(`Sweep ${path} ${Date.now() % 100000}`); await o.getByRole('button', { name: 'Save', exact: true }).click();
+    await o.getByLabel('List options').click(); await o.getByRole('menuitem', { name: /Save as a new view/ }).click(); await o.getByLabel('List name').fill(`Sweep ${path} ${Date.now() % 100000}`); await o.getByRole('button', { name: 'Save', exact: true }).click();
     await o.waitForTimeout(900); await check(o, `${path} view saved`);
-    const kan = o.locator('.mantine-SegmentedControl-root label').nth(1);
+    const kan = o.locator('.lv-tools .mantine-SegmentedControl-root label').nth(1);
     if (await kan.count()) { await kan.click(); await check(o, `${path} kanban`); await o.getByRole('button', { name: 'Save…' }).click().catch(() => {}); await o.getByRole('button', { name: /^Update “/ }).click().catch(() => {}); await o.waitForTimeout(800); await check(o, `${path} kanban saved`); }
     await o.reload(); await check(o, `${path} reload with saved view`);
-    await o.locator('button:has(.tabler-icon-settings-2)').first().click(); await o.getByRole('menuitem', { name: 'Delete view' }).click().catch(() => {});
-    o.once('dialog', (d) => d.accept()); await o.waitForTimeout(900); await check(o, `${path} view deleted`);
+    o.once('dialog', (d) => d.accept());
+    await o.getByLabel('List views').click(); await o.getByRole('menuitem', { name: 'Delete view' }).click();
+    await o.waitForTimeout(900); await check(o, `${path} view deleted`);
+    // tick two rows: the bulk bar appears and clears
+    const boxes = o.locator('.lv-table tbody input[type=checkbox]');
+    if (await boxes.count()) { await boxes.first().check(); await check(o, `${path} row selected`); await o.getByLabel('Clear selection').click(); }
   } catch (e) { problems.push(`${path} list view flow :: ${e.message.split('\n')[0]}`); }
 }
 

@@ -74,8 +74,8 @@ export function ChatButton() {
     <Popover opened={opened} onChange={setOpened} position="bottom-end" width={340} shadow="lg">
       <Popover.Target>
         <Tooltip label="Team chat" disabled={opened}>
-          <Indicator label={c.unread > 9 ? '9+' : c.unread} size={16} disabled={!c.unread} color="red" offset={4}>
-            <ActionIcon variant="subtle" color="gray" size="lg" onClick={() => setOpened((o) => !o)} aria-label="Team chat"><IconMessageCircle size={21} /></ActionIcon>
+          <Indicator label={c.unread > 9 ? '9+' : c.unread} size={16} disabled={!c.unread} color="accent" offset={6} styles={{ indicator: { fontWeight: 600, fontSize: 10 } }}>
+            <ActionIcon variant="subtle" color="gray" size={34} radius={9} onClick={() => setOpened((o) => !o)} aria-label="Team chat"><IconMessageCircle size={18} stroke={1.75} /></ActionIcon>
           </Indicator>
         </Tooltip>
       </Popover.Target>

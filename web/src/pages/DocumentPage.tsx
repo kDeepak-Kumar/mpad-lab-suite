@@ -68,9 +68,7 @@ function NewDocument({ kind }: { kind: 'quote' | 'invoice' }) {
           <Group justify="flex-end"><Button disabled={!clientId} loading={busy} onClick={create}>Create draft</Button></Group>
         </Stack>
       </Paper>
-      <Modal opened={adding} onClose={() => setAdding(false)} title="New client" size="xl">
-        <ClientForm onCancel={() => setAdding(false)} onSaved={(id) => { setAdding(false); reload(); setClientId(String(id)); }} />
-      </Modal>
+      {adding && <ClientForm onCancel={() => setAdding(false)} onSaved={(id) => { setAdding(false); reload(); setClientId(String(id)); }} />}
     </>
   );
 }
