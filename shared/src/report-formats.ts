@@ -204,8 +204,9 @@ function pairRows(left: Pair[], right: Pair[]): CellSpec[][] {
  * observation sheets; the section stays editable on the draft and edits never change those records.
  */
 export function reportDetails(d: FormatInput['data'], tests: TestSnap[], o: { sample?: Pair[]; testing?: Pair[]; method?: string } = {}): Section[] {
-  const nabl = d.accreditation === 'NABL' && d.ulr;
-  const band: [string, string][] = [['Test Report No.', token('number')], ...(nabl ? [['ULR No.', String(d.ulr)] as [string, string]] : []), ['Date of Issue', token('issueText')], ['Page', token('pageOf')]];
+  const nabl = d.accreditation === 'NABL';
+  // one ULR per report, assigned when it is signed and issued (NABL); filled in through the {{ulr}} token
+  const band: [string, string][] = [['Test Report No.', token('number')], ...(nabl ? [['ULR No.', token('ulr')] as [string, string]] : []), ['Date of Issue', token('issueText')], ['Page', token('pageOf')]];
   const bandT = table(band.map(() => 100 / band.length), [band.map(([l, v]) => ({ h: `<span style="font-size: 8.5pt">${escapeHtml(l)}</span><br><b>${escapeHtml(v)}</b>`, al: 'left', bg: '#F1F3F6' } as CellSpec))], { role: 'idband', sz: 10.5, mt: 1 });
   const c: ReportCustomer = d.customer ?? { name: d.client?.name ?? '', address: d.client?.address ?? '' };
   const ref = d.customerRef !== undefined && d.customerRef !== null && d.customerRef !== '' ? d.customerRef : c.customerRef;
@@ -686,3 +687,14 @@ export function refreshRoles(layout: ReportLayout, input: FormatInput, roles: ('
   return { ...layout, sections };
 }
 
+
+/**
+ * Put an issued report's ULR into its layout: the {{ulr}} token fills itself, and a draft made before
+ * ULRs moved to issue still carries the old text in its "ULR No." cell, which is replaced here.
+ */
+export function setLayoutUlr(layout: ReportLayout | undefined, ulr: string): ReportLayout | undefined {
+  if (!layout) return layout;
+  return { ...layout, sections: layout.sections.map((s) => (s.type === 'table' && s.role === 'idband'
+    ? { ...s, rows: s.rows.map((r) => r.map((c) => (!c.m && /ULR No\./.test(c.h) && !c.h.includes('{{ulr}}') ? { ...c, h: c.h.replace(/(ULR No\.[\s\S]*?<b>)[\s\S]*?(<\/b>)/, `$1${escapeHtml(ulr)}$2`) } : c))) }
+    : s)) };
+}

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { mailer } from '../alerts';
 import { emailHtml, footerText } from '../email';
-import { cleanLayout, refreshRoles, computeTotals, formatDate, isEmailList, stateName, type LineInput } from '@suite/shared';
+import { cleanLayout, refreshRoles, computeTotals, formatDate, isEmailList, setLayoutUlr, stateName, ulrScope, type LineInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
@@ -362,7 +362,19 @@ finance.post('/documents/:id/issue', h(async (req) => {
     const date = unlocked.date ? String(d.date) : today();
     const client = await trx('clients').where({ id: d.client_id }).first();
     const number = d.number ? String(d.number) : (await nextNumber(trx, cid, d.kind, { date, client: client?.short_code, material: String(d.data.material ?? '') })).number;
-    const data = { ...d.data, signatory: { name: signatory!.name, designation: signatory!.designation ?? '', qualifications: signatory!.qualifications ?? '', signature: signatory!.signature ?? null },
+    // NABL (NABL 133): one ULR per test report, given when it is issued. F = every test on it is within the
+    // accredited scope, P = only some are. An amended report keeps the ULR of the report it replaces.
+    let ulr: string | undefined;
+    if (d.kind === 'report' && (d.accreditation ?? d.data.accreditation) === 'NABL') {
+      const parent = d.parent_id ? await trx('documents').where({ id: d.parent_id, company_id: cid }).first('data') : null;
+      ulr = String(parseJson<Record<string, unknown>>(parent?.data, {}).ulr ?? '') || undefined;
+      if (!ulr) {
+        const tids = (d.data.testIds as number[]) ?? [];
+        const scope = tids.length ? (await trx('tests as t').leftJoin('catalog as c', 'c.id', 't.catalog_id').whereIn('t.id', tids).select('c.nabl')).map((r: { nabl: unknown }) => Boolean(r.nabl)) : [];
+        ulr = (await nextNumber(trx, cid, 'ulr', { date, client: client?.short_code, fp: ulrScope(scope) })).number;
+      }
+    }
+    const data = { ...d.data, ...(ulr ? { ulr, layout: setLayoutUlr(d.data.layout as never, ulr) } : {}), signatory: { name: signatory!.name, designation: signatory!.designation ?? '', qualifications: signatory!.qualifications ?? '', signature: signatory!.signature ?? null },
       issueText: unlocked.issueText ? d.data.issueText : formatDate(date), dateText: unlocked.dateText ? d.data.dateText : formatDate(date) };
     const hash = sha256({ data, overrides: d.overrides, template: d.template_id });
     await trx('documents').where({ id: d.id }).update({ number, date, status: 'issued', data: toJson(data), issued_at: now(), issued_by: req.user.id, hash, updated_at: now() });
@@ -380,8 +392,8 @@ finance.post('/documents/:id/issue', h(async (req) => {
       }
       if (d.parent_id) await trx('documents').where({ id: d.parent_id }).update({ status: 'cancelled' });
     }
-    await audit(trx, req.user, 'document', d.id, `${d.kind} signed and issued`, { number, hash: hash.slice(0, 12), signatory: signatory!.name });
-    return { number };
+    await audit(trx, req.user, 'document', d.id, `${d.kind} signed and issued`, { number, ulr, hash: hash.slice(0, 12), signatory: signatory!.name });
+    return { number, ulr };
   });
 }));
 finance.post('/documents/:id/amend', allow('reportIssue'), h(async (req) => {
@@ -614,6 +626,24 @@ finance.get('/invoices/analytics', allow('invoice.read'), h(async (req) => {
 }));
 
 /** Home dashboard charts and KPIs: money for those who may see invoices, lab workload for those who may see samples. */
+/**
+ * Read-only turnaround figures for Home: of the tests whose report was issued in the last 30 days, how many
+ * were issued on or before the test's due date; and the sample that has waited longest for its report.
+ */
+async function turnaround(cid: number) {
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const done = await db('tests as t').join('documents as d', 'd.id', 't.report_id')
+    .where({ 't.company_id': cid, 'd.status': 'issued' }).andWhere('d.issued_at', '>=', since).whereNotNull('t.due_date').select('t.due_date', 'd.issued_at');
+  const onTime = done.filter((r: { due_date: string; issued_at: string }) => String(r.issued_at).slice(0, 10) <= String(r.due_date).slice(0, 10)).length;
+  const oldest = await db('samples').where({ company_id: cid }).whereNotIn('status', ['reported', 'cancelled']).whereNull('disposed_at')
+    .orderBy('received_date', 'asc').first('code', 'received_date', 'material');
+  const days = oldest?.received_date ? Math.max(0, Math.floor((Date.now() - new Date(String(oldest.received_date) + 'T00:00:00').getTime()) / 86400000)) : null;
+  return {
+    onTime: done.length ? { pct: Math.round((100 * onTime) / done.length), of: done.length } : null,
+    oldest: oldest && days !== null ? { code: oldest.code as string, material: (oldest.material as string) ?? '', days } : null,
+  };
+}
+
 finance.get('/dashboard/insights', h(async (req) => {
   const cid = req.user.company_id, td = today();
   const ym = (d: string) => d.slice(0, 7);
@@ -658,6 +688,7 @@ finance.get('/dashboard/insights', h(async (req) => {
       intake: days.map((d) => ({ day: d, count: smp.filter((s) => s.received_date === d).length })),
       testsByStatus: status, materials: [...mat.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, count]) => ({ name, count })),
       testsThis: tests.filter((t) => String(t.created_at ?? '').slice(0, 7) === thisM).length, testsLast: tests.filter((t) => String(t.created_at ?? '').slice(0, 7) === lastM).length,
+      ...(await turnaround(cid)),
     };
   }
   return out;

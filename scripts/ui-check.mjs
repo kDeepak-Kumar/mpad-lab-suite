@@ -107,7 +107,7 @@ await sg.screenshot({ path: `${out}/report-issued-full.png`, fullPage: true });
 // ---- 6. System Admin completes a whole NABL flow alone, with editable fields and qty/GST
 const ad = await session('admin');
 const s2 = await api(ad, '/samples', { client_id: 2, site_id: 3, accreditation: 'NABL', material: 'Soil', received_date: new Date().toLocaleDateString('en-CA'), quantity: '20 kg', condition: 'Good', source: 'Sample supplied by the customer', tests: [{ catalog_id: cat.find((c) => c.code === 'SOIL-FSI').id }] });
-if (!s2.ulr) problems.push('admin: NABL sample has no ULR');
+if (s2.ulr) problems.push('admin: a ULR was given at sample registration (it belongs to the issued report)');
 const t2 = (await api(ad, '/tests?status=pending')).find((t) => t.sample_id === s2.id).id;
 await ad.goto(`${base}/tests/${t2}`);
 // FSI sheet: first row of the cylinder grid (Vd, Vk)
@@ -134,6 +134,7 @@ await ad.getByRole('button', { name: 'Sign & issue' }).click();
 await ad.waitForTimeout(1500);
 const r2 = await ad.locator('.doc-page').innerText();
 if (!r2.includes('Data Centre Division')) problems.push('admin: unlocked client name not on report');
+if (!/ULR No\.\s*\n?\s*[A-Z0-9]+\d{11}[FP]/.test(r2)) problems.push('admin: issued NABL report shows no ULR');
 const certNo = (await api(ad, '/company')).accreditation?.certNo;
 if (certNo && !r2.includes(certNo)) problems.push('admin: NABL letterhead (certificate no.) missing');
 if (!r2.includes('Free Swell Index')) problems.push('admin: FSI result missing');

@@ -73,7 +73,7 @@ export function HeaderFields({ kind, doc, data, onData, onNumber, onDate, disabl
         {kind === 'invoice' && F('SAC', 'sac')}
         {kind === 'quote' && <TextInput label="Valid for (days)" type="number" disabled={disabled} value={data.validityDays ?? ''} onChange={(e) => onData({ ...data, validityDays: Number(e.currentTarget.value) || null })} />}
         {isReport && F('Job code', 'jobCodeText')}
-        {isReport && F('ULR number', 'ulr')}
+        {isReport && data.accreditation === 'NABL' && (data.ulr ? F('ULR number', 'ulr') : <TextInput label="ULR number" disabled value="" placeholder="Assigned when the report is signed" description="One per report; ends in F or P by NABL scope" />)}
         {isReport && F('Date of sample received', 'receivedText')}
         {isReport && F('Date of test', 'testDatesText')}
         {isReport && F('Specification*', 'specification')}

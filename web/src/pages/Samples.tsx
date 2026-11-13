@@ -53,7 +53,7 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
   const blockers = [!v.client_id && 'Client', !tests.length && 'Tests', ...missing].filter(Boolean) as string[];
   const blocked = blockers.length > 0 || (outOfScope.length > 0 && !isAdmin(me));
   return (
-    <Sheet title="Register sample" subtitle={<>The job code{v.accreditation === 'NABL' ? ' and ULR are' : ' is'} assigned when you save.</>} onClose={() => onClose(savedAny)}
+    <Sheet title="Register sample" subtitle={<>The job code is assigned when you save.{v.accreditation === 'NABL' ? ' The ULR is given to the test report when it is signed.' : ''}</>} onClose={() => onClose(savedAny)}
       footer={<>
         <span className="grow">{blockers.length ? `Still needed: ${blockers.slice(0, 4).join(', ')}${blockers.length > 4 ? '…' : ''}` : 'Due dates follow each test’s turnaround in the rate card.'}</span>
         <Button variant="subtle" color="gray" onClick={() => onClose(savedAny)}>Cancel</Button>

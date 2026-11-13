@@ -50,7 +50,7 @@ export function certCode(certNo?: string | null): string {
   return c || 'TC00000';
 }
 
-export function formatNumber(format: string, seq: number, ctx: { date: string; client?: string; material?: string; fp?: 'F' | 'P'; cert?: string | null }): string {
+export function formatNumber(format: string, seq: number, ctx: { date: string; client?: string; material?: string; fp?: 'F' | 'P'; cert?: string | null; loc?: string | null }): string {
   const [yyyy, mm, dd] = ctx.date.slice(0, 10).split('-');
   const fy = financialYear(ctx.date);
   return format
@@ -67,7 +67,8 @@ export function formatNumber(format: string, seq: number, ctx: { date: string; c
     .replace(/\{Y1\}/g, yyyy.slice(3))
     .replace(/\{ML\}/g, 'ABCDEFGHIJKL'[Number(mm) - 1] ?? '')
     .replace(/\{FP\}/g, ctx.fp ?? 'F')
-    .replace(/\{CERT\}/g, certCode(ctx.cert));
+    .replace(/\{CERT\}/g, certCode(ctx.cert))
+    .replace(/\{LOC\}/g, /^\d$/.test(String(ctx.loc ?? '')) ? String(ctx.loc) : '0');
 }
 
 export const DEFAULT_NUMBERING: Record<string, string> = {
@@ -76,7 +77,7 @@ export const DEFAULT_NUMBERING: Record<string, string> = {
   workorder: 'WO/{SEQ:4}/{FY}',
   sample: 'LAB/{CLIENT}/{SEQ:4}/{MM}/{YYYY}',
   quick: 'QR/{SEQ:4}/{FY}',
-  ulr: '{CERT}{YY}0{SEQ:8}{FP}',
+  ulr: '{CERT}{YY}{LOC}{SEQ:8}{FP}',
   report: 'TR/{SEQ:4}/{FY}',
   receipt: 'RCPT/{SEQ:4}/{FY}',
 };
@@ -94,3 +95,11 @@ export function formatDate(d?: string | null): string {
   const [y, m, day] = d.slice(0, 10).split('-');
   return `${day}-${m}-${y}`;
 }
+
+/**
+ * NABL ULR scope letter: F when every test on the report is within the accredited scope, P when only some are.
+ * Tests outside the scope cannot appear on a report carrying the NABL symbol without this marker.
+ */
+export const ulrScope = (inScope: boolean[]): 'F' | 'P' => (inScope.length && inScope.every(Boolean) ? 'F' : 'P');
+/** The 8-digit running number of a ULR (the digits before the final F/P), or 0. */
+export const ulrSeq = (ulr?: string | null): number => Number(/(\d{8})[FP]$/.exec(String(ulr ?? '').trim())?.[1] ?? 0);

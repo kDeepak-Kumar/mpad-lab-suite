@@ -136,7 +136,7 @@ export const textToHtml = (s: unknown) => escapeHtml(String(s ?? '')).replace(/\
 export const htmlToText = (h: string) => String(h ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\n+$/, '');
 
 /** Values known only on issue (report number, issue date) are kept as tokens and filled when rendering. */
-export const TOKENS: Record<string, string> = { number: 'Report no. (on issue)', issueText: 'Issue date (on issue)', pageOf: 'Page 1 of the printed pages' };
+export const TOKENS: Record<string, string> = { number: 'Report no. (on issue)', ulr: 'ULR (assigned when the report is signed)', issueText: 'Issue date (on issue)', pageOf: 'Page 1 of the printed pages' };
 export const token = (k: keyof typeof TOKENS | string) => `{{${k}}}`;
 export function fillTokens(h: string, v: Record<string, string | null | undefined>, editing = false) {
   return String(h ?? '').replace(/\{\{(\w+)\}\}/g, (_, k) => {

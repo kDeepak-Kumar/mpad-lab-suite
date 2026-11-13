@@ -10,7 +10,7 @@ import { HttpError, type AuthUser } from './auth';
 export interface CompanyProfile {
   id: number; name: string; legalName?: string; tagline?: string; cin?: string; gstin?: string; pan?: string;
   stateCode?: string; address?: string; phone?: string; email?: string; website?: string; jurisdiction?: string;
-  accreditation?: { body?: string; certNo?: string; validTill?: string };
+  accreditation?: { body?: string; certNo?: string; validTill?: string; location?: string };
   logo?: string; accreditationLogo?: string; seal?: string;
   bank?: { name?: string; branch?: string; ifsc?: string; bank?: string; account?: string; upi?: string };
   numbering?: Record<string, string>;
@@ -26,7 +26,7 @@ export async function getCompany(cid: number, k: Knex = db): Promise<CompanyProf
 }
 
 /** Gap-free running numbers per company, kind and period (financial year / calendar year). */
-export async function nextNumber(trx: Knex, cid: number, kind: string, ctx: { date: string; client?: string; material?: string }) {
+export async function nextNumber(trx: Knex, cid: number, kind: string, ctx: { date: string; client?: string; material?: string; fp?: 'F' | 'P' }) {
   const company = await getCompany(cid, trx);
   const format = company.numbering?.[kind] || DEFAULT_NUMBERING[kind] || `${kind.toUpperCase()}/{SEQ}`;
   const scope = counterScope(format, ctx.date);
@@ -34,13 +34,13 @@ export async function nextNumber(trx: Knex, cid: number, kind: string, ctx: { da
   const seq = (cur?.value ?? 0) + 1;
   if (cur) await trx('counters').where({ company_id: cid, kind, scope }).update({ value: seq });
   else await trx('counters').insert({ company_id: cid, kind, scope, value: seq });
-  return { seq, number: formatNumber(format, seq, { ...ctx, cert: company.accreditation?.certNo }) };
+  return { seq, number: formatNumber(format, seq, { ...ctx, cert: company.accreditation?.certNo, loc: company.accreditation?.location }) };
 }
 
 /** Format a number with an existing sequence (e.g. ULR shares the sample's running number). */
 export async function formatWithSeq(cid: number, kind: string, seq: number, ctx: { date: string; client?: string; material?: string }, k: Knex = db) {
   const company = await getCompany(cid, k);
-  return formatNumber(company.numbering?.[kind] || DEFAULT_NUMBERING[kind], seq, { ...ctx, cert: company.accreditation?.certNo });
+  return formatNumber(company.numbering?.[kind] || DEFAULT_NUMBERING[kind], seq, { ...ctx, cert: company.accreditation?.certNo, loc: company.accreditation?.location });
 }
 
 export async function audit(k: Knex, u: AuthUser, entity: string, id: number, action: string, detail?: unknown) {
@@ -174,7 +174,7 @@ export async function buildReportData(cid: number, testIds: number[]) {
     sampleIds, testIds: tests.map((t) => t.id),
     samples: samples.map((s, i) => ({ id: s.id, code: s.code, ulr: s.ulr, label: s.sample_label || `Sample-${String(i + 1).padStart(2, '0')}` })),
     jobCodeText: samples.map((s) => `${s.material ? s.material + ' : ' : ''}${s.code}`).join(', '),
-    ulr: samples.map((s) => s.ulr).filter(Boolean).join(', '),
+    ulr: '', // assigned when the report is signed and issued (one ULR per report)
     receivedText: rangeText(samples.map((s) => s.received_date)),
     testDatesText: rangeText([...tests.map((t) => t.started_at), ...tests.map((t) => t.completed_at)]),
     specification: s0?.specification || material,

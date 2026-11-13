@@ -23,7 +23,7 @@ const tipStyle = { borderRadius: 12, border: '1px solid #e7e3db', fontSize: 12.5
 interface Insights {
   months: string[];
   money?: { invoiced: number[]; collected: number[]; invoicedThis: number; invoicedLast: number; collectedThis: number; collectedLast: number; outstanding: number; overdue: number; aging: { label: string; amount: number }[]; topClients: { name: string; total: number; share: number }[] };
-  lab?: { samplesThis: number; samplesLast: number; samplesByMonth: number[]; intake: { day: string; count: number }[]; testsByStatus: Record<string, number>; materials: { name: string; count: number }[]; testsThis: number; testsLast: number };
+  lab?: { onTime?: { pct: number; of: number } | null; oldest?: { code: string; material: string; days: number } | null; samplesThis: number; samplesLast: number; samplesByMonth: number[]; intake: { day: string; count: number }[]; testsByStatus: Record<string, number>; materials: { name: string; count: number }[]; testsThis: number; testsLast: number };
 }
 
 export function Dashboard() {
@@ -97,6 +97,10 @@ export function Dashboard() {
                       <span className="pipe-v">{st.n}</span>
                     </UnstyledButton>
                   ))}
+                </div>
+                <div className="pipe-foot">
+                  <div><div className="pipe-l">Reports issued on time · 30 days</div><div className="pipe-v">{lab.onTime ? `${lab.onTime.pct}%` : '–'}</div><div className="dash-card-sub">{lab.onTime ? `${lab.onTime.of} ${lab.onTime.of === 1 ? 'test' : 'tests'}, by due date` : 'No reports issued yet'}</div></div>
+                  <UnstyledButton onClick={() => lab.oldest && nav('/samples')} disabled={!lab.oldest}><div className="pipe-l">Oldest open job</div><div className="pipe-v" style={lab.oldest && lab.oldest.days > 14 ? { color: 'var(--bad)' } : undefined}>{lab.oldest ? `${lab.oldest.days} ${lab.oldest.days === 1 ? 'day' : 'days'}` : '–'}</div><div className="dash-card-sub">{lab.oldest ? `${lab.oldest.code}${lab.oldest.material ? ' · ' + lab.oldest.material : ''}` : 'Nothing waiting'}</div></UnstyledButton>
                 </div>
               </> : <Empty title="No tests yet">Register a sample to start the first test.</Empty>}
             </Card>

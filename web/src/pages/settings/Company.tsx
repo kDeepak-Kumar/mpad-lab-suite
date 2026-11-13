@@ -12,7 +12,7 @@ import { BrandColours } from '../../components/BrandColours';
 import { applyBrand } from '../../brand';
 import { AI_PROVIDERS, AiGuide, type AiProvider } from '../../components/AiGuide';
 
-const NUM_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Invoice', workorder: 'Work order', sample: 'Sample job code', ulr: 'ULR number', report: 'Test report', receipt: 'Payment receipt' };
+const NUM_LABEL: Record<string, string> = { quote: 'Quotation', invoice: 'Invoice', workorder: 'Work order', sample: 'Sample job code', ulr: 'ULR (NABL test reports)', report: 'Test report', receipt: 'Payment receipt' };
 
 const SECTIONS: { group: string; items: { key: string; label: string; hint: string; icon: React.ComponentType<{ size?: number | string }>; color: string; selfSave?: boolean }[] }[] = [
   { group: 'Company', items: [
@@ -109,7 +109,8 @@ export function CompanySettings() {
             {T('Company name (as on documents)', 'name')}{T('Tagline', 'tagline')}{T('Short name (printed under the logo, e.g. MPAD)', 'shortName')}{T('CIN', 'cin')}{T('GSTIN', 'gstin')}{T('PAN', 'pan')}
             <Select label="State (for GST)" searchable data={INDIAN_STATES.map((s) => ({ value: s.code, label: `${s.code} – ${s.name}` }))} value={v.stateCode ?? null} onChange={(x) => set('stateCode', x)} />
             {T('Phone(s)', 'phone')}{T('Email', 'email')}{T('Website', 'website')}{T('Jurisdiction city', 'jurisdiction')}
-            {T('Accreditation body', 'accreditation.body')}{T('Accreditation certificate no.', 'accreditation.certNo')}{T('Accreditation valid till', 'accreditation.validTill', { type: 'date' })}
+            {T('Accreditation body', 'accreditation.body')}{T('Accreditation certificate no.', 'accreditation.certNo')}
+            <Select label="Laboratory location code (in the ULR)" description="0 = permanent laboratory; another digit only if NABL gave this site its own code" data={['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']} value={v.accreditation?.location ?? '0'} onChange={(x) => set('accreditation.location', x ?? '0')} allowDeselect={false} />{T('Accreditation valid till', 'accreditation.validTill', { type: 'date' })}
           </SimpleGrid>
           <Textarea mt="sm" label="Address (footer)" autosize value={v.address ?? ''} onChange={(e) => set('address', e.currentTarget.value)} />
         </>}
@@ -135,11 +136,17 @@ export function CompanySettings() {
           <SimpleGrid cols={{ base: 1, md: 2 }}>{T('Account name', 'bank.name')}{T('Bank', 'bank.bank')}{T('Branch', 'bank.branch')}{T('IFSC', 'bank.ifsc')}{T('Account number', 'bank.account')}{T('UPI ID (optional)', 'bank.upi')}</SimpleGrid>
         </>}
         {sec === "numbering" && <>
+          <Alert variant="light" mb="sm" title="ULR on NABL test reports">
+            Every NABL test report gets one ULR when it is signed and issued, in the form <b>certificate no. + year + location code + 8-digit running number + F/P</b>
+            (e.g. {formatNumber(DEFAULT_NUMBERING.ulr, 1, { date: localToday(), cert: v.accreditation?.certNo, loc: v.accreditation?.location, fp: 'F' })}).
+            The running number restarts on 1 January. F means every test on the report is within the NABL scope (rate card “NABL”), P means only some are – set automatically.
+            An amended report keeps the ULR of the report it replaces. Non-NABL reports and quick reports carry no ULR.
+          </Alert>
           <Alert variant="light" mb="sm">Tokens: {'{SEQ}'} running number, {'{SEQ:4}'} zero-padded, {'{FY}'} 26-27, {'{YYYY}'} {'{YY}'} {'{MM}'}, {'{CLIENT}'} client short code, {'{MATCODE}'} material code (CEM, CON, STL…), {'{Y1}'} last digit of the year and {'{ML}'} month letter (A = Jan … L = Dec) for compact codes such as 6K0456, {'{FP}'} F/P on the ULR, {'{CERT}'} the NABL certificate number from the Company profile (e.g. NABLT0726TS18813; text in brackets such as "In lieu of TC-10775" is left out). Numbers containing {'{FY}'} restart every April; with {'{YYYY}'} every January.</Alert>
           <Stack>
             {Object.keys(DEFAULT_NUMBERING).map((k) => {
               const f = v.numbering?.[k] ?? DEFAULT_NUMBERING[k];
-              let preview = ''; try { preview = formatNumber(f, k === 'invoice' ? 183 : 76, { date: localToday(), client: 'ABCD' }); } catch { preview = '?'; }
+              let preview = ''; try { preview = formatNumber(f, k === 'invoice' ? 183 : 76, { date: localToday(), client: 'ABCD', cert: v.accreditation?.certNo, loc: v.accreditation?.location, fp: 'F' }); } catch { preview = '?'; }
               return <Group key={k} grow><TextInput label={NUM_LABEL[k]} value={f} onChange={(e) => set(`numbering.${k}`, e.currentTarget.value)} /><TextInput label="Example" value={preview} readOnly variant="filled" /></Group>;
             })}
           </Stack>

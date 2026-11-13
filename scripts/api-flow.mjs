@@ -39,7 +39,7 @@ console.log('2. Work order and sample register');
 const wo = await api('frontdesk', 'POST', `/documents/${q.id}/to-workorder`);
 expect(wo.number, `work order ${wo.number} created from accepted quote`);
 const s = await api('frontdesk', 'POST', '/samples', { work_order_id: wo.id, client_id: client.id, site_id: detail.sites[0].id, material: 'Soil', description: 'Soil sample from borrow area', quantity: '30 kg', condition: 'Satisfactory', source: 'Sample supplied by the customer', received_date: new Date().toISOString().slice(0, 10), customer_ref: 'Verbal', tests: lines.map((l) => ({ catalog_id: l.catalogId, assigned_to: tech.id })) });
-expect(s.code && s.ulr, `sample ${s.code} registered with ULR ${s.ulr}`);
+expect(s.code && !s.ulr, `sample ${s.code} registered (the ULR comes with the issued report, not the sample)`);
 
 console.log('3. Observation sheets (technician)');
 const queue = await api('tech', 'GET', '/tests?mine=1&status=pending');
@@ -89,6 +89,16 @@ await api('reviewer', 'POST', `/reports/${rep.id}/workflow`, { action: 'submit' 
 await api('signatory', 'POST', `/reports/${rep.id}/workflow`, { action: 'verify' });
 const issued = await api('signatory', 'POST', `/documents/${rep.id}/issue`);
 expect(issued.number, `report ${issued.number} issued`);
+{
+  const rd = await api('signatory', 'GET', `/documents/${rep.id}`);
+  const nabl = (rd.accreditation ?? rd.data.accreditation) === 'NABL';
+  const yy = String(new Date().getFullYear()).slice(2);
+  if (nabl) {
+    expect(/^[A-Z0-9]+\d{2}\d\d{8}[FP]$/.test(issued.ulr ?? '') && issued.ulr.includes(yy + '0') && rd.data.ulr === issued.ulr, `NABL report gets one ULR on issue: ${issued.ulr}`);
+    const band = rd.data.layout?.sections?.find((x) => x.role === 'idband');
+    expect(!band || band.rows[0].some((c) => c.h.includes('{{ulr}}') || c.h.includes(issued.ulr)), 'ULR shows in the report identification band');
+  } else expect(!issued.ulr, 'Non-NABL report carries no ULR');
+}
 
 console.log('6. Invoice from work order, payment, ledger');
 const inv = await api('accounts', 'POST', `/workorders/${wo.id}/invoice`);

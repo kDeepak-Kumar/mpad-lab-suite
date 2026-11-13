@@ -93,7 +93,7 @@ export function DocRenderer(p: RenderInput) {
           if (layoutDone) return null;
           layoutDone = true;
           const rb = t.blocks.find((x) => x.type === 'results');
-          return layoutBlocks(layout.sections, { number: p.number ?? '', issueText: p.data.issueText ?? '', pageOf: `Page 1 of ${p.pages ?? 1}` }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
+          return layoutBlocks(layout.sections, { number: p.number ?? '', ulr: p.data.ulr ?? '', issueText: p.data.issueText ?? '', pageOf: `Page 1 of ${p.pages ?? 1}` }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
         }
         const el = renderBlock(b, p, ctx);
         if (!el) return null;

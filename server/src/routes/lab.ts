@@ -96,7 +96,7 @@ lab.post('/samples', allow('samples'), h(async (req) => {
   return db.transaction(async (trx) => {
     const ctx = { date: s.received_date, client: client.short_code || client.name.replace(/[^A-Za-z]/g, '').slice(0, 4), material: s.material };
     const { seq, number: code } = await nextNumber(trx, cid, 'sample', ctx);
-    const ulr = accreditation === 'NABL' ? await formatWithSeq(cid, 'ulr', seq, ctx, trx) : null;
+    const ulr = null; // NABL: one ULR per test report, assigned when the report is signed and issued
     const { tests, custom, extra, ...sample } = s;
     const id = await insert(trx, 'samples', { ...sample, retention_days: keep, dispose_after: addDays(s.received_date, keep), accreditation, data: toJson(withExtra(mergeCustom(null, custom), extra)), seq, code, ulr, company_id: cid, status: 'registered', created_at: now() });
     const outsourced = new Map<number | null, number[]>();
@@ -153,10 +153,6 @@ lab.put('/samples/:id', allow('samples'), h(async (req) => {
   if (patch.retention_days !== undefined || patch.received_date) {
     const keep = patch.retention_days ?? ex.retention_days ?? await defaultRetention(cid, ex.material);
     patch.retention_days = keep; patch.dispose_after = addDays(patch.received_date ?? ex.received_date, keep);
-  }
-  if (patch.accreditation === 'NABL' && !ex.ulr) {
-    const client = await db('clients').where({ id: ex.client_id }).first();
-    patch.ulr = await formatWithSeq(cid, 'ulr', ex.seq, { date: ex.received_date, client: client?.short_code, material: ex.material });
   }
   if (patch.accreditation === 'Non-NABL') patch.ulr = null;
   await db('samples').where({ id }).update({ ...patch, data: toJson(withExtra(mergeCustom(ex.data, custom), extra)) });

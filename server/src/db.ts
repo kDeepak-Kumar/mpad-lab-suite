@@ -410,6 +410,35 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '015_ulr_at_issue',
+    up: async (k) => {
+      // ULRs are now given once per test report when it is issued ({CERT}{YY}{LOC}{SEQ:8}{FP}).
+      // Keep a certificate number that was typed into the old pattern, use the new pattern, and start this
+      // year's ULR counter above every ULR already printed, so no number is used twice.
+      const year = new Date().getFullYear();
+      const seqOf = (u: unknown) => Number(/(\d{8})[FP]$/.exec(String(u ?? '').trim())?.[1] ?? 0);
+      for (const c of await k('companies').select('id', 'data')) {
+        const data = parseJson<Record<string, any>>(c.data, {});
+        const old = String(data.numbering?.ulr ?? '');
+        const typed = /^([A-Z0-9-]+?)\{YY\}/.exec(old)?.[1];
+        const acc = { ...(data.accreditation ?? {}) };
+        if (typed && typed !== 'TC00000' && (!acc.certNo || /^TC-?0+$/.test(String(acc.certNo).replace(/\s/g, '')))) acc.certNo = typed;
+        if (data.numbering) delete data.numbering.ulr;
+        await k('companies').where({ id: c.id }).update({ data: toJson({ ...data, accreditation: acc }) });
+        const used = [
+          ...(await k('samples').where({ company_id: c.id }).whereNotNull('ulr').where('received_date', '>=', `${year}-01-01`).select('ulr')).map((r: { ulr: string }) => seqOf(r.ulr)),
+          ...(await k('documents').where({ company_id: c.id, kind: 'report' }).where('date', '>=', `${year}-01-01`).select('data')).map((r: { data: unknown }) => seqOf(parseJson<Record<string, unknown>>(r.data, {}).ulr)),
+        ];
+        const max = Math.max(0, ...used);
+        if (!max) continue;
+        const scope = `Y${year}`;
+        const cur = await k('counters').where({ company_id: c.id, kind: 'ulr', scope }).first();
+        if (!cur) await k('counters').insert({ company_id: c.id, kind: 'ulr', scope, value: max });
+        else if (Number(cur.value) < max) await k('counters').where({ company_id: c.id, kind: 'ulr', scope }).update({ value: max });
+      }
+    },
+  },
 ];
 
 /** Tables whose records show Created / Last modified dates (and that admins may correct). */
