@@ -424,3 +424,15 @@ body.has-qv .shell-main { padding-right: calc(440px + var(--shell-gap) + var(--m
 .fsheet .sheet-body { display: flex; flex-direction: column; }
 .fsheet .sheet-body > .mantine-Stack-root { flex: 1 0 auto; }
 .fsheet .form-actions { margin-top: auto; }
+
+/* ---------- small screens: nothing pushes the page sideways ---------- */
+.rec-grid, .rec-main, .rec-side { min-width: 0; }
+@media (max-width: 1100px) { .rec-grid.with-side { grid-template-columns: minmax(0, 1fr); } }
+.mantine-Tabs-list { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.mantine-Tabs-list::-webkit-scrollbar { display: none; }
+.mantine-Tabs-tab { flex: none; white-space: nowrap; }
+.mantine-SegmentedControl-root { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+@media (max-width: 1100px) {
+  .shell-main table.mantine-Table-table { display: block; max-width: 100%; overflow-x: auto; }
+}
+.shell-main { overflow-x: clip; }

@@ -42,7 +42,7 @@ export function PrepareReport() {
         actions={<Button disabled={!fresh.length} loading={busy} onClick={create}>Create {nReports > 1 ? `${nReports} report drafts` : 'report draft'} ({sel.length} test{sel.length === 1 ? '' : 's'})</Button>} />
       <Paper withBorder p="sm" mb="sm">
         <Group justify="space-between" wrap="wrap" gap="sm">
-          <div>
+          <div style={{ minWidth: 0, maxWidth: '100%' }}>
             <Text size="sm" fw={500}>Reports</Text>
             <SegmentedControl size="xs" value={split} onChange={(v) => setSplit(v as typeof split)} data={[{ value: 'none', label: 'One combined report' }, { value: 'each', label: 'One report per test / age' }, { value: 'sample', label: 'One report per sample' }]} />
           </div>
