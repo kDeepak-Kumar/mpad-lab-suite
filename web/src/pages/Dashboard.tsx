@@ -1,22 +1,24 @@
 import { useNavigate } from 'react-router-dom';
 import { type ComponentType, type ReactNode } from 'react';
-import { Badge, Button, Grid, Group, Menu, Paper, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Tooltip, UnstyledButton } from '@mantine/core';
+import { Button, Grid, Group, Menu, Skeleton, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import {
-  IconAlertTriangle, IconArrowDownRight, IconArrowUpRight, IconBell, IconCash, IconChevronRight, IconClipboardList, IconFileInvoice, IconFlask2, IconInfoCircle,
-  IconPlus, IconReceipt2, IconSparkles, IconTestPipe, IconUsers, IconWallet, IconCertificate, IconChecklist, IconFileDollar,
+  IconArrowDownRight, IconArrowUpRight, IconBell, IconChevronDown, IconChevronRight, IconClipboardList, IconFileInvoice, IconFlask2,
+  IconPlus, IconTestPipe, IconUsers, IconWallet, IconCertificate, IconChecklist, IconFileDollar,
 } from '@tabler/icons-react';
 import { useApi, money, compact } from '../api';
 import { useMe, useCan, hasTab } from '../ctx';
-import { Loading } from '../components/ui';
+import { Empty, Loading } from '../components/ui';
 import { AskAI } from './Analytics';
 
-// Fixed, validated chart colours (categorical order never changes; brand colours stay for the interface).
-export const S1 = '#2a78d6', S2 = '#eb6834';
-const UP = '#067647', DOWN = '#b42318';
+// Chart colours: charcoal for the main series, the accent for the one compared against it (they differ in lightness too).
+export const S1 = '#292524', S2 = '#c2410c';
+const UP = '#15803d', DOWN = '#b91c1c';
+const GRID = '#efede8', AXIS = '#6b655e';
 const MONTH = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short' });
 const rupees = (n: number) => `₹${money(n)}`;
 const pct = (now: number, before: number) => (before ? Math.round(((now - before) / before) * 1000) / 10 : now ? null : 0);
+const tipStyle = { borderRadius: 12, border: '1px solid #e7e3db', fontSize: 12.5, boxShadow: '0 16px 40px rgba(28,25,23,.14)', padding: '8px 12px' };
 
 interface Insights {
   months: string[];
@@ -50,140 +52,149 @@ export function Dashboard() {
   const m = ins?.money, lab = ins?.lab;
   const months = ins?.months ?? [];
 
-  return (
-    <Stack gap="md">
-      <div className="dash-hero">
-        <div>
-          <Text className="dash-eyebrow">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-          <Text className="dash-title">Good {hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, {me.user.name.split(' ')[0]}</Text>
-          <Text size="sm" c="dimmed">{data.unread ? `${data.unread} new reminder${data.unread === 1 ? '' : 's'} · ` : ''}{queue.filter((q) => q.value).length ? (() => { const n = queue.reduce((a, q) => a + Number(q.value || 0), 0); return `${n} item${n === 1 ? '' : 's'} waiting in your queue`; })() : 'Your queue is clear'}</Text>
-        </div>
-        <Group gap="xs">
-          {can('viewAnalytics') && <Button variant="default" leftSection={<IconSparkles size={16} />} onClick={() => nav('/analytics')}>Ask AI</Button>}
-          {create.length > 0 && (
-            <Menu shadow="lg" position="bottom-end" width={220}>
-              <Menu.Target><Button leftSection={<IconPlus size={16} />}>Create</Button></Menu.Target>
-              <Menu.Dropdown>{create.map((q) => <Menu.Item key={q.to} leftSection={<q.icon size={16} />} onClick={() => nav(q.to)}>{q.label}</Menu.Item>)}</Menu.Dropdown>
-            </Menu>
-          )}
-        </Group>
-      </div>
+  const waiting = queue.reduce((a, q) => a + Number(q.value || 0), 0);
+  const all = lab ? STAGES.map((st) => ({ ...st, n: lab.testsByStatus[st.key] ?? 0 })) : [];
+  const stages = all.filter((st) => st.n);
+  const open = stages.filter((st) => !['accepted', 'reported'].includes(st.key)).reduce((a, st) => a + st.n, 0);
 
-      {(m || lab) && (
-        <SimpleGrid cols={{ base: 1, xs: 2, lg: m ? 4 : 2 }} spacing="md" maw={m ? undefined : 760}>
-          {m && <Stat icon={IconReceipt2} label="Invoiced this month" value={rupees(m.invoicedThis)} now={m.invoicedThis} before={m.invoicedLast} spark={m.invoiced} onClick={() => nav('/invoices')} />}
-          {m && <Stat icon={IconCash} label="Collected this month" value={rupees(m.collectedThis)} now={m.collectedThis} before={m.collectedLast} spark={m.collected} onClick={() => nav('/payments')} />}
-          {lab && <Stat icon={IconTestPipe} label="Samples received" value={String(lab.samplesThis)} now={lab.samplesThis} before={lab.samplesLast} spark={lab.samplesByMonth} onClick={() => nav('/samples')} />}
-          {m && <Stat icon={IconWallet} label="Outstanding" value={rupees(m.outstanding)} sub={m.overdue ? <Text size="xs" c={DOWN} fw={600}><IconAlertTriangle size={12} style={{ verticalAlign: -1 }} /> {rupees(m.overdue)} over 30 days</Text> : <Text size="xs" c="dimmed">Nothing overdue</Text>} onClick={() => nav('/ledger')} />}
-          {!m && lab && <Stat icon={IconFlask2} label="Tests registered this month" value={String(lab.testsThis)} now={lab.testsThis} before={lab.testsLast} onClick={() => nav('/tests')} />}
-        </SimpleGrid>
-      )}
-      {!ins && <SimpleGrid cols={{ base: 1, xs: 2, lg: 4 }}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} h={118} radius="lg" />)}</SimpleGrid>}
+  return (
+    <div className="dash">
+      <header className="dash-hero">
+        <div style={{ minWidth: 0 }}>
+          <div className="dash-eyebrow">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+          <h1 className="dash-title">Good {hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, {me.user.name.split(' ')[0]}</h1>
+          <div className="dash-sub">{waiting ? <>{waiting} {waiting === 1 ? 'item is' : 'items are'} waiting in your queue</> : 'Your queue is clear'}{data.unread ? ` · ${data.unread} new reminder${data.unread === 1 ? '' : 's'}` : ''}</div>
+        </div>
+        {create.length > 0 && (
+          <Menu position="bottom-end" width={220}>
+            <Menu.Target><Button leftSection={<IconPlus size={16} />} rightSection={<IconChevronDown size={14} />}>New</Button></Menu.Target>
+            <Menu.Dropdown>{create.map((q) => <Menu.Item key={q.to} leftSection={<q.icon size={16} />} onClick={() => nav(q.to)}>{q.label}</Menu.Item>)}</Menu.Dropdown>
+          </Menu>
+        )}
+      </header>
 
       <Grid gutter="md">
-        <Grid.Col span={{ base: 12, lg: 8 }}>
+        {(m || lab) && <Grid.Col span={12} order={{ base: 2, lg: 0 }}>
+        <div className="dash-kpis" style={{ ['--n' as any]: m ? 4 : 2 }}>
+          {m && <Stat label="Invoiced this month" value={rupees(m.invoicedThis)} now={m.invoicedThis} before={m.invoicedLast} spark={m.invoiced} onClick={() => nav('/invoices')} />}
+          {m && <Stat label="Collected this month" value={rupees(m.collectedThis)} now={m.collectedThis} before={m.collectedLast} spark={m.collected} sub={m.invoicedThis ? <span>{Math.round((100 * m.collectedThis) / m.invoicedThis)}% of this month’s invoicing</span> : undefined} onClick={() => nav('/payments')} />}
+          {lab && <Stat label="Samples received" value={String(lab.samplesThis)} now={lab.samplesThis} before={lab.samplesLast} spark={lab.samplesByMonth} onClick={() => nav('/samples')} />}
+          {m && <Stat label="Outstanding" value={rupees(m.outstanding)} tone={m.overdue ? 'bad' : undefined} sub={m.overdue ? <span className="dn">{rupees(m.overdue)} over 30 days</span> : <span>Nothing overdue</span>} onClick={() => nav('/ledger')} />}
+          {!m && lab && <Stat label="Tests registered this month" value={String(lab.testsThis)} now={lab.testsThis} before={lab.testsLast} onClick={() => nav('/tests')} />}
+        </div>
+        </Grid.Col>}
+        {!ins && <Grid.Col span={12} order={{ base: 2, lg: 0 }}> <div className="dash-kpis" style={{ ['--n' as any]: 4 }}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} h={112} radius={16} />)}</div></Grid.Col>}
+
+        {lab && (
+          <Grid.Col span={{ base: 12, lg: 8 }} order={{ base: 3, lg: 1 }}>
+            <Card title="Lab pipeline" sub={open ? `${open} ${open === 1 ? 'test' : 'tests'} in progress across all samples` : 'No tests in progress'} action={<Button size="compact-sm" variant="subtle" color="gray" rightSection={<IconChevronRight size={14} />} onClick={() => nav('/tests')}>Tests</Button>}>
+              {stages.length ? <>
+                <div className="pipe-bar" role="img" aria-label={stages.map((st) => `${st.label} ${st.n}`).join(', ')}>{stages.map((st) => <Tooltip key={st.key} label={`${st.label}: ${st.n}`}><span style={{ flex: st.n, background: st.color }} /></Tooltip>)}</div>
+                <div className="pipe-tiles">
+                  {all.map((st) => (
+                    <UnstyledButton key={st.key} className={`pipe-tile${st.n ? '' : ' zero'}`} onClick={() => nav(st.to)}>
+                      <span className="pipe-l"><i style={{ background: st.color }} />{st.label}</span>
+                      <span className="pipe-v">{st.n}</span>
+                    </UnstyledButton>
+                  ))}
+                </div>
+              </> : <Empty title="No tests yet">Register a sample to start the first test.</Empty>}
+            </Card>
+          </Grid.Col>
+        )}
+        <Grid.Col span={{ base: 12, lg: lab ? 4 : 12 }} order={{ base: 1, lg: 2 }}>
+          <Card title="Your queue" sub="Work waiting for your role" count={waiting || undefined}>
+            <div className="queue">
+              {queue.map((q) => (
+                <UnstyledButton key={q.label} className={`queue-row${q.value ? '' : ' zero'}`} onClick={() => nav(q.to)}>
+                  <span className="queue-ic"><q.icon size={16} stroke={1.75} /></span>
+                  <span className="queue-t">{q.label}</span>
+                  {q.value ? <span className={`pill ${q.alert ? 'p-acc' : 'p-neu'}`}>{q.value}</span> : <span className="queue-zero">None</span>}
+                  <IconChevronRight size={15} className="queue-chev" />
+                </UnstyledButton>
+              ))}
+              {!queue.length && <Text size="sm" c="dimmed">Nothing is assigned to your role.</Text>}
+            </div>
+          </Card>
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 12, lg: 8 }} order={3}>
           {m ? (
-            <Card title="Invoiced vs collected" sub="Last 12 months" action={<Button size="compact-sm" variant="subtle" rightSection={<IconChevronRight size={14} />} onClick={() => nav('/analytics')}>Analytics</Button>}>
-              <div style={{ height: 270 }}>
+            <Card title="Invoiced vs collected" sub="Last 12 months" action={<Button size="compact-sm" variant="subtle" color="gray" rightSection={<IconChevronRight size={14} />} onClick={() => nav('/analytics')}>Analytics</Button>}>
+              <div className="dash-legend"><span><i style={{ background: S2 }} />Invoiced</span><span><i style={{ background: S1 }} />Collected</span></div>
+              <div style={{ height: 250 }}>
                 <ResponsiveContainer>
-                  <LineChart data={months.map((mm, i) => ({ m: MONTH(mm), Invoiced: m.invoiced[i], Collected: m.collected[i] }))} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="#eef0f3" />
-                    <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#667085' }} />
-                    <YAxis tickLine={false} axisLine={false} width={56} tick={{ fontSize: 12, fill: '#667085' }} tickFormatter={(v) => `₹${compact(v)}`} />
-                    <RTooltip formatter={(v: number) => rupees(v)} contentStyle={{ borderRadius: 10, border: '1px solid #e4e8ee', fontSize: 13 }} cursor={{ stroke: '#d0d5dd' }} />
-                    <Legend iconType="plainline" wrapperStyle={{ fontSize: 13, color: '#344054' }} />
-                    <Line type="linear" dataKey="Invoiced" stroke={S1} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
-                    <Line type="linear" dataKey="Collected" stroke={S2} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+                  <LineChart data={months.map((mm, i) => ({ m: MONTH(mm), Invoiced: m.invoiced[i], Collected: m.collected[i] }))} margin={{ top: 8, right: 16, left: 4, bottom: 0 }}>
+                    <CartesianGrid vertical={false} stroke={GRID} />
+                    <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fontSize: 11.5, fill: AXIS }} interval="preserveStartEnd" minTickGap={8} padding={{ left: 8, right: 8 }} />
+                    <YAxis tickLine={false} axisLine={false} width={60} tick={{ fontSize: 11.5, fill: AXIS }} tickFormatter={(v) => `₹${compact(v)}`} />
+                    <RTooltip formatter={(v: number) => rupees(v)} contentStyle={tipStyle} cursor={{ stroke: '#d8d3c9', strokeDasharray: '3 3' }} />
+                    <Line type="monotone" dataKey="Invoiced" stroke={S2} strokeWidth={2} dot={false} activeDot={{ r: 4.5, strokeWidth: 2, stroke: '#fff' }} />
+                    <Line type="monotone" dataKey="Collected" stroke={S1} strokeWidth={2} dot={false} activeDot={{ r: 4.5, strokeWidth: 2, stroke: '#fff' }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </Card>
           ) : lab ? <IntakeCard lab={lab} /> : null}
         </Grid.Col>
-        <Grid.Col span={{ base: 12, lg: 4 }}>
-          <Card title="Your queue" sub="Work waiting for you">
-            <Stack gap={4}>
-              {queue.map((q) => (
-                <UnstyledButton key={q.label} className="dash-queue" onClick={() => nav(q.to)}>
-                  <ThemeIcon variant="light" radius="md" size={34} color={q.alert ? 'orange' : 'brand'}><q.icon size={18} /></ThemeIcon>
-                  <Text size="sm" fw={550} style={{ flex: 1 }}>{q.label}</Text>
-                  <Text fw={700} fz={18} style={{ fontVariantNumeric: 'tabular-nums' }}>{q.value}</Text>
-                  <IconChevronRight size={16} color="#98a2b3" />
-                </UnstyledButton>
-              ))}
-              {!queue.length && <Text size="sm" c="dimmed">Nothing assigned to your role.</Text>}
-            </Stack>
-          </Card>
-        </Grid.Col>
+        <Grid.Col span={{ base: 12, lg: 4 }} order={4}><Reminders data={data} /></Grid.Col>
 
-        {m && lab && <Grid.Col span={{ base: 12, lg: 8 }}><IntakeCard lab={lab} /></Grid.Col>}
-        {lab && <Grid.Col span={{ base: 12, lg: 4 }}>
-          <Card title="Tests by stage" sub="All open and finished tests">
-            <BarList rows={STAGES.filter((s) => lab.testsByStatus[s.key]).map((s) => ({ label: s.label, value: lab.testsByStatus[s.key], onClick: () => nav(s.to) }))} empty="No tests yet" />
-          </Card>
-        </Grid.Col>}
-
-        {m && <Grid.Col span={{ base: 12, md: 6, lg: 4 }}>
+        {m && lab && <Grid.Col span={{ base: 12, lg: 6 }} order={5}><IntakeCard lab={lab} /></Grid.Col>}
+        {m && <Grid.Col span={{ base: 12, md: 6, lg: 3 }} order={6}>
           <Card title="Top clients" sub="Invoiced, last 12 months">
             <BarList rows={m.topClients.map((t) => ({ label: t.name, value: t.total, display: `${rupees(t.total)} · ${t.share}%` }))} empty="No invoices yet" />
           </Card>
         </Grid.Col>}
-        {m && <Grid.Col span={{ base: 12, md: 6, lg: 4 }}>
-          <Card title="Receivables by age" sub="Unpaid invoice balance" action={<Button size="compact-sm" variant="subtle" onClick={() => nav('/ledger')}>Ledgers</Button>}>
+        {m && <Grid.Col span={{ base: 12, md: 6, lg: 3 }} order={7}>
+          <Card title="Receivables by age" sub="Unpaid invoice balance" action={<Button size="compact-sm" variant="subtle" color="gray" onClick={() => nav('/ledger')}>Ledgers</Button>}>
             <BarList rows={m.aging.map((a) => ({ label: `${a.label}`, value: a.amount, display: rupees(a.amount), warn: a.label !== '0–30 days' && a.amount > 0 }))} empty="Nothing outstanding" />
           </Card>
         </Grid.Col>}
-        <Grid.Col span={{ base: 12, lg: m ? 4 : lab ? 8 : 12 }}>
-          <Reminders data={data} />
-        </Grid.Col>
-        {can('viewAnalytics') && <Grid.Col span={12}><AskAI onOpen={() => nav('/analytics?tab=builder')} /></Grid.Col>}
+        {can('viewAnalytics') && <Grid.Col span={12} order={8}><AskAI onOpen={() => nav('/analytics?tab=builder')} /></Grid.Col>}
       </Grid>
-    </Stack>
+    </div>
   );
 }
 
+/** Test stages in workflow order; colours differ in lightness as well as hue. */
 const STAGES = [
-  { key: 'pending', label: 'Not started', to: '/tests' }, { key: 'in_progress', label: 'In progress', to: '/tests' }, { key: 'returned', label: 'Returned for correction', to: '/tests' },
-  { key: 'submitted', label: 'Awaiting review', to: '/tests?tab=review' }, { key: 'accepted', label: 'Accepted', to: '/reports/prepare' }, { key: 'reported', label: 'Reported', to: '/reports' },
+  { key: 'pending', label: 'Not started', to: '/tests', color: '#d8d3c9' }, { key: 'in_progress', label: 'In progress', to: '/tests', color: '#1d4ed8' },
+  { key: 'returned', label: 'Returned', to: '/tests', color: '#b91c1c' }, { key: 'submitted', label: 'To review', to: '/tests?tab=review', color: '#a16207' },
+  { key: 'accepted', label: 'Ready for report', to: '/reports/prepare', color: '#c2410c' }, { key: 'reported', label: 'Reported', to: '/reports', color: '#15803d' },
 ];
 
-export function Card({ title, sub, action, children }: { title: string; sub?: string; action?: ReactNode; children: ReactNode }) {
+export function Card({ title, sub, action, children, count }: { title: string; sub?: string; action?: ReactNode; children: ReactNode; count?: number }) {
   return (
-    <Paper withBorder radius="lg" p="md" h="100%" className="dash-card">
-      <Group justify="space-between" mb="sm" wrap="nowrap" align="flex-start">
-        <div><Text fw={650}>{title}</Text>{sub && <Text size="xs" c="dimmed">{sub}</Text>}</div>{action}
-      </Group>
+    <section className="card dash-card">
+      <header className="dash-card-h">
+        <div style={{ minWidth: 0 }}><h3>{title}{count ? <span className="cnt acc" style={{ marginLeft: 8, verticalAlign: 2 }}>{count}</span> : null}</h3>{sub && <div className="dash-card-sub">{sub}</div>}</div>{action}
+      </header>
       {children}
-    </Paper>
+    </section>
   );
 }
 
-export function Stat({ icon: Icon, label, value, now, before, spark, sub, onClick, vs = 'vs last month' }: { icon: ComponentType<{ size?: number | string }>; label: string; value: string; now?: number; before?: number; spark?: number[]; sub?: ReactNode; onClick?: () => void; vs?: string }) {
+/** A figure card. `icon` is accepted for older callers and not drawn: the label names the figure. */
+export function Stat({ label, value, now, before, spark, sub, onClick, vs = 'vs last month', tone }: { icon?: ComponentType<any>; label: string; value: string; now?: number; before?: number; spark?: number[]; sub?: ReactNode; onClick?: () => void; vs?: string; tone?: 'bad' }) {
   const p = now !== undefined && before !== undefined ? pct(now, before) : undefined;
   return (
-    <UnstyledButton className="dash-stat" onClick={onClick}>
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <div className="dash-stat-ic"><Icon size={20} /></div>
-        {spark && spark.some(Boolean) && <Spark values={spark} />}
-      </Group>
-      <Text size="sm" c="dimmed" mt="sm" fw={550}>{label}</Text>
-      <Text className="dash-stat-value">{value}</Text>
-      {sub ?? (p === undefined ? null : p === null ? <Text size="xs" c="dimmed">Nothing to compare yet</Text> : (
-        <Group gap={4}>
-          <Badge size="sm" variant="light" color={p >= 0 ? 'green' : 'red'} leftSection={p >= 0 ? <IconArrowUpRight size={12} /> : <IconArrowDownRight size={12} />} style={{ textTransform: 'none' }}>{Math.abs(p)}%</Badge>
-          <Text size="xs" c="dimmed">{vs}</Text>
-        </Group>
-      ))}
+    <UnstyledButton className="kpi clickable dash-stat" onClick={onClick}>
+      <div className="dash-stat-top"><span className="kpi-label">{label}</span>{spark && spark.some(Boolean) && <Spark values={spark} />}</div>
+      <div className="kpi-value" style={tone === 'bad' ? { color: DOWN } : undefined}>{value}</div>
+      <div className="dash-stat-d">
+        {p !== undefined && p !== null && <span className={p >= 0 ? 'up' : 'dn'} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>{p >= 0 ? <IconArrowUpRight size={13} /> : <IconArrowDownRight size={13} />}{Math.abs(p)}%</span>}
+        {sub ?? (p === undefined ? null : p === null ? <span>First month with figures</span> : <span>{vs}</span>)}
+      </div>
     </UnstyledButton>
   );
 }
 
-/** Tiny trend line for a stat tile (no axes; the tile names it). */
+/** Tiny trend line for a figure card (no axes; the card names it). */
 function Spark({ values }: { values: number[] }) {
-  const w = 84, h = 30, max = Math.max(...values, 1);
+  const w = 72, h = 26, max = Math.max(...values, 1);
   const pts = values.map((v, i) => `${(i / (values.length - 1)) * (w - 4) + 2},${h - 3 - (v / max) * (h - 6)}`).join(' ');
   const last = pts.split(' ').pop()!.split(',');
-  return <svg width={w} height={h} aria-hidden><polyline points={pts} fill="none" stroke={S1} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" /><circle cx={last[0]} cy={last[1]} r={3} fill={S1} stroke="#fff" strokeWidth={1.5} /></svg>;
+  return <svg width={w} height={h} aria-hidden style={{ flex: 'none' }}><polyline points={pts} fill="none" stroke="#a8a29a" strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" /><circle cx={last[0]} cy={last[1]} r={2.6} fill="#1c1917" /></svg>;
 }
 
 export function BarList({ rows, empty }: { rows: { label: string; value: number; display?: string; warn?: boolean; onClick?: () => void }[]; empty: string }) {
@@ -198,7 +209,7 @@ export function BarList({ rows, empty }: { rows: { label: string; value: number;
               <Text size="sm" truncate style={{ minWidth: 0 }}>{r.label}</Text>
               <Text size="sm" fw={600} style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }} c={r.warn ? DOWN : undefined}>{r.display ?? r.value}</Text>
             </Group>
-            <div className="dash-bar"><span style={{ width: `${Math.max(2, (r.value / max) * 100)}%`, background: S1 }} /></div>
+            <div className="bar" style={{ width: '100%' }}><span className={r.warn ? 'warn' : ''} style={{ width: `${Math.max(2, (r.value / max) * 100)}%` }} /></div>
           </UnstyledButton>
         </Tooltip>
       ))}
@@ -213,18 +224,18 @@ function IntakeCard({ lab }: { lab: NonNullable<Insights['lab']> }) {
         <Grid.Col span={{ base: 12, sm: 8 }}>
           <div style={{ height: 220 }}>
             <ResponsiveContainer>
-              <BarChart data={lab.intake.map((d) => ({ d: new Date(d.day + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), Samples: d.count }))} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke="#eef0f3" />
-                <XAxis dataKey="d" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#667085' }} interval={1} />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#667085' }} />
-                <RTooltip cursor={{ fill: '#f2f4f7' }} contentStyle={{ borderRadius: 10, border: '1px solid #e4e8ee', fontSize: 13 }} />
-                <Bar dataKey="Samples" fill={S1} radius={[4, 4, 0, 0]} maxBarSize={22} />
+              <BarChart data={lab.intake.map((d) => ({ d: new Date(d.day + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), Samples: d.count }))} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke={GRID} />
+                <XAxis dataKey="d" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: AXIS }} interval="preserveStartEnd" minTickGap={14} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} tick={{ fontSize: 11.5, fill: AXIS }} />
+                <RTooltip cursor={{ fill: '#f3f1ec' }} contentStyle={tipStyle} />
+                <Bar dataKey="Samples" fill={S1} radius={[4, 4, 0, 0]} maxBarSize={20} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Grid.Col>
         <Grid.Col span={{ base: 12, sm: 4 }}>
-          <Text size="xs" c="dimmed" fw={600} mb={8}>BY MATERIAL · 90 DAYS</Text>
+          <div className="dash-mini-h">By material · 90 days</div>
           <BarList rows={lab.materials.map((x) => ({ label: x.name, value: x.count }))} empty="No samples yet" />
         </Grid.Col>
       </Grid>
@@ -234,20 +245,22 @@ function IntakeCard({ lab }: { lab: NonNullable<Insights['lab']> }) {
 
 function Reminders({ data }: { data: any }) {
   const nav = useNavigate();
+  const tone = (l: string) => (l === 'danger' ? 'bad' : l === 'warning' ? 'warn' : 'info');
   return (
-    <Card title="Reminders" sub="Due tests, calibrations, follow-ups and payments" action={<Badge variant="light">{data.unread ?? data.reminders.length} new</Badge>}>
-      <Stack gap={2} mah={360} style={{ overflow: 'auto' }}>
-        {data.reminders.length === 0 && <Group gap={6}><IconBell size={16} color="#98a2b3" /><Text size="sm" c="dimmed">All clear. Nothing overdue.</Text></Group>}
+    <Card title="Needs attention" sub="Due tests, calibrations, follow-ups and payments" count={data.reminders.length || undefined}>
+      <div className="rem-list">
+        {data.reminders.length === 0 && <Empty icon={<IconBell size={20} stroke={1.6} />} title="All clear">Nothing is overdue.</Empty>}
         {data.reminders.map((r: any, i: number) => (
-          <UnstyledButton key={i} className="dash-rem" onClick={() => nav(r.link)}>
-            {r.level === 'info' ? <IconInfoCircle size={18} color="#2a78d6" /> : <IconAlertTriangle size={18} color={r.level === 'danger' ? '#d92d20' : '#dc6803'} />}
+          <UnstyledButton key={i} className="rem" onClick={() => nav(r.link)}>
+            <span className={`rem-dot ${tone(r.level)}`} />
             <div style={{ minWidth: 0, flex: 1 }}>
-              <Text size="xs" fw={650} c={r.level === 'danger' ? 'red.7' : r.level === 'warning' ? 'orange.8' : 'blue.7'}>{r.kind}</Text>
+              <div className={`rem-k ${tone(r.level)}`}>{r.kind}</div>
               <Text size="sm" lineClamp={2}>{r.text}</Text>
             </div>
+            <IconChevronRight size={15} className="queue-chev" />
           </UnstyledButton>
         ))}
-      </Stack>
+      </div>
     </Card>
   );
 }
