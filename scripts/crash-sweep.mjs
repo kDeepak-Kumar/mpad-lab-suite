@@ -46,7 +46,10 @@ const docs = await api(o, '/documents');
 for (const kind of ['quote', 'invoice', 'report']) for (const d of docs.filter((x) => x.kind === kind).slice(0, 3)) {
   await visit(o, `/documents/${d.id}`, `${kind} ${d.number ?? d.id}`);
   for (const tab of ['Layout', 'History']) await clickThen(o, o.getByRole('tab', { name: tab }), `${kind} ${d.id} tab ${tab}`);
-  for (const b of ['Email', 'WhatsApp', 'Sharing', 'Duplicate']) await clickThen(o, o.getByRole('button', { name: b, exact: true }), `${kind} ${d.id} ${b}`, () => esc(o));
+  for (const [menu, item] of [['Share', 'Email…'], ['Share', 'WhatsApp…'], ['More actions', 'Sharing & access…'], ['More actions', 'Duplicate…']]) {
+    const m = o.getByRole('button', { name: menu, exact: true });
+    if (await m.count()) { await esc(o); await m.first().click().catch(() => {}); await o.waitForTimeout(400); await clickThen(o, o.getByRole('menuitem', { name: item, exact: true }), `${kind} ${d.id} ${item}`, () => esc(o)); await esc(o); }
+  }
 }
 const clients = await api(o, '/clients');
 for (const c of clients.slice(0, 3)) {

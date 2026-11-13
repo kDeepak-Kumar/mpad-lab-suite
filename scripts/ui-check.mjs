@@ -68,7 +68,7 @@ const inputs = tech.locator('table.grid-input input');
 for (let i = 0; i < prr.length; i++) await inputs.nth(i).fill(String(prr[i]));
 await tech.waitForTimeout(400);
 const sheet = await tech.locator('.print-root').innerText();
-if (!/Reported CBR value:\s*16\.0/.test(sheet)) problems.push('observation: live CBR is not 16.0');
+if (!/Reported CBR value:?\s*16\.0/.test(sheet)) problems.push('observation: live CBR is not 16.0');
 await shot(tech, 'observation-cbr-entered');
 await tech.getByRole('button', { name: 'Submit for review' }).click();
 await tech.waitForTimeout(1200);

@@ -48,7 +48,7 @@ export function TypeBadge({ value }: { value?: string | null }) {
 /** Stage stepper: done steps are ticked, the current one carries the accent. */
 export function Path({ steps, current }: { steps: { key: string; label: string }[]; current: string }) {
   const idx = steps.findIndex((s) => s.key === current);
-  return <div className="path no-print" role="list" aria-label="Progress">{steps.map((s, i) => <div key={s.key} role="listitem" aria-current={i === idx ? 'step' : undefined} className={`path-step${i < idx ? ' done' : i === idx ? ' current' : ''}`}>{s.label}</div>)}</div>;
+  return <div className="path no-print" role="list" aria-label="Progress">{steps.map((s, i) => <div key={s.key} role="listitem" aria-current={i === idx ? 'step' : undefined} className={`path-step${i < idx || (i === idx && i === steps.length - 1) ? ' done' : i === idx ? ' current' : ''}`}>{s.label}</div>)}</div>;
 }
 
 export function Loading() {

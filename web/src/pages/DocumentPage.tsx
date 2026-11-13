@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMediaQuery } from '@mantine/hooks';
-import { Alert, Button, Checkbox, Grid, Group, Menu, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch } from '@mantine/core';
-import { IconFileSearch, IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck, IconCopy } from '@tabler/icons-react';
+import { ActionIcon, Alert, Button, Checkbox, Grid, Group, Menu, Modal, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Badge, Anchor, Switch, Tooltip } from '@mantine/core';
+import { IconFileSearch, IconDownload, IconMail, IconPrinter, IconChevronDown, IconSparkles, IconLockOpen, IconCheck, IconCopy, IconSend, IconBrandWhatsapp, IconFileTypePdf, IconFileTypeDoc, IconPhoto, IconDots, IconUsersGroup, IconLock } from '@tabler/icons-react';
 import { applyOverrides, buildLayout, computeTotals, DEFAULT_TEMPLATES, refreshRoles, type DocOverrides, type DocTemplate, type LineInput, type ReportLayout, type Section } from '@suite/shared';
 import { api, ok, useApi, dmy, money } from '../api';
 import { useCan, useMe, isAdmin, useFields } from '../ctx';
@@ -10,7 +10,7 @@ import { PageHeader, StatusBadge, TypeBadge, Loading, Path } from '../components
 import { RecordForm } from '../components/RecordForm';
 import { DocRenderer } from '../doc/DocRenderer';
 import { WhatsAppButton, WhatsAppModal, docWaVars } from '../components/WhatsApp';
-import { trackRecent } from '../favorites';
+import { FavStar, trackRecent } from '../favorites';
 import { TermsPicker } from '../components/Terms';
 import { SharingButton, SharingModal } from '../components/Sharing';
 import { DesignPanel } from '../doc/DesignPanel';
@@ -197,30 +197,52 @@ function DocumentView({ id }: { id: number }) {
 
   return (
     <>
-      <PageHeader eyebrow={KIND_LABEL[doc.kind]} fav={{ label: doc.number ?? `Draft #${doc.id}`, sub: `${KIND_LABEL[doc.kind]} · ${data.client?.name ?? ''}` }}
-        title={<Group gap="sm">{doc.number ?? <Text span c="dimmed" fz={22}>Draft #{doc.id}</Text>} <StatusBadge status={doc.status} /><TypeBadge value={data.accreditation} />{doc.revision ? <Badge variant="outline">Rev {doc.revision}</Badge> : null}</Group>}
-        subtitle={<>{data.client?.name}{data.site ? ` · ${data.site.name}` : ''} · {dmy(doc.date)}{doc.kind === 'invoice' && doc.paid !== undefined && doc.status !== 'draft' ? ` · received ₹${money(doc.paid)} of ₹${money(doc.total)}` : ''}{doc.owner_name ? ` · Owner: ${doc.owner_name}` : ''}{dirty && editable ? ' · saving…' : ''}</>}
-        actions={<>
+      <Crumb kind={doc.kind} label={doc.number ?? `Draft #${doc.id}`} />
+      <header className="ws-head no-print">
+        <div className="ws-id">
+          <div className="rec-eyebrow">{KIND_LABEL[doc.kind]}</div>
+          <div className="rec-title-row">
+            <h1 className="rec-title tnum">{doc.number ?? <span style={{ color: 'var(--muted)' }}>Draft #{doc.id}</span>}</h1>
+            <FavStar kind="document" refKey={`/documents/${doc.id}`} label={doc.number ?? `Draft #${doc.id}`} sub={`${KIND_LABEL[doc.kind]} · ${data.client?.name ?? ''}`} />
+            <StatusBadge status={doc.status} /><TypeBadge value={data.accreditation} />{doc.revision ? <span className="tag t-non">REV {doc.revision}</span> : null}
+          </div>
+          <div className="rec-meta">{data.client?.name && <span>{data.client.name}{data.site ? ` · ${data.site.name}` : ''}</span>}<span className="tnum">{dmy(doc.date)}</span>{doc.kind === 'invoice' && doc.paid !== undefined && doc.status !== 'draft' ? <span className="tnum">Received ₹{money(doc.paid)} of ₹{money(doc.total)}</span> : null}{doc.owner_name ? <span>Owner: {doc.owner_name}</span> : null}{(saving || (dirty && editable)) && <span className="ws-saving">Saving…</span>}</div>
+        </div>
+        <div className="ws-actions">
           {actions}
-          <AdminDelete object={doc.kind} id={doc.id} compact onDeleted={() => nav(({ quote: '/quotes', invoice: '/invoices', report: '/reports' } as Record<string, string>)[doc.kind] ?? '/')} />
-          {['quote', 'invoice'].includes(doc.kind) && <SharingButton access={doc.access} onClick={() => setShareOpen(true)} />}
-          <Menu shadow="lg"><Menu.Target><Button variant="default" leftSection={<IconDownload size={16} />}>Export</Button></Menu.Target><Menu.Dropdown>
-            <Menu.Item leftSection={<IconPrinter size={14} />} onClick={async () => { setSelected(null); setLsel(null); const m = await exportLib(); await m.printDocument(printRef.current!); }}>Print (A4, 300 dpi)</Menu.Item>
-            <Menu.Item onClick={() => { setSelected(null); setTimeout(() => window.print(), 50); }}>Print from the browser (text stays selectable)</Menu.Item>
-            <Menu.Item onClick={() => exp('downloadPdf')}>Download PDF</Menu.Item>
-            <Menu.Item onClick={() => exp('downloadPng')}>Download PNG image</Menu.Item>
-            <Menu.Item onClick={() => exp('downloadDoc')}>Download Word (.doc)</Menu.Item>
+          <Menu position="bottom-end" width={240}>
+            <Menu.Target><Button variant="default" leftSection={<IconSend size={15} />} rightSection={<IconChevronDown size={14} />}>Share</Button></Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IconMail size={15} />} onClick={() => setEmailOpen(true)}>Email…</Menu.Item>
+              {doc.kind !== 'report' || issued ? <Menu.Item leftSection={<IconBrandWhatsapp size={15} />} onClick={async () => { await save(true); setSelected(null); setWaOpen(true); }}>WhatsApp…</Menu.Item>
+                : <Menu.Item disabled leftSection={<IconBrandWhatsapp size={15} />}>WhatsApp – after the report is issued</Menu.Item>}
+            </Menu.Dropdown>
+          </Menu>
+          <Menu position="bottom-end" width={270}><Menu.Target><Button variant="default" leftSection={<IconDownload size={15} />}>Export</Button></Menu.Target><Menu.Dropdown>
+            <Menu.Label>Print</Menu.Label>
+            <Menu.Item leftSection={<IconPrinter size={15} />} onClick={async () => { setSelected(null); setLsel(null); const m = await exportLib(); await m.printDocument(printRef.current!); }}>Print (A4, 300 dpi)</Menu.Item>
+            <Menu.Item leftSection={<IconPrinter size={15} />} onClick={() => { setSelected(null); setTimeout(() => window.print(), 50); }}>Print from the browser (text stays selectable)</Menu.Item>
+            <Menu.Label>Download</Menu.Label>
+            <Menu.Item leftSection={<IconFileTypePdf size={15} />} onClick={() => exp('downloadPdf')}>Download PDF</Menu.Item>
+            <Menu.Item leftSection={<IconPhoto size={15} />} onClick={() => exp('downloadPng')}>Download PNG image</Menu.Item>
+            <Menu.Item leftSection={<IconFileTypeDoc size={15} />} onClick={() => exp('downloadDoc')}>Download Word (.doc)</Menu.Item>
           </Menu.Dropdown></Menu>
-          <Button variant="default" leftSection={<IconMail size={16} />} onClick={() => setEmailOpen(true)}>Email</Button>
-          {doc.kind !== 'report' || issued ? <WhatsAppButton onClick={async () => { await save(true); setSelected(null); setWaOpen(true); }} /> : null}
-          {['quote', 'invoice'].includes(doc.kind) && can(`${doc.kind}.create`) && <Button variant="subtle" leftSection={<IconCopy size={16} />} onClick={() => setDupOpen(true)}>Duplicate</Button>}
-          {saving && <Text size="xs" c="dimmed">Saving…</Text>}
-        </>} />
-      <div style={{ marginBottom: 14 }}><Path steps={PATHS[doc.kind]} current={doc.status === 'sent' && doc.kind === 'quote' ? 'sent' : doc.status} /></div>
+          {(['quote', 'invoice'].includes(doc.kind)) && (
+            <Menu position="bottom-end" width={220}>
+              <Menu.Target><Tooltip label="More actions"><ActionIcon variant="default" size={36} aria-label="More actions"><IconDots size={16} /></ActionIcon></Tooltip></Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<IconUsersGroup size={15} />} onClick={() => setShareOpen(true)}>Sharing & access…</Menu.Item>
+                {can(`${doc.kind}.create`) && <Menu.Item leftSection={<IconCopy size={15} />} onClick={() => setDupOpen(true)}>Duplicate…</Menu.Item>}
+              </Menu.Dropdown>
+            </Menu>
+          )}
+          <AdminDelete object={doc.kind} id={doc.id} compact onDeleted={() => nav(({ quote: '/quotes', invoice: '/invoices', report: '/reports' } as Record<string, string>)[doc.kind] ?? '/')} />
+        </div>
+      </header>
+      <div className="ws-path no-print"><Path steps={PATHS[doc.kind]} current={doc.status === 'sent' && doc.kind === 'quote' ? 'sent' : doc.status} />{issued && <span className="ws-lock"><IconLock size={14} />This document is {doc.status === 'cancelled' ? 'cancelled' : 'issued and locked'}.{admin ? ' As System Admin you can unlock it to make changes (logged).' : doc.kind === 'report' ? ' Use Amend to issue a corrected revision.' : ''}</span>}</div>
       {doc.kind === 'report' && data.workflowNote && doc.status === 'draft' && <Alert color="orange" mb="sm" title="Sent back by the signatory">{data.workflowNote}</Alert>}
-      {issued && <Alert color="teal" variant="light" mb="sm">This document is {doc.status === 'cancelled' ? 'cancelled' : 'issued and locked'}.{admin ? ' As System Admin you can unlock it to make changes (logged).' : doc.kind === 'report' ? ' Use Amend to issue a corrected revision.' : ''}</Alert>}
-      <Grid gutter="md">
-        <Grid.Col span={{ base: 12, xl: 5 }} className="no-print">
+      <div className="ws-grid">
+        <div className="ws-insp no-print">
           <Tabs value={tab} onChange={setTab}>
             <Tabs.List mb="sm"><Tabs.Tab value="details">Details</Tabs.Tab>{phone && <Tabs.Tab value="preview">Preview</Tabs.Tab>}<Tabs.Tab value="design" className="hide-mobile">Layout</Tabs.Tab><Tabs.Tab value="history">History</Tabs.Tab></Tabs.List>
             <Tabs.Panel value="details">
@@ -248,8 +270,8 @@ function DocumentView({ id }: { id: number }) {
               {doc.hash && <Text size="xs" c="dimmed" mt="sm">Fingerprint: {doc.hash.slice(0, 16)}…</Text>}</Paper>
             </Tabs.Panel>
           </Tabs>
-        </Grid.Col>
-        <Grid.Col span={{ base: 12, xl: 7 }} className={phone && tab !== 'preview' ? 'offscreen' : undefined}>
+        </div>
+        <div className={`ws-preview${phone && tab !== 'preview' ? ' offscreen' : ''}`}>
           <div className="print-root" ref={printRef}>
             {layoutEditable && tab !== 'design' && <LayoutToolbar sections={layout!.sections} sel={lsel} setSel={setLsel} onChange={(s) => setSections(s)}
               undo={undoLayout} redo={redoLayout} canUndo={hist.current.undo.length > 0} canRedo={hist.current.redo.length > 0}
@@ -261,8 +283,8 @@ function DocumentView({ id }: { id: number }) {
             </FitWidth></div>
             <PagePlanOverlay rootRef={printRef} onPages={setPages} />
           </div>
-        </Grid.Col>
-      </Grid>
+        </div>
+      </div>
       {emailOpen && <EmailModal doc={doc} getRoot={() => printRef.current!} fileName={fileName} onClose={(sent) => { setEmailOpen(false); if (sent) reload(); }} />}
       {waOpen && <WhatsAppModal context={doc.kind} vars={docWaVars(doc, data)} clientId={doc.client_id} preferred={{ name: data.contact?.name, phone: data.contact?.phone }} link={{ kind: doc.kind, id: doc.id }}
         title={`Send ${KIND_LABEL[doc.kind].toLowerCase()} on WhatsApp`}
@@ -486,4 +508,14 @@ function DuplicateModal({ doc, onClose, onDone }: { doc: any; onClose: () => voi
       </Stack>
     </Modal>
   );
+}
+
+/** Tells the top bar where this document lives (e.g. Test reports › DCTL-TR/0007/26-27). */
+function Crumb({ kind, label }: { kind: string; label: string }) {
+  useEffect(() => {
+    const to = ({ quote: '/quotes', invoice: '/invoices', report: '/reports' } as Record<string, string>)[kind];
+    window.dispatchEvent(new CustomEvent('crumb', { detail: to ? { to, label } : null }));
+    return () => { window.dispatchEvent(new CustomEvent('crumb', { detail: null })); };
+  }, [kind, label]);
+  return null;
 }

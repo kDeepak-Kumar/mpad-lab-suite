@@ -143,7 +143,10 @@ function Shell() {
   const waiting: Record<string, [number, boolean]> = { '/tests': [(c.myTests || 0) + (c.toReview || 0), (c.myTests || 0) > 0], '/reports': [(c.reportsToVerify || 0) + (c.reportsToIssue || 0), true], '/quotes': [c.quotesAwaiting || 0, false] };
   const items = navFor(me).map((n) => (waiting[n.to]?.[0] ? { ...n, count: waiting[n.to][0], mine: waiting[n.to][1] } : n));
   const pages = items.flatMap((n) => (n.sub ? n.sub.map((s) => ({ ...s, icon: n.icon })) : [n]));
-  const here = matchNav(items, loc.pathname);
+  // a record page can name itself in the breadcrumb (e.g. a document says which list it belongs to)
+  const [crumb, setCrumb] = useState<{ to: string; label: string } | null>(null);
+  useEffect(() => { const on = (e: Event) => setCrumb((e as CustomEvent).detail); window.addEventListener('crumb', on); return () => window.removeEventListener('crumb', on); }, []);
+  const here = matchNav(items, crumb ? crumb.to : loc.pathname);
   const recent = useRecent().filter((r) => r.to !== loc.pathname).slice(0, 5);
   const logout = () => signOut();
   const reminders: any[] = dash?.reminders ?? [];
@@ -203,7 +206,8 @@ function Shell() {
             {here ? <>
               {here.item.section && <span className="hide-mobile">{here.item.section}</span>}
               {here.item.section && <IconChevronRight size={13} className="hide-mobile" />}
-              {here.sub && here.item.sub!.length > 1 && here.sub.label !== here.item.label ? <><RLink to={here.item.to} className="hide-mobile">{here.item.label}</RLink><IconChevronRight size={13} className="hide-mobile" /><b>{here.sub.label}</b></> : <b>{here.item.label}</b>}
+              {crumb ? <><RLink to={crumb.to} className="hide-mobile">{here.sub && here.item.sub!.length > 1 ? here.sub.label : here.item.label}</RLink><IconChevronRight size={13} className="hide-mobile" /><b className="tnum">{crumb.label}</b></>
+              : here.sub && here.item.sub!.length > 1 && here.sub.label !== here.item.label ? <><RLink to={here.item.to} className="hide-mobile">{here.item.label}</RLink><IconChevronRight size={13} className="hide-mobile" /><b>{here.sub.label}</b></> : <b>{here.item.label}</b>}
             </> : <b>{loc.pathname.startsWith('/account') ? 'My account' : loc.pathname.startsWith('/documents') ? 'Document' : ''}</b>}
           </nav>
           <div className="tb-right">
@@ -240,7 +244,7 @@ function Shell() {
         </AppShell.Section>
       </AppShell.Navbar>
       <AppShell.Main className="shell-main">
-        {here?.item.sub && here.item.sub.length > 1 && !/\/(new|\d+)$/.test(loc.pathname) && !/^\/settings\/templates\/./.test(loc.pathname) && (
+        {here?.item.sub && here.item.sub.length > 1 && !crumb && !/\/(new|\d+)$/.test(loc.pathname) && !/^\/settings\/templates\/./.test(loc.pathname) && (
           <nav className="subnav no-print" aria-label={here.item.label}>
             {here.item.sub.map((x) => <RLink key={x.to} to={x.to} end className={x === here.sub ? 'on' : ''}>{x.label}</RLink>)}
           </nav>

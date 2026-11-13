@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Alert, Button, Checkbox, Grid, Group, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
-import { IconAlertTriangle, IconPrinter } from '@tabler/icons-react';
+import { ActionIcon, Alert, Button, Checkbox, Grid, Group, Menu, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
+import { IconAlertTriangle, IconCheck, IconDots, IconPrinter, IconTemplate, IconTestPipe } from '@tabler/icons-react';
 import { emptyInput, evaluateObservation, normalizeObservation, parseNumberInput, reportParts, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
 import { api, dmy, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
 import { ListView } from '../components/ListView';
-import { PageHeader, SimpleTable, StatusBadge, Loading } from '../components/ui';
+import { PageHeader, Pill, SimpleTable, StatusBadge, TypeBadge, Loading } from '../components/ui';
 import { LineChart } from '../doc/Chart';
 import { BoreLog, SoilLegend } from '../doc/BoreLog';
 import { AdminDelete, RecordInfo } from '../components/RecordAdmin';
@@ -26,11 +26,11 @@ export function TestsPage() {
       <Tabs value={tab} onChange={(t) => setSp({ tab: t ?? 'open' })} mb="sm">
         <Tabs.List><Tabs.Tab value="mine">My tests</Tabs.Tab><Tabs.Tab value="open">All open</Tabs.Tab><Tabs.Tab value="review">To review</Tabs.Tab><Tabs.Tab value="accepted">Accepted</Tabs.Tab><Tabs.Tab value="all">All</Tabs.Tab></Tabs.List>
       </Tabs>
-      <ListView id={`tests-${tab}`} rows={data} onRow={(t) => nav(`/tests/${t.id}`)} columns={[
+      <ListView id={`tests-${tab}`} rows={data} onRow={(t) => nav(`/tests/${t.id}`)} empty={({ mine: 'No tests are assigned to you right now.', open: 'No tests are open. New ones appear when samples are registered.', review: 'Nothing is waiting for review.', accepted: 'No accepted tests are waiting for a report.' } as Record<string, string>)[tab] ?? 'No tests yet.'} columns={[
         { key: 'test', label: 'Test', value: (t) => t.report_name || t.billing_name, render: (t) => <Text size="sm" fw={550}>{t.report_name || t.billing_name}</Text>, filter: 'select' },
         { key: 'sample_code', label: 'Job code' }, { key: 'accreditation', label: 'Type', type: 'badge' }, { key: 'client_name', label: 'Client', filter: 'select' },
         { key: 'assignee', label: 'Assigned', filter: 'select' },
-        { key: 'due_date', label: 'Due', type: 'date', render: (t) => <Text size="sm" c={t.due_date && t.due_date < today && ['pending', 'in_progress', 'returned'].includes(t.status) ? 'red' : undefined}>{dmy(t.due_date)}</Text> },
+        { key: 'due_date', label: 'Due', type: 'date', render: (t) => (t.due_date && t.due_date < today && ['pending', 'in_progress', 'returned'].includes(t.status) ? <Pill tone="bad">Overdue · {dmy(t.due_date)}</Pill> : t.due_date === today && ['pending', 'in_progress', 'returned'].includes(t.status) ? <Pill tone="warn">Today</Pill> : <span className="tnum">{dmy(t.due_date)}</span>) },
         { key: 'status', label: 'Status', type: 'status' }]} />
     </>
   );
@@ -106,19 +106,30 @@ export function TestSheetPage() {
 
   return (
     <>
-      <PageHeader title={<Group gap="sm">{t.catalog?.report_name || tpl.name}<StatusBadge status={t.status} />{tpl.simplified && <Badge color="yellow" variant="light">Simplified sheet</Badge>}</Group>}
-        subtitle={<>{s.code} · {t.client?.name}{t.site ? ` · ${t.site.name}` : ''} · {tpl.method}</>}
-        actions={<>
-          <Button className="hide-mobile" variant="default" leftSection={<IconPrinter size={16} />} onClick={() => window.print()}>Print sheet</Button>
-          <AdminDelete object="test" id={t.id} compact onDeleted={() => nav('/tests')} />
-          {can('manageTemplates') && <Button className="hide-mobile" variant="subtle" onClick={() => nav(`/settings/templates/obs/${encodeURIComponent(tpl.code)}`)}>Edit sheet template</Button>}
-          {editable && <Button variant="default" loading={busy} disabled={!dirty} onClick={() => (t.status === 'returned' ? setReasonOpen(true) : save())}>Save</Button>}
-          {editable && ['pending', 'in_progress', 'returned'].includes(t.status) && <Button loading={busy} disabled={errors.length > 0 && !admin} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button>}
+      <header className="ws-head ws-sticky no-print">
+        <div className="ws-id">
+          <div className="rec-eyebrow"><span className="tnum">{s.code}</span> · {tpl.method}</div>
+          <div className="rec-title-row"><h1 className="rec-title">{t.catalog?.report_name || tpl.name}</h1><StatusBadge status={t.status} /><TypeBadge value={s.accreditation} />{tpl.simplified && <Pill tone="warn">Simplified sheet</Pill>}</div>
+          <div className="rec-meta"><span>{t.client?.name}{t.site ? ` · ${t.site.name}` : ''}</span>{t.due_date && <span className="tnum">Due {dmy(t.due_date)}</span>}{dirty && editable && <span className="ws-saving">Unsaved changes</span>}</div>
+        </div>
+        <div className="ws-actions">
+          {t.report_id && <Button variant="default" onClick={() => nav(`/documents/${t.report_id}`)}>Open report</Button>}
           {canReview && <Button variant="default" color="red" onClick={() => setReturnOpen(true)}>Return for correction</Button>}
-          {canReview && <Button color="teal" onClick={() => review('accept')}>Accept</Button>}
-          {t.status === 'accepted' && can('prepareReports') && <Button onClick={() => nav('/reports/prepare')}>Prepare report</Button>}
-          {t.report_id && <Button variant="light" onClick={() => nav(`/documents/${t.report_id}`)}>Open report</Button>}
-        </>} />
+          {canReview && <Button color="accent" leftSection={<IconCheck size={16} />} onClick={() => review('accept')}>Accept</Button>}
+          {editable && <Button variant="default" loading={busy} disabled={!dirty} onClick={() => (t.status === 'returned' ? setReasonOpen(true) : save())}>Save</Button>}
+          {editable && ['pending', 'in_progress', 'returned'].includes(t.status) && <Tooltip label={errors.length && !admin ? 'Fix the highlighted entries first' : 'Locks the sheet and sends it to the reviewer'}><Button loading={busy} disabled={errors.length > 0 && !admin} onClick={async () => { if (t.status === 'returned' && dirty) setReasonOpen(true); else await submit(); }}>Submit for review</Button></Tooltip>}
+          {t.status === 'accepted' && can('prepareReports') && <Button color="accent" onClick={() => nav('/reports/prepare')}>Prepare report</Button>}
+          <Menu position="bottom-end" width={220}>
+            <Menu.Target><Tooltip label="More actions"><ActionIcon variant="default" size={36} aria-label="More actions"><IconDots size={16} /></ActionIcon></Tooltip></Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IconPrinter size={15} />} onClick={() => window.print()}>Print sheet</Menu.Item>
+              {can('manageTemplates') && <Menu.Item leftSection={<IconTemplate size={15} />} onClick={() => nav(`/settings/templates/obs/${encodeURIComponent(tpl.code)}`)}>Edit sheet template</Menu.Item>}
+              <Menu.Item leftSection={<IconTestPipe size={15} />} onClick={() => nav(`/samples?open=${s.id}`)}>Open sample {s.code}</Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+          <AdminDelete object="test" id={t.id} compact onDeleted={() => nav('/tests')} />
+        </div>
+      </header>
       {t.status === 'returned' && t.review_note && <Alert color="red" mb="sm" title={`Returned by ${t.reviewedBy ?? 'reviewer'}`}>{t.review_note}</Alert>}
       {t.status === 'submitted' && !canReview && <Alert mb="sm">Submitted on {new Date(t.submitted_at).toLocaleString('en-IN')} – waiting for review. The sheet is locked.</Alert>}
       {tpl.instructions && editable && <Alert variant="light" mb="sm">{tpl.instructions}</Alert>}
@@ -200,12 +211,12 @@ export function TestSheetPage() {
                     </Group>}
                   </div>
                 ))}
-                <Paper withBorder p="sm" bg="#f1f6ff">
-                  <Text size="sm" fw={600} mb={4}>Results</Text>
-                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing={4}>
-                    {tpl.results.filter((r) => !r.hidden).map((r) => <Text key={r.key} size="sm">{r.label}: <b>{formatValue(result.results[r.key] as never, r.decimals) || '—'}</b> {r.unit}</Text>)}
-                  </SimpleGrid>
-                </Paper>
+                <section className="res-card" aria-label="Calculated results">
+                  <div className="res-h">Results <span>calculated as you type</span></div>
+                  <div className="res-grid">
+                    {tpl.results.filter((r) => !r.hidden).map((r) => { const v = formatValue(result.results[r.key] as never, r.decimals); return <div key={r.key} className="res-item"><div className="res-l">{r.label}</div><div className={`res-v${v ? '' : ' empty'}`}>{v || '—'}{v && r.unit ? <small> {r.unit}</small> : null}</div></div>; })}
+                  </div>
+                </section>
                 {inputIssues.length > 0 && <Alert color="red" icon={<IconAlertTriangle size={16} />} py={6} title="Fix these entries before saving">{inputIssues.slice(0, 6).map((m, i) => <div key={i}>{m}</div>)}</Alert>}
                 {result.checks.map((c, i) => <Alert key={i} color={c.level === 'error' ? 'red' : 'orange'} icon={<IconAlertTriangle size={16} />} py={6}>{c.message}</Alert>)}
                 {allCharts(tpl).map((ch, i) => {
