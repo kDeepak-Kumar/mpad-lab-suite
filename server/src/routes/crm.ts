@@ -47,21 +47,60 @@ publicApi.get('/public/doc/:token', h(async (req) => {
     template: tpl?.definition ?? null, verify: d.kind === 'report' && d.hash ? verifyToken(d.id, d.hash) : null, replacedBy: replaced?.number ?? null,
   };
 }));
+/** Short verification code printed beside the QR code (from the same signed token): typed in on the verify page with the report number. */
+export const verifyCode = (token: string) => (token.split('-').slice(1).join('-').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase());
+
+/** Everything the verify page shows for an issued report: status, key facts, the integrity check and the genuine report itself. */
+async function verifyPayload(d: Record<string, any>, req: { ip?: string }) {
+  const data = parseJson<Record<string, any>>(d.data, {});
+  const overrides = parseJson<Record<string, any> | null>(d.overrides, null);
+  const full = await getCompany(d.company_id);
+  const company: Record<string, unknown> = { ...full };
+  for (const k of PRIVATE_KEYS) delete company[k];
+  const client = await db('clients').where({ id: d.client_id }).first('name');
+  const replaced = d.status === 'cancelled' ? await db('documents').where({ parent_id: d.id }).whereNot('status', 'cancelled').first('number') : null;
+  // the stored report must still be exactly what was signed: same fingerprint as at issue
+  const intact = [overrides, overrides ?? {}, d.overrides].some((o) => sha256({ data, overrides: o, template: d.template_id }) === d.hash);
+  if (!intact) console.warn(`[verify] report ${d.number} (id ${d.id}): stored content no longer matches its issue fingerprint`);
+  // scan log: every check is recorded (History of the report shows who and when, by IP)
+  await db('audit_log').insert({ company_id: d.company_id, user_id: null, entity: 'document', entity_id: d.id, action: 'verified by QR / code', detail: JSON.stringify({ ip: req.ip }), at: now() });
+  const scans = await db('audit_log').where({ company_id: d.company_id, entity: 'document', entity_id: d.id, action: 'verified by QR / code' }).count({ n: '*' }).first();
+  const tpl = await getDocTemplate(d.company_id, 'report', d.template_id);
+  const tests = ((data.tests ?? []) as { name?: string; sampleLabel?: string }[]);
+  const token = verifyToken(d.id, d.hash);
+  return {
+    lab: full.name, accreditation: full.accreditation?.certNo ?? null, phone: full.phone ?? '', email: full.email ?? '', website: full.website ?? '',
+    number: d.number, issued: formatDate(d.date), status: !intact ? 'Check failed' : d.status === 'issued' ? 'Valid' : d.status === 'cancelled' ? 'Withdrawn (amended)' : d.status,
+    intact, replacedBy: replaced?.number ?? null, client: data.customer?.name || data.client?.name || client?.name || '', ulr: data.ulr ?? '', jobCode: data.jobCodeText ?? '',
+    material: data.specification || data.material || '', signedBy: data.signatory?.name ?? '', scans: Number(scans?.n ?? 0),
+    tests: [...new Set([...tests.map((t) => t.name).filter(Boolean), ...((data.rows ?? []) as { group?: string; name: string }[]).map((r) => r.group || r.name)])],
+    code: verifyCode(token), token,
+    // the genuine report, drawn from the issued record (never a stored file): view, print or save as PDF
+    report: intact ? { kind: 'report', number: d.number, status: d.status, date: d.date, data, overrides: overrides ?? {}, company, template: tpl?.definition ?? null, issuer: data.signatory?.name ? data.signatory : null } : null,
+  };
+}
 publicApi.get('/public/verify/:token', h(async (req) => {
   const [idPart] = String(req.params.token).split('-');
   const id = Number(idPart);
   const d = Number.isFinite(id) ? await db('documents').where({ id, kind: 'report' }).first() : null;
   if (!d || !d.hash || verifyToken(d.id, d.hash) !== req.params.token) throw new HttpError(404, 'No issued report matches this code. The report may be altered or not issued by this laboratory.');
-  const data = parseJson<Record<string, any>>(d.data, {});
-  const company = await getCompany(d.company_id);
-  const client = await db('clients').where({ id: d.client_id }).first('name');
-  const replaced = d.status === 'cancelled' ? await db('documents').where({ parent_id: d.id }).whereNot('status', 'cancelled').first('number') : null;
-  return {
-    lab: company.name, accreditation: company.accreditation?.certNo ?? null,
-    number: d.number, issued: formatDate(d.date), status: d.status === 'issued' ? 'Valid' : d.status === 'cancelled' ? 'Withdrawn (amended)' : d.status,
-    replacedBy: replaced?.number ?? null, client: data.client?.name || client?.name || '', ulr: data.ulr ?? '', jobCode: data.jobCodeText ?? '',
-    tests: [...new Set(((data.rows ?? []) as { group?: string; name: string }[]).map((r) => r.group || r.name))],
-  };
+  return verifyPayload(d, req);
+}));
+/** Manual check without the QR code: report number + the verification code printed beside the QR. Limited per address. */
+const lookups = new Map<string, { n: number; at: number }>();
+publicApi.post('/public/verify-lookup', h(async (req) => {
+  const key = String(req.ip ?? '?'), t = Date.now();
+  const e = lookups.get(key);
+  const cur = e && t - e.at < 15 * 60_000 ? e : { n: 0, at: t };
+  if (cur.n >= 10) throw new HttpError(429, 'Too many attempts. Please try again in 15 minutes.');
+  lookups.set(key, { n: cur.n + 1, at: cur.at });
+  if (lookups.size > 5000) lookups.clear();
+  const b = z.object({ number: z.string().trim().min(3).max(60), code: z.string().trim().min(4).max(20) }).parse(req.body);
+  const code = b.code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const cands = await db('documents').where({ kind: 'report', number: b.number }).whereNotNull('hash').whereIn('status', ['issued', 'cancelled']).limit(5);
+  const d = cands.find((x) => verifyCode(verifyToken(x.id, x.hash)) === code);
+  if (!d) throw new HttpError(404, 'No issued report matches this number and code. Check both, or contact the laboratory.');
+  return verifyPayload(d, req);
 }));
 
 // ---------- follow-ups ----------

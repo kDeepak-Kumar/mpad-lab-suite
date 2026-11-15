@@ -114,7 +114,7 @@ export function App() {
   if (/^\/(welcome|reset)\//.test(loc.pathname)) return <Routes><Route path="/welcome/:token" element={<SetPasswordPage />} /><Route path="/reset/:token" element={<SetPasswordPage />} /></Routes>;
   if (loc.pathname.startsWith('/d/')) return <Suspense fallback={<Center h="100vh"><Loader /></Center>}><Routes><Route path="/d/:token" element={<SharedDocPage />} /></Routes></Suspense>;
   if (me === undefined && !loc.pathname.startsWith('/verify/')) return <Center h="100vh"><Loader /></Center>;
-  if (loc.pathname.startsWith('/verify/')) return <Routes><Route path="/verify/:token" element={<VerifyPage />} /></Routes>;
+  if (loc.pathname === '/verify' || loc.pathname.startsWith('/verify/')) return <Routes><Route path="/verify" element={<VerifyPage />} /><Route path="/verify/:token" element={<VerifyPage />} /></Routes>;
   if (!me) return <Routes><Route path="/login" element={<Login onLogin={() => api<Me>('/auth/me').then(setMe)} />} /><Route path="*" element={<Navigate to="/login" />} /></Routes>;
   if (me.security?.required && !me.security.totpEnabled) return <MeCtx.Provider value={me}><Suspense fallback={<Loading />}><Required2fa /></Suspense></MeCtx.Provider>;
   return <MeCtx.Provider value={me}><MetaLoader /></MeCtx.Provider>;

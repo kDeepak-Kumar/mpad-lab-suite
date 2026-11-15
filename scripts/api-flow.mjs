@@ -132,6 +132,10 @@ const pub = await fetch(`${base}/api/public/verify/${repDoc.verify}`).then((r) =
 expect(pub.status === 'Valid' && pub.number === issued.number, `QR verification shows report ${pub.number} as ${pub.status} without signing in`);
 const bad = await fetch(`${base}/api/public/verify/${rep.id}-AAAAAAAAAAAAAAAA`);
 expect(bad.status === 404, 'a forged verification code is rejected');
+expect(pub.intact === true && pub.report?.data && !pub.report.company.smtp && !pub.report.company.ai && /^[A-Z0-9]{8}$/.test(pub.code) && pub.scans >= 1, 'verify page gets the genuine report (no private settings), its code, an intact fingerprint and the scan count');
+const look = await fetch(`${base}/api/public/verify-lookup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ number: issued.number, code: pub.code.toLowerCase() }) });
+const wrong = await fetch(`${base}/api/public/verify-lookup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ number: issued.number, code: 'ZZZZ9999' }) });
+expect(look.status === 200 && (await look.json()).number === issued.number && wrong.status === 404, 'manual check by report number + verification code works; a wrong code is rejected');
 console.log('9. Discounts, validation, certificates, alerts');
 const fail = async (fn) => { try { await fn(); return null; } catch (e) { return e.message; } };
 await api('owner', 'PUT', `/clients/${client.id}`, { discount_pct: 10 });

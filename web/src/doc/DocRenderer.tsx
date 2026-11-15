@@ -459,7 +459,9 @@ function ChartList({ charts }: { charts: any[] }) {
   );
 }
 
-function VerifyQr({ url, caption = 'Scan to verify' }: { url: string; caption?: string }) {
+/** The 8-character code printed beside the QR (same as the server's verifyCode): for checking the report by number + code. */
+export const verifyCodeOf = (url: string) => { const t = url.split('/').pop() ?? ''; return t.split('-').slice(1).join('-').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase(); };
+function VerifyQr({ url, caption = 'Scan to verify' }: { url: string; caption?: ReactNode }) {
   const qr = qrcode(0, 'M');
   qr.addData(url); qr.make();
   return (
@@ -519,7 +521,7 @@ function ReportSignature({ pr, p, fill }: { pr: Record<string, any>; p: RenderIn
           {!issued && <span className="no-print" style={{ ...ph, width: '24mm', height: '24mm', borderRadius: '50%' }}>{p.company.seal ? 'Seal – applied on issue' : 'Laboratory seal'}</span>}
         </div>
       )}
-      {qr && <div style={{ width: '22mm', display: 'grid', placeItems: 'center' }}><VerifyQr url={p.verifyUrl!} caption="Verify online" /></div>}
+      {qr && <div style={{ width: '24mm', display: 'grid', placeItems: 'center' }}><VerifyQr url={p.verifyUrl!} caption={<>Verify online<br />Code {verifyCodeOf(p.verifyUrl!)}</>} /></div>}
     </div>
   );
 }
