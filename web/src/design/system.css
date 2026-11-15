@@ -462,3 +462,4 @@ body.has-qv .shell-main { padding-right: calc(440px + var(--shell-gap) + var(--m
 .nt-empty { display: flex; gap: 10px; align-items: flex-start; padding: 12px 10px; color: var(--ok); }
 .nt-empty b { display: block; font-size: 13.5px; color: var(--ink); font-weight: 600; }
 .nt-empty span { font-size: 12.5px; color: var(--muted); }
+.lv-partial { font-size: 12.5px; color: var(--muted); padding: 6px 2px 2px; }

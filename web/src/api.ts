@@ -38,11 +38,16 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
     if (!opts.quiet && !leaving) notifications.show({ color: 'red', title: 'Could not complete', message: msg });
     throw new ApiError(r.status, msg);
   }
+  // lists that the server cuts short say how many records exist in all (read with listTotal)
+  const total = r.headers.get('x-total-count');
+  if (total !== null && Array.isArray(j)) Object.defineProperty(j, '__total', { value: Number(total), enumerable: false });
   if (method === 'GET') cache.set(path, { at: Date.now(), data: j });
   else if (!path.startsWith('/ai/') && !path.startsWith('/analytics/')) invalidate();
   return j as T;
 }
 
+/** Total number of records behind a list the server may have cut short (undefined when not reported). */
+export const listTotal = (rows: unknown): number | undefined => (rows as { __total?: number } | null)?.__total;
 export const ok = (message: string) => notifications.show({ color: 'teal', message, autoClose: 2500 });
 export const fail = (message: string) => notifications.show({ color: 'red', title: 'Could not complete', message });
 

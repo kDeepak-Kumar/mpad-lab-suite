@@ -109,6 +109,17 @@ core.put('/meta/:kind/:key', h(async (req) => {
     if (others.some((o) => !o.key.includes(':__pin') && String(parseJson<{ name?: string }>(o.data, {}).name ?? '').trim().toLowerCase() === name)) throw new HttpError(409, `A view called “${String(req.body.name).trim()}” already exists for this list. Choose another name.`);
   }
   const { shared: _s, ...data } = req.body ?? {};
+  if (kind === 'role') {
+    // a role must be complete, or screens that list roles (Users, Setup) cannot draw it
+    if (!/^[a-z][a-z0-9_]{1,39}$/.test(req.params.key)) throw new HttpError(400, 'Role key must be lowercase letters, digits or _');
+    data.key = req.params.key;
+    if (typeof data.label !== 'string' || !data.label.trim()) throw new HttpError(400, 'Give the role a name');
+    if (!Array.isArray(data.tabs) || data.tabs.some((t: unknown) => typeof t !== 'string')) throw new HttpError(400, 'Role tabs must be a list');
+    for (const k of ['objects', 'actions', 'fields'] as const) {
+      if (data[k] === undefined) data[k] = {};
+      if (typeof data[k] !== 'object' || data[k] === null || Array.isArray(data[k])) throw new HttpError(400, `Role ${k} must be an object`);
+    }
+  }
   await saveMeta(req.user.company_id, kind, req.params.key, data, PERSONAL.includes(kind) && !shared ? req.user.id : null);
   await audit(db, req.user, 'meta', 0, `${kind} ${req.params.key} saved`);
   return { ok: true };
@@ -186,7 +197,7 @@ const withCustom = (r: Record<string, any>, jsonCols: string[] = ['data']) => { 
 const custom = z.record(z.any()).optional();
 const isoDateOpt = z.string().refine((v) => v === '' || isIsoDate(v), 'must be a valid date').optional().nullable().transform((v) => v || null);
 const clientSchema = z.object({
-  name: z.string().min(1), short_code: z.string().max(20).optional().nullable(), type: z.string().optional().nullable(),
+  name: z.string().min(1).max(200, 'Client name can be at most 200 characters'), short_code: z.string().max(20).optional().nullable(), type: z.string().optional().nullable(),
   gstin: z.string().optional().nullable(), state_code: z.string().optional().nullable(), pan: z.string().optional().nullable(),
   address: z.string().optional().nullable(), email: z.string().optional().nullable(), phone: z.string().optional().nullable(),
   payment_terms_days: z.coerce.number().int().min(0).max(365).optional().nullable(), opening_balance: z.coerce.number().optional().nullable(), notes: z.string().optional().nullable(),
@@ -332,11 +343,20 @@ core.get('/clients/:id', allow('client.read'), h(async (req) => {
     documents: docs.filter(await docVisibility(req.user)).map((d) => ({ ...d, total: Number(d.total) })), workOrders, samples, ledger: led,
     timeline: timeline.map((t) => ({ ...row(t, ['detail']), user: users.get(t.user_id) })) };
 }));
+/** A save made from a copy loaded before someone else's save is refused, so their change is not silently lost. */
+export async function notChangedSince(u: { id: number; company_id: number }, entity: string, id: number, base: unknown, current: unknown) {
+  if (!base || !current || String(base) === String(current)) return;
+  const last = await db('audit_log').where({ company_id: u.company_id, entity, entity_id: id }).orderBy('id', 'desc').first('user_id', 'at');
+  if (last && last.user_id === u.id) return; // your own earlier save
+  const who = last ? (await db('users').where({ id: last.user_id }).first('name'))?.name : null;
+  throw new HttpError(409, `${who ?? 'Someone else'} changed this record after you opened it. Reload to see their changes, then make yours again.`);
+}
 core.put('/clients/:id', allow('client.edit'), h(async (req) => {
   const id = Number(req.params.id);
   const ex = await db('clients').where({ id, company_id: req.user.company_id }).first();
   if (!ex) throw new HttpError(404, 'Client not found');
   if ((await recordAccess(req.user, 'client', ex)) !== 'edit') throw new HttpError(403, 'This client is read-only for you. Ask its owner to share it with edit access.');
+  await notChangedSince(req.user, 'client', id, req.body?.base_updated_at, ex.updated_at);
   const c = normaliseClient(await cleanWrite(req.user.company_id, req.user.roleDef, 'client', clientSchema.partial().parse(req.body), { creating: false }));
   const { rest, cu } = split(c);
   await db('clients').where({ id }).update({ ...rest, data: toJson(mergeCustom(ex.data, cu)) });

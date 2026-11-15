@@ -71,12 +71,21 @@ const sampleSchema = z.object({
   extra: z.record(z.union([z.string().max(300), z.number(), z.null()])).optional(),
   tests: z.array(z.object({ catalog_id: z.number(), assigned_to: z.number().nullable().optional(), due_date: isoDate.optional().nullable().or(z.literal('')) })).min(1, 'Add at least one test'),
 });
-lab.get('/samples', allow('sample.read'), h(async (req) => {
+const LIST_LIMIT = 500;
+/** Samples list query: quick-report filter and search (code, ULR, client, site, material, description, customer reference). */
+function samplesQuery(cid: number, query: Record<string, unknown>) {
+  const q = String(query.q ?? '').trim();
+  return db('samples as s').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('sites as st', 'st.id', 's.site_id')
+    .where('s.company_id', cid).andWhere((w) => (query.quick === '1' ? w.where('s.quick', true) : w.whereNull('s.quick').orWhere('s.quick', false)))
+    .modify((b) => { if (q) b.andWhere((w) => w.where('s.code', 'like', `%${q}%`).orWhere('c.name', 'like', `%${q}%`).orWhere('s.ulr', 'like', `%${q}%`).orWhere('st.name', 'like', `%${q}%`)
+      .orWhere('s.material', 'like', `%${q}%`).orWhere('s.description', 'like', `%${q}%`).orWhere('s.customer_ref', 'like', `%${q}%`)); });
+}
+lab.get('/samples', allow('sample.read'), h(async (req, res) => {
   const cid = req.user.company_id;
-  const q = String(req.query.q ?? '').trim();
-  const rows = await db('samples as s').leftJoin('clients as c', 'c.id', 's.client_id').leftJoin('sites as st', 'st.id', 's.site_id')
-    .where('s.company_id', cid).andWhere((w) => (req.query.quick === '1' ? w.where('s.quick', true) : w.whereNull('s.quick').orWhere('s.quick', false))).modify((b) => { if (q) b.andWhere((w) => w.where('s.code', 'like', `%${q}%`).orWhere('c.name', 'like', `%${q}%`).orWhere('s.ulr', 'like', `%${q}%`)); })
-    .orderBy('s.id', 'desc').limit(500).select('s.*', 'c.name as client_name', 'st.name as site_name') as Record<string, any>[];
+  const total = Number((await samplesQuery(cid, req.query).count({ n: 's.id' }).first())?.n ?? 0);
+  // newest first; the list says when it holds only part of the records, and its search then asks the server
+  res.setHeader('X-Total-Count', String(total));
+  const rows = await samplesQuery(cid, req.query).orderBy('s.id', 'desc').limit(LIST_LIMIT).select('s.*', 'c.name as client_name', 'st.name as site_name') as Record<string, any>[];
   const tests = rows.length ? await db('tests as t').leftJoin('catalog as k', 'k.id', 't.catalog_id').whereIn('t.sample_id', rows.map((r) => r.id)).select('t.sample_id', 't.status', 'k.report_name', 'k.billing_name') : [];
   return rows.map((r) => ({ ...r, tests: tests.filter((t) => t.sample_id === r.id) }));
 }));
@@ -193,17 +202,23 @@ lab.put('/samples/:id', allow('samples'), h(async (req) => {
 }));
 
 // ---------- tests & observation sheets ----------
-lab.get('/tests', allow('test.read'), h(async (req) => {
+lab.get('/tests', allow('test.read'), h(async (req, res) => {
   const cid = req.user.company_id;
-  const q = db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id')
+  const qs = String(req.query.q ?? '').trim();
+  const base = () => db('tests as t').join('samples as s', 's.id', 't.sample_id').leftJoin('clients as c', 'c.id', 's.client_id')
     .leftJoin('catalog as k', 'k.id', 't.catalog_id').leftJoin('users as u', 'u.id', 't.assigned_to')
     .where('t.company_id', cid)
-    .select('t.id', 't.status', 't.due_date', 't.sample_id', 't.report_id', 't.started_at', 't.completed_at', 't.submitted_at', 't.reviewed_at', 't.review_note', 't.template_code',
-      's.code as sample_code', 's.material', 's.accreditation', 's.received_date', 's.client_id', 'c.name as client_name', 'k.report_name', 'k.billing_name', 'k.nabl', 'u.name as assignee', 't.assigned_to');
-  if (req.query.status) q.whereIn('t.status', String(req.query.status).split(','));
-  if (req.query.mine) q.andWhere('t.assigned_to', req.user.id);
-  if (req.query.client_id) q.andWhere('s.client_id', Number(req.query.client_id));
-  return q.orderBy([{ column: 't.due_date' }, { column: 't.id' }]).limit(500);
+    .modify((q) => {
+      if (req.query.status) q.whereIn('t.status', String(req.query.status).split(','));
+      if (req.query.mine) q.andWhere('t.assigned_to', req.user.id);
+      if (req.query.client_id) q.andWhere('s.client_id', Number(req.query.client_id));
+      if (qs) q.andWhere((w) => w.where('s.code', 'like', `%${qs}%`).orWhere('c.name', 'like', `%${qs}%`).orWhere('k.report_name', 'like', `%${qs}%`).orWhere('k.billing_name', 'like', `%${qs}%`).orWhere('s.material', 'like', `%${qs}%`));
+    });
+  res.setHeader('X-Total-Count', String(Number((await base().count({ n: 't.id' }).first())?.n ?? 0)));
+  const q = base().select('t.id', 't.status', 't.due_date', 't.sample_id', 't.report_id', 't.started_at', 't.completed_at', 't.submitted_at', 't.reviewed_at', 't.review_note', 't.template_code',
+    's.code as sample_code', 's.material', 's.accreditation', 's.received_date', 's.client_id', 'c.name as client_name', 'k.report_name', 'k.billing_name', 'k.nabl', 'u.name as assignee', 't.assigned_to');
+  // open work: most urgent first; every status ("All"): newest first, so newly registered tests always show
+  return (req.query.status ? q.orderBy([{ column: 't.due_date' }, { column: 't.id' }]) : q.orderBy('t.id', 'desc')).limit(LIST_LIMIT);
 }));
 lab.get('/tests/:id', allow('test.read'), h(async (req) => {
   const cid = req.user.company_id;

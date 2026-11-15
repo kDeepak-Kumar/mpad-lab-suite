@@ -122,10 +122,17 @@ function DocumentView({ id }: { id: number }) {
   }, [doc, data]);
 
   const strip = (d: Record<string, any>) => { const { __id, ...rest } = d; return rest; };
+  // revision this copy was loaded at: the server refuses a save if someone else saved in between
+  const revRef = useRef<number>(0);
+  useEffect(() => { revRef.current = Number(doc?.data?._rev ?? 0); }, [doc]);
   const save = async (quiet = false) => {
     if (!doc || !dirtyRef.current || !data) return;
     setSaving(true);
-    try { await api(`/documents/${doc.id}`, { method: 'PUT', body: editable ? { data: strip(data), overrides } : {} }); dirtyRef.current = false; setDirty(false); if (!quiet) ok('Saved'); }
+    try {
+      const r = await api<{ rev?: number }>(`/documents/${doc.id}`, { method: 'PUT', body: editable ? { data: strip(data), overrides, base_rev: revRef.current } : {} });
+      if (typeof r?.rev === 'number') revRef.current = r.rev;
+      dirtyRef.current = false; setDirty(false); if (!quiet) ok('Saved');
+    } catch (e: any) { if (e?.status === 409) dirtyRef.current = false; } // conflict: stop retrying; the message says to reload
     finally { setSaving(false); }
   };
   useEffect(() => { if (!dirty || !editable) return; const t = setTimeout(() => save(true), 1200); return () => clearTimeout(t); }, [data, overrides, dirty]);

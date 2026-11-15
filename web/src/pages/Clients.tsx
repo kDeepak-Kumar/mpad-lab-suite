@@ -34,7 +34,7 @@ export function ClientForm({ initial, onSaved, onCancel }: { initial?: any; onSa
     setBusy(true);
     try {
       const { id, sites, contacts, documents, workOrders, samples, ledger, timeline, data, company_id, created_at, ...body } = v;
-      if (initial?.id) { await api(`/clients/${initial.id}`, { method: 'PUT', body }); onSaved(initial.id); }
+      if (initial?.id) { await api(`/clients/${initial.id}`, { method: 'PUT', body: { ...body, base_updated_at: initial.updated_at } }); onSaved(initial.id); }
       else { const r = await api<{ id: number }>(`/clients${force ? '?force=1' : ''}`, { body }); onSaved(r.id); }
       ok('Client saved');
     } catch (e: any) {

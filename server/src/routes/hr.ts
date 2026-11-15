@@ -28,6 +28,10 @@ const empSchema = z.object({
   id_type: opt(30), id_number: opt(40), pan: opt(12).refine((v) => !v || /^[A-Z]{5}\d{4}[A-Z]$/.test(v.toUpperCase()), 'PAN looks wrong (e.g. ABCDE1234F)'),
   status: z.enum(['active', 'left']).default('active'), left_on: date, notes: opt(2000),
 }).superRefine((v, ctx) => {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (v.date_of_birth && (v.date_of_birth > todayIso || v.date_of_birth < '1900-01-01')) ctx.addIssue({ code: 'custom', path: ['date_of_birth'], message: 'Date of birth is not valid' });
+  if (v.date_of_birth && v.date_of_joining && v.date_of_joining <= v.date_of_birth) ctx.addIssue({ code: 'custom', path: ['date_of_joining'], message: 'Joining date must be after the date of birth' });
+  if (v.left_on && v.date_of_joining && v.left_on < v.date_of_joining) ctx.addIssue({ code: 'custom', path: ['left_on'], message: 'Leaving date cannot be before the joining date' });
   if (v.id_number && /aadhaar/i.test(v.id_type ?? '') && !/^\d{12}$/.test(v.id_number.replace(/\s/g, ''))) ctx.addIssue({ code: 'custom', path: ['id_number'], message: 'Aadhaar number has 12 digits' });
 });
 const mask = (n?: string | null) => (n ? `${'X'.repeat(Math.max(0, n.replace(/\s/g, '').length - 4)).replace(/(.{4})/g, '$1 ')}${n.replace(/\s/g, '').slice(-4)}`.trim() : null);
@@ -127,7 +131,8 @@ hr.get('/attendance', h(async (req) => {
   return { employees, records: await rec.select('id', 'employee_id', 'date', 'status', 'in_time', 'out_time', 'note', 'source', 'updated_at') };
 }));
 
-const entry = z.object({ employee_id: z.number().int(), date: z.string().refine(isIsoDate, 'Enter a valid date'), status: z.enum(STATUSES), in_time: time, out_time: time, note: z.string().max(300).optional().nullable() });
+const entry = z.object({ employee_id: z.number().int(), date: z.string().refine(isIsoDate, 'Enter a valid date'), status: z.enum(STATUSES), in_time: time, out_time: time, note: z.string().max(300).optional().nullable() })
+  .refine((r) => !r.in_time || !r.out_time || r.out_time > r.in_time, { message: 'Out time must be after in time', path: ['out_time'] });
 
 async function upsert(u: AuthUser, rows: z.infer<typeof entry>[], source: string) {
   const cid = u.company_id;

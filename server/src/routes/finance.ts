@@ -156,8 +156,14 @@ finance.put('/documents/:id', h(async (req) => {
   const body = z.object({
     data: z.record(z.any()).optional(), overrides: z.record(z.any()).optional(), template_id: z.number().nullable().optional(),
     client_id: z.number().optional(), site_id: z.number().nullable().optional(), contact_id: z.number().nullable().optional(), date: isoDate.optional(),
-    number: z.string().nullable().optional(),
+    number: z.string().nullable().optional(), base_rev: z.number().int().optional(),
   }).parse(req.body);
+  // edits made from a copy that someone else has saved over since are refused (the copy's revision is behind)
+  const rev = Number((d.data as { _rev?: number })._rev ?? 0), editor = (d.data as { _editor?: number })._editor;
+  if (body.data && body.base_rev !== undefined && body.base_rev < rev && editor !== req.user.id) {
+    const who = editor ? (await db('users').where({ id: editor }).first('name'))?.name : null;
+    throw new HttpError(409, `${who ?? 'Someone else'} saved this document after you opened it. Reload to see their changes, then make yours again.`);
+  }
   const admin = isAdmin(req.user);
   const issued = ['issued', 'paid', 'partly_paid', 'cancelled'].includes(d.status);
   const locked = issued || (!admin && ((d.kind === 'quote' && d.status !== 'draft') || (d.kind === 'report' && d.status === 'verified')));
@@ -200,6 +206,8 @@ finance.put('/documents/:id', h(async (req) => {
     if (roles.length) (data as any).layout = refreshRoles((data as any).layout, { data: data as never }, [...roles]);
   }
   if (data.placeOfSupply && !(data.unlocked as any)?.placeOfSupplyName) data.placeOfSupplyName = stateName(String(data.placeOfSupply));
+  const nextRev = body.data ? rev + 1 : rev;
+  if (body.data) { (data as Record<string, unknown>)._rev = nextRev; (data as Record<string, unknown>)._editor = req.user.id; }
   const patch: Record<string, unknown> = { data: toJson(data), updated_at: now(), accreditation: (data.accreditation as string) ?? null };
   if (d.kind !== 'report') { const t = await totalsFor(cid, data); patch.totals = toJson(t); patch.total = t.total; }
   if (body.overrides) patch.overrides = toJson(body.overrides);
@@ -218,7 +226,7 @@ finance.put('/documents/:id', h(async (req) => {
   }
   await db('documents').where({ id: d.id }).update(patch);
   if (body.overrides && Object.keys(body.overrides).length) await audit(db, req.user, 'document', d.id, 'layout edited');
-  return { ok: true };
+  return { ok: true, rev: nextRev };
 }));
 finance.post('/documents/:id/unlock', h(async (req) => {
   if (!isAdmin(req.user)) throw new HttpError(403, 'Only the System Administrator can unlock an issued document');

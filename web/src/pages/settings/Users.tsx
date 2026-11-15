@@ -65,7 +65,7 @@ function UserModal({ user, canManage, admin, roles, onClose, onLink }: { user: a
     finally { setBusy(false); }
   };
   const st = strength(v.password ?? '');
-  const roleOptions = roles.filter((r) => admin || r.key !== 'admin').map((r) => ({ value: r.key, label: r.label }));
+  const roleOptions = roles.filter((r) => r?.key && (admin || r.key !== 'admin')).map((r) => ({ value: String(r.key), label: String(r.label ?? r.key) }));
   return (
     <FormSheet opened onClose={() => onClose(false)} title={user.id ? `Edit ${user.name}` : 'Add user'} size="lg">
       <Stack>

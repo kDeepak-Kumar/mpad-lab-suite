@@ -1,7 +1,20 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActionIcon, Drawer, Tooltip, UnstyledButton } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { IconChevronRight, IconX } from '@tabler/icons-react';
+
+
+/**
+ * Closing a form the user has typed into (Esc, a click outside, the close button) asks first, so typed work is not lost.
+ * Saving closes the sheet through the page's own code, which is not affected.
+ */
+function useCloseGuard(onClose: () => void, opened = true) {
+  const dirty = useRef(false);
+  useEffect(() => { if (opened) dirty.current = false; }, [opened]);
+  const mark = () => { dirty.current = true; };
+  const close = () => { if (dirty.current && !window.confirm('Discard the changes you have made?')) return; dirty.current = false; onClose(); };
+  return { mark, close };
+}
 
 /**
  * Side sheet: forms and focused tasks open over the page they belong to, so the user keeps their place.
@@ -9,14 +22,15 @@ import { IconChevronRight, IconX } from '@tabler/icons-react';
  */
 export function Sheet({ title, subtitle, onClose, footer, size = 680, children, tools }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; footer?: ReactNode; size?: number; children: ReactNode; tools?: ReactNode }) {
   const phone = useMediaQuery('(max-width: 767px)');
+  const guard = useCloseGuard(onClose);
   return (
-    <Drawer opened onClose={onClose} withCloseButton={false} size={phone ? '100%' : size} padding={0} trapFocus returnFocus>
+    <Drawer opened onClose={guard.close} withCloseButton={false} size={phone ? '100%' : size} padding={0} trapFocus returnFocus>
       <div className="sheet">
         <header className="sheet-head">
           <div style={{ minWidth: 0, outline: 'none' }} tabIndex={-1} data-autofocus><div className="sheet-title">{title}</div>{subtitle && <div className="sheet-sub">{subtitle}</div>}</div>
-          <div className="sheet-tools">{tools}<Tooltip label="Close (Esc)"><ActionIcon variant="subtle" color="gray" size={34} radius={9} aria-label="Close" onClick={onClose}><IconX size={17} /></ActionIcon></Tooltip></div>
+          <div className="sheet-tools">{tools}<Tooltip label="Close (Esc)"><ActionIcon variant="subtle" color="gray" size={34} radius={9} aria-label="Close" onClick={guard.close}><IconX size={17} /></ActionIcon></Tooltip></div>
         </header>
-        <div className="sheet-body">{children}</div>
+        <div className="sheet-body" onInput={guard.mark}>{children}</div>
         {footer && <footer className="sheet-foot">{footer}</footer>}
       </div>
     </Drawer>
@@ -66,14 +80,15 @@ export function Facts({ items }: { items: [ReactNode, ReactNode][] }) {
 export function FormSheet({ opened = true, onClose, title, size, children }: { opened?: boolean; onClose: () => void; title: ReactNode; size?: string | number; children: ReactNode }) {
   const phone = useMediaQuery('(max-width: 767px)');
   const w = typeof size === 'number' ? size : size === 'xl' ? 720 : size === 'lg' ? 600 : 520;
+  const guard = useCloseGuard(onClose, opened);
   return (
-    <Drawer opened={opened} onClose={onClose} withCloseButton={false} size={phone ? '100%' : w} padding={0} trapFocus returnFocus>
+    <Drawer opened={opened} onClose={guard.close} withCloseButton={false} size={phone ? '100%' : w} padding={0} trapFocus returnFocus>
       <div className="sheet fsheet">
         <header className="sheet-head">
           <div style={{ minWidth: 0, outline: 'none' }} tabIndex={-1} data-autofocus><div className="sheet-title">{title}</div></div>
-          <div className="sheet-tools"><Tooltip label="Close (Esc)"><ActionIcon variant="subtle" color="gray" size={34} radius={9} aria-label="Close" onClick={onClose}><IconX size={17} /></ActionIcon></Tooltip></div>
+          <div className="sheet-tools"><Tooltip label="Close (Esc)"><ActionIcon variant="subtle" color="gray" size={34} radius={9} aria-label="Close" onClick={guard.close}><IconX size={17} /></ActionIcon></Tooltip></div>
         </header>
-        <div className="sheet-body" style={{ paddingTop: 18 }}>{children}</div>
+        <div className="sheet-body" style={{ paddingTop: 18 }} onInput={guard.mark}>{children}</div>
       </div>
     </Drawer>
   );

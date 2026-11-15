@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Button, Group, Menu, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Tooltip } from '@mantine/core';
 import { IconArchive, IconCheck, IconDots, IconFileAnalytics, IconPencil, IconPlus, IconPrinter, IconTruckDelivery } from '@tabler/icons-react';
 import { JOB_STATUS } from './Outsourcing';
-import { api, dmy, fail, ok, useApi, localToday } from '../api';
+import { api, dmy, fail, listTotal, ok, useApi, localToday } from '../api';
 import { useCan, useFields, useMe, isAdmin } from '../ctx';
 import { PageHeader, Pill, SkeletonRows, StatusBadge, TypeBadge } from '../components/ui';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
@@ -100,7 +100,8 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
 
 export function SamplesPage() {
   const [sp, setSp] = useSearchParams();
-  const { data, reload } = useApi<any[]>('/samples');
+  const [sq, setSq] = useState('');
+  const { data, reload } = useApi<any[]>(`/samples${sq ? `?q=${encodeURIComponent(sq)}` : ''}`, [sq]);
   const nav = useNavigate();
   const can = useCan();
   const custom = useCustomCols('sample');
@@ -175,7 +176,7 @@ export function SamplesPage() {
   return (
     <>
       <PageHeader title="Samples" subtitle="Every sample received, its tests and where it stands" actions={can('sample.create') && <Button leftSection={<IconPlus size={16} />} onClick={() => setSp({ new: '1' })}>Register sample</Button>} />
-      <ListView id="samples" rows={data} columns={cols} onRow={(s) => { setEdit(null); setSp({ open: String(s.id) }); }} panel={panel} activeId={openId} onClosePanel={close}
+      <ListView id="samples" rows={data} total={listTotal(data)} onServerSearch={setSq} columns={cols} onRow={(s) => { setEdit(null); setSp({ open: String(s.id) }); }} panel={panel} activeId={openId} onClosePanel={close}
         quickFilters={[{ label: 'In testing', filters: [{ key: 'status', op: 'in', value: ['registered', 'in_test'] }] }, { label: 'NABL', filters: [{ key: 'accreditation', op: 'in', value: ['NABL'] }] }, { label: 'Non-NABL', filters: [{ key: 'accreditation', op: 'in', value: ['Non-NABL'] }] }]} />
       {sp.get('new') === '1' && <NewSampleModal preset={sp.get('client') ? { client_id: Number(sp.get('client')) } : undefined} onClose={(saved) => { setSp({}); if (saved) reload(); }} />}
       <Modal opened={Boolean(dispose)} onClose={() => setDispose(null)} title={`Record disposal · ${sample?.code ?? ''}`}>

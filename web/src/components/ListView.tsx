@@ -31,8 +31,12 @@ const workKey = (id: string, view: string) => `lv-work:${id}:${view}`;
 const readWork = (id: string, view: string): ViewDef | null => { try { return JSON.parse(localStorage.getItem(workKey(id, view)) ?? 'null'); } catch { return null; } };
 const writeWork = (id: string, view: string, v: ViewDef | null) => { try { if (v) localStorage.setItem(workKey(id, view), JSON.stringify(v)); else localStorage.removeItem(workKey(id, view)); } catch { /* storage unavailable */ } };
 
-export function ListView<T extends Record<string, any>>({ id, rows, columns: columnsIn, onRow, loading, actions, empty, pageSize = 50, quickFilters, embedded, bulk, panel, activeId, onClosePanel }: {
+export function ListView<T extends Record<string, any>>({ id, rows, columns: columnsIn, onRow, loading, actions, empty, pageSize = 50, quickFilters, embedded, bulk, panel, activeId, onClosePanel, total, onServerSearch }: {
   id: string; rows: T[] | null; columns: Col<T>[]; onRow?: (r: T) => void; loading?: boolean; actions?: ReactNode; empty?: ReactNode; pageSize?: number;
+  /** How many records exist in all when the server sent only part of them (shown above the list). */
+  total?: number;
+  /** The server searches every record: the list hands it the search text (debounced) instead of filtering only the loaded rows. */
+  onServerSearch?: (q: string) => void;
   quickFilters?: { label: string; filters: Filter[] }[];
   /** A short related list inside a record page: no toolbar of its own (search appears once it has more than a handful of rows). */
   embedded?: boolean;
@@ -61,6 +65,11 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
   const [view, setViewState] = useState<string>(() => sp.get('view') ?? pinned ?? lastView);
   const setView = (v: string) => { setViewState(v); setLastView(v); };
   const [search, setSearch] = useState('');
+  useEffect(() => {
+    if (!onServerSearch) return;
+    const t = setTimeout(() => onServerSearch(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
   const [filters, setFilters] = useState<Filter[]>([]);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   const [visible, setVisible] = useState<string[]>(defaults);
@@ -110,10 +119,12 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
   const resetWork = () => { setFilters(base.filters ?? []); setSort(base.sort ?? null); setSearch(base.search ?? ''); setVisible(base.columns?.length ? base.columns : defaults); setDisplay(base.display ?? 'table'); setGroupBy(base.groupBy ?? null); writeWork(id, view, null); };
 
   const shown = visible.map((k) => columns.find((c) => c.key === k)).filter(Boolean) as Col<T>[];
+  // the server sent only the newest records: counts of the loaded part would mislead, and search goes to the server
+  const partial = total !== undefined && rows !== null && total > rows.length;
   const filtered = useMemo(() => {
     let out = rows ?? [];
     const q = search.trim().toLowerCase();
-    if (q) out = out.filter((r) => columns.some((c) => String(getVal(c, r) ?? '').toLowerCase().includes(q)));
+    if (q && !onServerSearch) out = out.filter((r) => columns.some((c) => String(getVal(c, r) ?? '').toLowerCase().includes(q)));
     for (const f of filters) {
       const c = columns.find((x) => x.key === f.key); if (!c) continue;
       out = out.filter((r) => {
@@ -278,8 +289,8 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
           {!embedded && viewMenu}
           {!embedded && quickFilters && quickFilters.length > 0 && (
             <div className="lv-seg" role="tablist" aria-label="Quick filters">
-              <button type="button" role="tab" aria-selected={!filters.length} className={!filters.length ? 'on' : ''} onClick={() => setFilters([])}>All{rows ? <span className="n">{rows.length}</span> : null}</button>
-              {quickFilters.map((q) => <button key={q.label} type="button" role="tab" aria-selected={sameFilters(q.filters)} className={sameFilters(q.filters) ? 'on' : ''} onClick={() => { setFilters(sameFilters(q.filters) ? [] : q.filters); setPage(1); }}>{q.label}{rows ? <span className="n">{matches(q.filters)}</span> : null}</button>)}
+              <button type="button" role="tab" aria-selected={!filters.length} className={!filters.length ? 'on' : ''} onClick={() => setFilters([])}>All{rows ? <span className="n">{partial ? total!.toLocaleString('en-IN') : rows.length}</span> : null}</button>
+              {quickFilters.map((q) => <button key={q.label} type="button" role="tab" aria-selected={sameFilters(q.filters)} className={sameFilters(q.filters) ? 'on' : ''} onClick={() => { setFilters(sameFilters(q.filters) ? [] : q.filters); setPage(1); }}>{q.label}{rows && !partial ? <span className="n">{matches(q.filters)}</span> : null}</button>)}
             </div>
           )}
           {!embedded && favRef && def && <FavStar kind="listview" refKey={favRef} label={def.name} sub={document.title.split('·')[0]?.trim() || undefined} />}
@@ -310,6 +321,7 @@ export function ListView<T extends Record<string, any>>({ id, rows, columns: col
           </div>
         </div>
       )}
+      {partial && <div className="lv-partial" role="status">Showing the newest {rows!.length.toLocaleString('en-IN')} of {total!.toLocaleString('en-IN')}{search ? ' matches' : ''}.{onServerSearch ? ' Search finds any of them.' : ''}</div>}
       {!embedded && (chips.length > 0 || dirty) && (
         <div className="lv-chips">
           {chips.map((f) => {

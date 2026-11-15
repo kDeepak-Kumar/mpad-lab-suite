@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Button, Checkbox, Grid, Group, Menu, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconDots, IconPrinter, IconTemplate, IconTestPipe } from '@tabler/icons-react';
 import { emptyInput, evaluateObservation, normalizeObservation, parseNumberInput, reportParts, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
-import { api, dmy, ok, useApi, localToday } from '../api';
+import { api, dmy, listTotal, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
 import { ListView } from '../components/ListView';
@@ -17,7 +17,9 @@ export function TestsPage() {
   const [sp, setSp] = useSearchParams();
   const tab = sp.get('tab') ?? (me.user.role === 'technician' ? 'mine' : ['reviewer', 'signatory'].includes(me.user.role) ? 'review' : 'open');
   const q = tab === 'mine' ? '?mine=1&status=pending,in_progress,returned' : tab === 'open' ? '?status=pending,in_progress,returned' : tab === 'review' ? '?status=submitted' : tab === 'accepted' ? '?status=accepted' : '';
-  const { data } = useApi<any[]>(`/tests${q}`, [tab]);
+  const [sq, setSq] = useState('');
+  const path = `/tests${q}${sq ? `${q ? '&' : '?'}q=${encodeURIComponent(sq)}` : ''}`;
+  const { data } = useApi<any[]>(path, [tab, sq]);
   const nav = useNavigate();
   const today = localToday();
   return (
@@ -26,7 +28,7 @@ export function TestsPage() {
       <Tabs value={tab} onChange={(t) => setSp({ tab: t ?? 'open' })} mb="sm">
         <Tabs.List><Tabs.Tab value="mine">My tests</Tabs.Tab><Tabs.Tab value="open">All open</Tabs.Tab><Tabs.Tab value="review">To review</Tabs.Tab><Tabs.Tab value="accepted">Accepted</Tabs.Tab><Tabs.Tab value="all">All</Tabs.Tab></Tabs.List>
       </Tabs>
-      <ListView id={`tests-${tab}`} rows={data} onRow={(t) => nav(`/tests/${t.id}`)} empty={({ mine: 'No tests are assigned to you right now.', open: 'No tests are open. New ones appear when samples are registered.', review: 'Nothing is waiting for review.', accepted: 'No accepted tests are waiting for a report.' } as Record<string, string>)[tab] ?? 'No tests yet.'} columns={[
+      <ListView id={`tests-${tab}`} rows={data} total={listTotal(data)} onServerSearch={setSq} onRow={(t) => nav(`/tests/${t.id}`)} empty={({ mine: 'No tests are assigned to you right now.', open: 'No tests are open. New ones appear when samples are registered.', review: 'Nothing is waiting for review.', accepted: 'No accepted tests are waiting for a report.' } as Record<string, string>)[tab] ?? 'No tests yet.'} columns={[
         { key: 'test', label: 'Test', value: (t) => t.report_name || t.billing_name, render: (t) => <Text size="sm" fw={550}>{t.report_name || t.billing_name}</Text>, filter: 'select' },
         { key: 'sample_code', label: 'Job code' }, { key: 'accreditation', label: 'Type', type: 'badge' }, { key: 'client_name', label: 'Client', filter: 'select' },
         { key: 'assignee', label: 'Assigned', filter: 'select' },
