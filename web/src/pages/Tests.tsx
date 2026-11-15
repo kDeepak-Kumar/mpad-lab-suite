@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Button, Checkbox, Grid, Group, Menu, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconDots, IconPrinter, IconTemplate, IconTestPipe } from '@tabler/icons-react';
-import { emptyInput, evaluateObservation, normalizeObservation, parseNumberInput, reportParts, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
+import { emptyInput, envApplies, evaluateObservation, normalizeObservation, parseNumberInput, reportParts, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
 import { api, dmy, listTotal, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
@@ -150,10 +150,10 @@ export function TestSheetPage() {
                   <Info k="Template" v={`${tpl.code} v${tpl.version}`} />
                 </SimpleGrid>
                 <SimpleGrid cols={{ base: 2, md: 4 }}>
-                  <TextInput size="xs" type="date" label="Test started" value={dates.started_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, started_at: e.currentTarget.value }); setDirty(true); }} />
-                  <TextInput size="xs" type="date" label="Test completed" value={dates.completed_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, completed_at: e.currentTarget.value }); setDirty(true); }} />
-                  {!tpl.headerFields.some((f) => f.key === 'temp') && <TextInput size="xs" label="Lab temperature (°C)" inputMode="decimal" placeholder="27" description="Printed under Environmental conditions" value={dates.env_temp} disabled={!editable} onChange={(e) => { setDates({ ...dates, env_temp: e.currentTarget.value }); setDirty(true); }} />}
-                  {!tpl.headerFields.some((f) => f.key === 'rh') && <TextInput size="xs" label="Relative humidity (%)" inputMode="decimal" placeholder="65" value={dates.env_rh} disabled={!editable} onChange={(e) => { setDates({ ...dates, env_rh: e.currentTarget.value }); setDirty(true); }} />}
+                  <TextInput size="xs" type="date" label="Test started" min={s?.received_date ?? undefined} max={localToday()} value={dates.started_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, started_at: e.currentTarget.value }); setDirty(true); }} />
+                  <TextInput size="xs" type="date" label="Test completed" min={dates.started_at || undefined} max={localToday()} value={dates.completed_at} disabled={!editable} onChange={(e) => { setDates({ ...dates, completed_at: e.currentTarget.value }); setDirty(true); }} />
+                  {envApplies(s?.material) && !tpl.headerFields.some((f) => f.key === 'temp') && <TextInput size="xs" label="Lab temperature (°C)" inputMode="decimal" placeholder="27" description="Printed under Environmental conditions" value={dates.env_temp} disabled={!editable} onChange={(e) => { setDates({ ...dates, env_temp: e.currentTarget.value }); setDirty(true); }} />}
+                  {envApplies(s?.material) && !tpl.headerFields.some((f) => f.key === 'rh') && <TextInput size="xs" label="Relative humidity (%)" inputMode="decimal" placeholder="65" value={dates.env_rh} disabled={!editable} onChange={(e) => { setDates({ ...dates, env_rh: e.currentTarget.value }); setDirty(true); }} />}
                   {tpl.headerFields.map((f) => f.type === 'select'
                     ? <Select key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} data={f.options ?? []} value={(obs.header[f.key] as string) ?? (f.default !== undefined ? String(f.default) : null)} disabled={!editable} onChange={(v) => setHeader(f.key, v)} description={f.help} />
                     : <TextInput key={f.key} size="xs" label={`${f.label}${f.unit ? ` (${f.unit})` : ''}`} required={f.required} type={f.type === 'date' ? 'date' : 'text'} inputMode={f.type === 'number' ? 'decimal' : undefined}

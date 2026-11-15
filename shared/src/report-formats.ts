@@ -183,6 +183,10 @@ function extraPairs(d: FormatInput['data']): [string, string][] {
 
 type Pair = [string, string | null | undefined, Partial<Cell>?];
 /** Two label/value pairs per row; an unpaired item takes the full width; empty items are left out (no blank rows). */
+/** Environmental conditions are reported only for materials whose results depend on them:
+ * cement, fly ash, GGBS, construction water and drinking water (physical and chemical tests). */
+export const envApplies = (material: unknown) => /cement|fly\s*-?\s*ash|ggbs|slag|water/i.test(String(material ?? ''));
+
 function pairRows(left: Pair[], right: Pair[]): CellSpec[][] {
   const ok = (p: Pair) => p[1] !== undefined && p[1] !== null && String(p[1]).trim() !== '';
   const Lf = left.filter(ok), Rt = right.filter(ok);
@@ -235,7 +239,7 @@ export function reportDetails(d: FormatInput['data'], tests: TestSnap[], o: { sa
   ];
   const method = o.method ?? uniq(tests.map((t) => t.method).filter(Boolean)).join('; ');
   const testLeft: Pair[] = [['Period of testing', d.testDatesText], ['Test method', method], ...(o.testing ?? [])];
-  const testRight: Pair[] = [['Environmental conditions', d.envText], ['Test location', d.testLocation]];
+  const testRight: Pair[] = [['Environmental conditions', envApplies(d.material) ? d.envText : ''], ['Test location', d.testLocation]];
   const rows: CellSpec[][] = [sec('CUSTOMER'), ...custRows, sec('SAMPLE'), ...pairRows(sampleLeft, sampleRight)];
   const tr = pairRows(testLeft, testRight);
   if (tr.length) rows.push(sec('TESTING'), ...tr);
@@ -334,7 +338,6 @@ const cubes: Builder = (tests, d) => {
     title('COMPRESSIVE STRENGTH OF CONCRETE CUBES'),
     table([6, 15, 11, 11, 9, 10, 10, 13, 15], rows, { head: 1, role: 'results', sz: 10 }),
     ...extraSections(d),
-    table([34, 22, 22, 22], [[C('Requirements as per IS 456:2000', { cs: 4 }), null, null, null], [C('3 days – 45 %'), C('7 days – 60 %'), C('14 days – 85 %'), C('28 days – 100 %')]], { mt: 2, role: 'requirements', sz: 10 }),
     ...remarksSection(d), ...notesSection(d), endSection(),
   ];
 };

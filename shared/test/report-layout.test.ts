@@ -115,7 +115,7 @@ describe('report formats', () => {
     expect(htmlToText(cust.h)).toContain('Example Infra Pvt Ltd');
     expect(htmlToText(cust.h)).not.toContain('R. Kumar'); // contact details only when asked for
     const t = all(l);
-    for (const x of ['CUSTOMER', 'SAMPLE', 'TESTING', 'Project / site*', 'Pristinia', 'Customer reference*', 'EI/QC/Oct/2026, dated 29-10-2026', 'Date & time of receipt', '20-10-2026, 11:40', 'Environmental conditions', '27 °C, 65 % RH', 'Test location', 'Test method', 'Condition on receipt']) expect(t).toContain(x);
+    for (const x of ['CUSTOMER', 'SAMPLE', 'TESTING', 'Project / site*', 'Pristinia', 'Customer reference*', 'EI/QC/Oct/2026, dated 29-10-2026', 'Date & time of receipt', '20-10-2026, 11:40', 'Test location', 'Test method', 'Condition on receipt']) expect(t).toContain(x);
     expect(t).not.toContain('not covered under the scope of NABL');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
     expect(res.rows.length).toBe(5);
@@ -136,8 +136,9 @@ describe('report formats', () => {
     expect(rem.type).toBe('table'); expect(htmlToText(rem.rows[0][0].h)).toBe('REMARKS'); expect(htmlToText(rem.rows[1][0].h)).toBe('Meets the 7-day requirement.');
     const notes = l.sections.find((s) => s.role === 'notes') as TableSection;
     expect(notes.rows.length).toBe(1); expect(htmlToText(notes.rows[0][1].h)).toContain('2. Not to be reproduced');
-    const req = l.sections.find((s) => s.role === 'requirements') as TableSection;
-    expect(req.width).toBeUndefined(); expect(req.head).toBe(1);
+    // cube reports carry no "% of grade strength by age" table; environmental conditions are not reported for concrete
+    expect(l.sections.find((s) => s.role === 'requirements')).toBeUndefined();
+    expect(all(l)).not.toContain('28 days – 100 %'); expect(all(l)).not.toContain('Environmental conditions');
     expect(all(l)).toContain('— END OF REPORT —');
     const again = refreshRoles(l, { data: { ...base, remarks: 'Changed.', tests: [], customer } }, ['remarks']);
     expect(htmlToText((again.sections.find((s) => s.role === 'remarks') as TableSection).rows[1][0].h)).toBe('Changed.');
@@ -244,5 +245,13 @@ describe('ULR with the new NABL certificate number', () => {
     expect(certCode('TC-5064')).toBe('TC5064');
     expect(formatNumber(DEFAULT_NUMBERING.ulr, 3170, { date: '2026-11-10', cert: 'NABLT0726TS18813 (In lieu of TC-10775)' })).toBe('NABLT0726TS1881326000003170F');
     expect(formatNumber(DEFAULT_NUMBERING.ulr, 1, { date: '2026-11-10', cert: 'NABLT0726TS18813', fp: 'P' })).toBe('NABLT0726TS1881326000000001P');
+  });
+});
+
+describe('environmental conditions on reports', () => {
+  it('apply only to cement, fly ash, GGBS and water', async () => {
+    const { envApplies } = await import('../src/report-formats');
+    for (const m of ['Cement', 'OPC 53 cement', 'Fly ash', 'Flyash', 'GGBS', 'Water', 'Drinking water', 'Water for construction purposes']) expect(envApplies(m), m).toBe(true);
+    for (const m of ['Concrete', 'Steel', 'Soil', 'Coarse aggregate', 'Fine aggregate', 'Pile / pier', '']) expect(envApplies(m), m).toBe(false);
   });
 });
