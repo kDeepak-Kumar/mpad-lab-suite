@@ -439,6 +439,15 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: '016_revoked_sessions',
+    up: async (k) => {
+      // Sessions ended by "Sign out" stay unusable until they would have expired anyway
+      if (!(await k.schema.hasTable('revoked_sessions'))) {
+        await k.schema.createTable('revoked_sessions', (t) => { t.string('jti', 64).primary(); t.string('expires_at', 32).notNullable().index(); });
+      }
+    },
+  },
 ];
 
 /** Tables whose records show Created / Last modified dates (and that admins may correct). */

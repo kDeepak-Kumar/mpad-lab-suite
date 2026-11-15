@@ -30,11 +30,25 @@ export async function nextNumber(trx: Knex, cid: number, kind: string, ctx: { da
   const company = await getCompany(cid, trx);
   const format = company.numbering?.[kind] || DEFAULT_NUMBERING[kind] || `${kind.toUpperCase()}/{SEQ}`;
   const scope = counterScope(format, ctx.date);
-  const cur = await trx('counters').where({ company_id: cid, kind, scope }).forUpdate().first();
-  const seq = (cur?.value ?? 0) + 1;
-  if (cur) await trx('counters').where({ company_id: cid, kind, scope }).update({ value: seq });
-  else await trx('counters').insert({ company_id: cid, kind, scope, value: seq });
-  return { seq, number: formatNumber(format, seq, { ...ctx, cert: company.accreditation?.certNo, loc: company.accreditation?.location }) };
+  // Never hand out a number that is already printed on a document (e.g. after the pattern was changed): skip ahead.
+  for (let tries = 0; tries < 50; tries++) {
+    const cur = await trx('counters').where({ company_id: cid, kind, scope }).forUpdate().first();
+    const seq = (cur?.value ?? 0) + 1;
+    if (cur) await trx('counters').where({ company_id: cid, kind, scope }).update({ value: seq });
+    else await trx('counters').insert({ company_id: cid, kind, scope, value: seq });
+    const number = formatNumber(format, seq, { ...ctx, cert: company.accreditation?.certNo, loc: company.accreditation?.location });
+    if (!(await numberTaken(trx, cid, kind, number))) return { seq, number };
+  }
+  throw new HttpError(409, `The ${kind} numbering pattern keeps producing numbers that are already used. Add {SEQ} to it in Settings → Numbering.`);
+}
+const NUMBER_TABLES: Record<string, [string, string, Record<string, unknown>?]> = {
+  quote: ['documents', 'number', { kind: 'quote' }], invoice: ['documents', 'number', { kind: 'invoice' }], report: ['documents', 'number', { kind: 'report' }],
+  sample: ['samples', 'code'], receipt: ['payments', 'number'], workorder: ['work_orders', 'number'],
+};
+async function numberTaken(k: Knex, cid: number, kind: string, number: string) {
+  const t = NUMBER_TABLES[kind];
+  if (!t) return false;
+  return Boolean(await k(t[0]).where({ company_id: cid, [t[1]]: number, ...(t[2] ?? {}) }).first('id'));
 }
 
 /** Format a number with an existing sequence (e.g. ULR shares the sample's running number). */
@@ -88,6 +102,10 @@ export async function buildReportData(cid: number, testIds: number[]) {
   if (!tests.length) throw new HttpError(400, 'Select at least one accepted test');
   const bad = tests.find((t) => t.status !== 'accepted' && t.status !== 'reported');
   if (bad) throw new HttpError(400, 'Only tests accepted by a reviewer can go on a report');
+  // a result sheet with nothing calculated (all readings blank) never goes on a report
+  const usable = (v: unknown) => (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && v.trim() !== '');
+  const empty = tests.find((t) => !Object.values((t.results ?? {}) as Record<string, unknown>).some(usable) && !(t.observation as { external?: unknown } | null)?.external);
+  if (empty) throw new HttpError(400, 'One of the tests has no calculated result. Return it to the technician to enter the readings.');
   const sampleIds = [...new Set(tests.map((t) => t.sample_id as number))];
   const samples = await db('samples').whereIn('id', sampleIds).orderBy('id');
   const clientIds = new Set(samples.map((s) => s.client_id));

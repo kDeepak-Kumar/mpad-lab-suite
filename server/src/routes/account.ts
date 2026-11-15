@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { db, now } from '../db';
-import { allow, checkPassword, clearPolicyCache, companyRequires2fa, h, hashPassword, HttpError, isAdmin, requireAuth, setSession, zBool } from '../auth';
+import { allow, checkPassword, clearPolicyCache, companyRequires2fa, h, hashPassword, HttpError, isAdmin, requireAuth, revokeSession, setSession, zBool } from '../auth';
 import { audit, getCompany } from '../services';
 import { mailer } from '../alerts';
 import { emailHtml } from '../email';
@@ -57,7 +57,7 @@ async function newDeviceAlert(u: { id: number; company_id: number; name: string;
   } catch { /* email not set up: the alert still shows in the app */ }
 }
 
-account.post('/auth/logout', h(async (_req, res) => { res.clearCookie('suite_sid'); return { ok: true }; }));
+account.post('/auth/logout', h(async (req, res) => { await revokeSession(req, res); return { ok: true }; }));
 
 /** Public: name, logo and tagline for the sign-in page (no secrets). */
 account.get('/public/branding', h(async () => {

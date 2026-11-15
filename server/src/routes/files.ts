@@ -55,6 +55,15 @@ files.post('/files', h(async (req) => {
   const base64 = b.data.replace(/^data:[^;]+;base64,/, '');
   if (!/^[A-Za-z0-9+/=\s]+$/.test(base64)) throw new HttpError(400, 'File content is not valid');
   const size = Math.floor((base64.replace(/\s/g, '').length * 3) / 4);
+  // the content must really be the declared kind (PDF, PNG, JPG, WebP, or an Office file, which is a ZIP)
+  const head = Buffer.from(base64.slice(0, 24), 'base64');
+  const sig = head.subarray(0, 4).toString('latin1');
+  const okSig = b.mime === 'application/pdf' ? sig === '%PDF'
+    : b.mime === 'image/png' ? head.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    : /^image\/jpe?g$/.test(b.mime) ? head[0] === 0xff && head[1] === 0xd8
+    : b.mime === 'image/webp' ? sig === 'RIFF' && head.subarray(8, 12).toString('latin1') === 'WEBP'
+    : sig === 'PK\u0003\u0004';
+  if (!okSig) throw new HttpError(400, 'The file content does not match its type. Upload a real PDF, image or Word/Excel file.');
   if (size > MAX_BYTES) throw new HttpError(400, 'File is larger than 10 MB');
   const name = b.name.replace(/[\\/:*?"<>|]+/g, '_');
   const id = await insert(db, 'files', { company_id: req.user.company_id, entity: b.entity, entity_id: b.entity_id, name, mime: b.mime, size, data: base64, note: b.note ?? null, kind: b.kind ?? null, uploaded_by: req.user.id, created_at: now() });

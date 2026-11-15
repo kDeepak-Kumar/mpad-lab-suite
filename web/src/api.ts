@@ -44,6 +44,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
 }
 
 export const ok = (message: string) => notifications.show({ color: 'teal', message, autoClose: 2500 });
+export const fail = (message: string) => notifications.show({ color: 'red', title: 'Could not complete', message });
 
 /** Load data with stale-while-revalidate caching. */
 export function useApi<T = any>(path: string | null, deps: unknown[] = []) {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
 import { roleAllows, type RoleDef } from '@suite/shared';
 import { db } from './db';
 import { getRole } from './meta';
@@ -27,16 +28,31 @@ export async function companyRequires2fa(cid: number) {
 export const clearPolicyCache = () => policyCache.clear();
 
 export function setSession(res: Response, u: { id: number; token_version?: number | null }) {
-  const token = jwt.sign({ uid: u.id, tv: Number(u.token_version ?? 0) }, SECRET, { expiresIn: '12h' });
+  const token = jwt.sign({ uid: u.id, tv: Number(u.token_version ?? 0), jti: randomUUID() }, SECRET, { expiresIn: '12h' });
   res.cookie(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true', maxAge: 12 * 3600 * 1000 });
 }
 export const clearSession = (res: Response) => res.clearCookie(COOKIE);
+
+/** Sign-out: the cookie is cleared and the token itself is recorded as ended, so a copy of it no longer works. */
+export async function revokeSession(req: Request, res: Response) {
+  const token = req.cookies?.[COOKIE];
+  res.clearCookie(COOKIE);
+  if (!token) return;
+  try {
+    const { jti, exp } = jwt.verify(token, SECRET) as { jti?: string; exp?: number };
+    if (!jti) return;
+    const expires = new Date((exp ?? Date.now() / 1000 + 43200) * 1000).toISOString();
+    await db('revoked_sessions').insert({ jti, expires_at: expires }).onConflict('jti').ignore();
+    await db('revoked_sessions').where('expires_at', '<', new Date().toISOString()).delete();
+  } catch { /* an invalid token is already unusable */ }
+}
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const token = req.cookies?.[COOKIE];
     if (!token) return res.status(401).json({ error: 'Please sign in' });
-    const { uid, tv } = jwt.verify(token, SECRET) as { uid: number; tv?: number };
+    const { uid, tv, jti } = jwt.verify(token, SECRET) as { uid: number; tv?: number; jti?: string };
+    if (jti && await db('revoked_sessions').where({ jti }).first('jti')) return res.status(401).json({ error: 'You were signed out. Please sign in again.' });
     const u = await db('users').where({ id: uid, active: true }).first('id', 'company_id', 'name', 'email', 'role', 'token_version', 'totp_enabled');
     if (!u) return res.status(401).json({ error: 'Please sign in' });
     // "Sign out of all other devices" bumps token_version, which ends every older session
@@ -65,6 +81,9 @@ export const isAdmin = (u: AuthUser) => Boolean(u.roleDef?.admin);
 
 export const allow = (perm: string): RequestHandler => (req, res, next) =>
   can(req.user, perm) ? next() : res.status(403).json({ error: 'Your role does not allow this action' });
+/** Passes when the role has any one of the permissions. */
+export const allowAny = (...perms: string[]): RequestHandler => (req, res, next) =>
+  perms.some((p) => can(req.user, p)) ? next() : res.status(403).json({ error: 'Your role does not allow this action' });
 
 /**
  * Yes/no field that also accepts what the database returns (SQLite stores booleans as 1/0) and "true"/"false",

@@ -50,7 +50,7 @@ function PaymentModal({ clientId, invoiceId, onClose }: { clientId: string | nul
       <Stack>
         <Select label="Client" searchable data={(clients ?? []).map((c) => ({ value: String(c.id), label: c.name }))} value={client} onChange={(x) => { setClient(x); setAlloc({}); }} />
         <SimpleGrid cols={{ base: 2, sm: 3 }}>
-          <TextInput type="date" label="Date" value={v.date} onChange={(e) => setV({ ...v, date: e.currentTarget.value })} />
+          <TextInput type="date" label="Date" max={localToday()} value={v.date} onChange={(e) => setV({ ...v, date: e.currentTarget.value })} />
           <NumberInput label="Amount received (₹)" thousandSeparator="," decimalScale={2} value={v.amount} onChange={(x) => setV({ ...v, amount: Number(x) || 0 })} />
           <NumberInput label="TDS deducted (₹)" thousandSeparator="," decimalScale={2} value={v.tds} onChange={(x) => setV({ ...v, tds: Number(x) || 0 })} />
           <Select label="Mode" data={modes} value={v.mode} onChange={(x) => setV({ ...v, mode: x ?? '' })} />
@@ -66,7 +66,7 @@ function PaymentModal({ clientId, invoiceId, onClose }: { clientId: string | nul
                     <Table.Td><Checkbox checked={!!alloc[i.id]} onChange={(e) => setAlloc({ ...alloc, [i.id]: e.currentTarget.checked ? Math.min(i.balance, Math.max(0, v.amount + v.tds - allocated) || i.balance) : 0 })} /></Table.Td>
                     <Table.Td>{i.number}</Table.Td><Table.Td>{dmy(i.date)}{i.overdue ? <Text span c="red" size="xs"> · {i.days}d</Text> : null}</Table.Td>
                     <Table.Td className="num">₹{money(i.total)}</Table.Td><Table.Td className="num">₹{money(i.balance, 2)}</Table.Td>
-                    <Table.Td><NumberInput size="xs" thousandSeparator="," decimalScale={2} value={alloc[i.id] ?? 0} onChange={(x) => setAlloc({ ...alloc, [i.id]: Number(x) || 0 })} /></Table.Td>
+                    <Table.Td><NumberInput size="xs" thousandSeparator="," decimalScale={2} min={0} max={i.balance} clampBehavior="strict" value={alloc[i.id] ?? 0} onChange={(x) => setAlloc({ ...alloc, [i.id]: Number(x) || 0 })} /></Table.Td>
                   </Table.Tr>
                 ))}
                 {open?.length === 0 && <Table.Tr><Table.Td colSpan={6}><Text size="sm" c="dimmed" p="sm">No unpaid invoices. The amount is recorded as an advance on the client ledger.</Text></Table.Td></Table.Tr>}

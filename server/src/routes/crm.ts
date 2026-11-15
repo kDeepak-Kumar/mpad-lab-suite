@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { formatDate } from '@suite/shared';
 import { db, insert, now, parseJson, row, today } from '../db';
-import { h, HttpError, isAdmin, requireAuth, zBool } from '../auth';
+import { can, h, HttpError, isAdmin, requireAuth, zBool, type AuthUser } from '../auth';
 import { moveToBin } from '../recycle';
 import { audit, getCompany, getDocTemplate, sha256 } from '../services';
 
@@ -69,11 +69,16 @@ export const crm = Router();
 crm.use(requireAuth);
 const TYPES = ['Call', 'Visit', 'Email', 'WhatsApp', 'Meeting', 'Task', 'Note'] as const;
 
+/** Creator, assignee, System Administrator, or a role that may modify all client records. */
+const mayEditActivity = (u: AuthUser, a: { created_by: number; assigned_to: number | null }) =>
+  a.created_by === u.id || a.assigned_to === u.id || isAdmin(u) || Boolean((u.roleDef?.objects?.client as { modifyAll?: boolean } | undefined)?.modifyAll);
 crm.get('/activities', h(async (req) => {
   const cid = req.user.company_id;
   const q = db('activities as a').leftJoin('clients as c', 'c.id', 'a.client_id').leftJoin('users as u', 'u.id', 'a.assigned_to').leftJoin('users as b', 'b.id', 'a.created_by')
     .where('a.company_id', cid).select('a.*', 'c.name as client_name', 'u.name as assignee', 'b.name as created_by_name');
   if (req.query.client_id) q.andWhere('a.client_id', Number(req.query.client_id));
+  // roles without client access see only the follow-ups assigned to or created by them
+  if (!can(req.user, 'client.read')) q.andWhere((w) => w.where('a.assigned_to', req.user.id).orWhere('a.created_by', req.user.id));
   if (req.query.link_kind && req.query.link_id) q.andWhere({ 'a.link_kind': String(req.query.link_kind), 'a.link_id': Number(req.query.link_id) });
   if (req.query.mine === '1') q.andWhere('a.assigned_to', req.user.id);
   if (req.query.open === '1') q.whereNull('a.done_at');
@@ -89,6 +94,8 @@ const actSchema = z.object({
 crm.post('/activities', h(async (req) => {
   const cid = req.user.company_id;
   const b = actSchema.parse(req.body);
+  if (b.client_id && !can(req.user, 'client.read')) throw new HttpError(403, 'Your role cannot log follow-ups for clients');
+  if (b.assigned_to && !(await db('users').where({ id: b.assigned_to, company_id: cid, active: true }).first('id'))) throw new HttpError(400, 'Assigned person not found');
   if (b.client_id && !(await db('clients').where({ id: b.client_id, company_id: cid }).first())) throw new HttpError(400, 'Client not found');
   const { done, ...rest } = b;
   const id = await insert(db, 'activities', { ...rest, company_id: cid, assigned_to: b.assigned_to ?? req.user.id, created_by: req.user.id, done_at: done || b.type === 'Note' ? now() : null, created_at: now() });
@@ -99,7 +106,9 @@ crm.put('/activities/:id', h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
   const a = await db('activities').where({ id, company_id: cid }).first();
   if (!a) throw new HttpError(404, 'Follow-up not found');
+  if (!mayEditActivity(req.user, a)) throw new HttpError(403, 'Only the person who created or is assigned this follow-up can change it');
   const b = actSchema.partial().parse(req.body);
+  if (b.client_id && !can(req.user, 'client.read')) throw new HttpError(403, 'Your role cannot log follow-ups for clients');
   const { done, ...rest } = b;
   await db('activities').where({ id }).update({ ...rest, ...(done === undefined ? {} : { done_at: done ? now() : null }) });
   return { ok: true };

@@ -4,7 +4,7 @@ import { mailer } from '../alerts';
 import { emailHtml, footerText } from '../email';
 import { cleanLayout, refreshRoles, computeTotals, formatDate, isEmailList, setLayoutUlr, stateName, ulrScope, type LineInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
-import { allow, can, h, HttpError, isAdmin } from '../auth';
+import { allow, allowAny, can, h, HttpError, isAdmin } from '../auth';
 import { cleanWrite } from '../meta';
 import { audit, clientSnapshot, getCompany, getDocTemplate, ledger, nextNumber, paidAgainst, refreshInvoiceStatus, sha256 } from '../services';
 import { guardDocument, recordAccess, restrictDocuments, isShareObject } from '../sharing';
@@ -12,6 +12,7 @@ import { followUpsDue, scheduleQuoteFollowUp, shareable, shareToken, verifyToken
 import { createWorkOrder } from './lab';
 import { isIsoDate } from '@suite/shared';
 const isoDate = z.string().refine(isIsoDate, 'Enter a valid date (YYYY-MM-DD)');
+const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
 export const finance = Router();
 /** Private quotations / invoices: owner, shared users and View all roles only (see sharing.ts). */
@@ -49,6 +50,8 @@ function checkDocData(data: Record<string, unknown> | undefined) {
   lines.forEach((l, i) => {
     if (!String(l.description ?? '').trim()) throw new HttpError(400, `Line ${i + 1}: description is required`);
     if (!Number.isFinite(Number(l.rate)) || Number(l.rate) < 0) throw new HttpError(400, `Line ${i + 1}: rate must be a number of 0 or more`);
+    if (Number(l.rate) > 1e8) throw new HttpError(400, `Line ${i + 1}: rate is too large (max ₹10 crore)`);
+    if (l.qty !== null && l.qty !== undefined && Number(l.qty) > 1e5) throw new HttpError(400, `Line ${i + 1}: quantity is too large`);
     if (l.qty !== null && l.qty !== undefined && (!Number.isFinite(Number(l.qty)) || Number(l.qty) < 0)) throw new HttpError(400, `Line ${i + 1}: quantity must be 0 or more`);
     if (l.discountPct !== undefined && l.discountPct !== null && (Number(l.discountPct) < 0 || Number(l.discountPct) > 100)) throw new HttpError(400, `Line ${i + 1}: discount must be between 0 and 100%`);
     if (l.gstRate !== undefined && l.gstRate !== null && (Number(l.gstRate) < 0 || Number(l.gstRate) > 28)) throw new HttpError(400, `Line ${i + 1}: GST rate must be between 0 and 28%`);
@@ -227,6 +230,7 @@ finance.post('/documents/:id/unlock', h(async (req) => {
 }));
 finance.delete('/documents/:id', h(async (req) => {
   const d = await loadDoc(req.user.company_id, Number(req.params.id));
+  if (!can(req.user, permFor(d.kind))) throw new HttpError(403, 'Your role cannot cancel this document');
   if (d.status !== 'draft' || (d.kind === 'quote' && d.number)) {
     if (d.status !== 'draft') throw new HttpError(409, 'Only drafts can be deleted');
   }
@@ -348,6 +352,7 @@ finance.post('/documents/:id/issue', h(async (req) => {
   if (d.kind === 'invoice' && d.status !== 'draft') throw new HttpError(409, 'Invoice already issued');
   if (d.kind === 'report' && d.status !== 'verified' && !(admin && ['draft', 'review'].includes(d.status))) throw new HttpError(409, 'Verify the report before signing and issuing it');
   if (d.kind === 'invoice' && !((d.data.lines as unknown[]) ?? []).length) throw new HttpError(400, 'Add at least one line');
+  if (d.kind === 'invoice' && !(Number(d.total ?? (d.totals as { total?: number } | undefined)?.total ?? 0) > 0)) throw new HttpError(400, 'A tax invoice must be for more than ₹0');
   let signatory: Signatory | undefined;
   if (d.data.signatoryId) {
     signatory = (await signatoryOptions(cid)).find((x) => x.id === d.data.signatoryId);
@@ -414,12 +419,16 @@ finance.post('/documents/:id/amend', allow('reportIssue'), h(async (req) => {
 finance.post('/documents/:id/email', h(async (req) => {
   const cid = req.user.company_id;
   const d = await loadDoc(cid, Number(req.params.id));
+  // sending goes out from the company mailbox: readers may send issued documents, drafts need edit rights
+  if (!can(req.user, `${d.kind}.read`) || (d.status === 'draft' && !can(req.user, permFor(d.kind)))) throw new HttpError(403, 'Your role cannot email this document');
   const body = z.object({
     to: z.string().min(3), cc: z.string().optional(), subject: z.string().min(1), body: z.string(), pdfBase64: z.string().optional(), filename: z.string().optional(),
     attachFileIds: z.array(z.number().int()).max(5).optional(),
   }).parse(req.body);
   if (!isEmailList(body.to)) throw new HttpError(400, 'To: enter valid email addresses separated by commas');
   if (body.cc && !isEmailList(body.cc)) throw new HttpError(400, 'Cc: enter valid email addresses separated by commas');
+  const pdf = body.pdfBase64 ? Buffer.from(body.pdfBase64.replace(/^data:[^;]+;base64,/, ''), 'base64') : null;
+  if (pdf && pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new HttpError(400, 'The attachment is not a PDF');
   const company = await getCompany(cid);
   let send;
   try { send = await mailer(company); } catch (e) { throw new HttpError(400, (e as Error).message); }
@@ -430,12 +439,12 @@ finance.post('/documents/:id/email', h(async (req) => {
     text: `${body.body.trim()}\n\n${footerText(company, { kind: d.kind as string })}`.trim(),
     html: emailHtml(company, body.body, { kind: d.kind as string }),
     attachments: [
-      ...(body.pdfBase64 ? [{ filename: body.filename || `${d.number || d.kind}.pdf`, content: Buffer.from(body.pdfBase64, 'base64'), contentType: 'application/pdf' }] : []),
+      ...(pdf ? [{ filename: body.filename || `${d.number || d.kind}.pdf`, content: pdf, contentType: 'application/pdf' }] : []),
       ...extra.map((f) => ({ filename: f.name, content: Buffer.from(String(f.data), 'base64'), contentType: f.mime })),
     ],
   });
   if (d.kind === 'quote' && d.status === 'draft') await db('documents').where({ id: d.id }).update({ status: 'sent', issued_at: now(), issued_by: req.user.id, hash: sha256(d.data) });
-  await audit(db, req.user, 'document', d.id, 'emailed', { to: body.to, cc: body.cc, subject: body.subject, attachments: extra.map((f) => f.name) });
+  await audit(db, req.user, 'document', d.id, 'emailed', { to: body.to, cc: body.cc, subject: body.subject, attachments: extra.map((f) => f.name), pdf: pdf ? { bytes: pdf.length, sha256: sha256(pdf.toString('base64')) } : null });
   return { ok: true };
 }));
 /** Preview of the branded footer that is added under every document email. */
@@ -448,7 +457,7 @@ finance.get('/email/footer', h(async (req) => {
 finance.get('/payments', allow('payment.read'), h(async (req) => db('payments as p').leftJoin('clients as c', 'c.id', 'p.client_id').where('p.company_id', req.user.company_id)
   .modify((b) => { if (req.query.client_id) b.andWhere('p.client_id', Number(req.query.client_id)); })
   .orderBy('p.id', 'desc').select('p.*', 'c.name as client_name').then((r: Record<string, unknown>[]) => r.map((x) => row(x, ['allocations'])))));
-finance.get('/invoices/outstanding', h(async (req) => {
+finance.get('/invoices/outstanding', allowAny('invoice.read', 'payment.read'), h(async (req) => {
   const cid = req.user.company_id;
   const q = db('documents as d').leftJoin('clients as c', 'c.id', 'd.client_id').where({ 'd.company_id': cid, 'd.kind': 'invoice' }).whereIn('d.status', ['issued', 'partly_paid']);
   if (req.query.client_id) q.andWhere('d.client_id', Number(req.query.client_id));
@@ -470,7 +479,22 @@ finance.post('/payments', allow('recordPayments'), h(async (req) => {
   if (p.tds > p.amount) throw new HttpError(400, 'TDS cannot be more than the amount received');
   const alloc = p.allocations.reduce((s, a) => s + a.amount, 0);
   if (alloc - (p.amount + p.tds) > 0.5) throw new HttpError(400, 'Allocated amount is more than the payment plus TDS');
+  if (p.date > addDays(today(), 1) || p.date < '2000-01-01') throw new HttpError(400, 'Payment date cannot be in the future');
+  if (new Set(p.allocations.map((a) => a.invoiceId)).size !== p.allocations.length) throw new HttpError(400, 'Each invoice can appear only once in a payment');
   return db.transaction(async (trx) => {
+    // allocate only to this client's issued invoices, and never more than what is still due on each
+    if (p.allocations.length) {
+      const invs = await trx('documents').where({ company_id: cid, kind: 'invoice' }).whereIn('id', p.allocations.map((a) => a.invoiceId)).modify((q) => { if (trx.client.config.client === 'mysql2') q.forUpdate(); }).select('id', 'number', 'client_id', 'status', 'total');
+      const paid = await paidAgainst(cid, trx);
+      for (const a of p.allocations) {
+        const inv = invs.find((i: { id: number }) => i.id === a.invoiceId);
+        if (!inv) throw new HttpError(400, 'Invoice not found');
+        if (Number(inv.client_id) !== p.client_id) throw new HttpError(400, `Invoice ${inv.number} belongs to another client`);
+        if (!['issued', 'partly_paid'].includes(inv.status)) throw new HttpError(400, `Invoice ${inv.number || '(draft)'} is ${inv.status === 'paid' ? 'already fully paid' : 'not issued'}`);
+        const due = Math.round((Number(inv.total) - (paid.get(inv.id) ?? 0)) * 100) / 100;
+        if (a.amount - due > 0.5) throw new HttpError(400, `Invoice ${inv.number} has ₹${due.toLocaleString('en-IN')} due; you allocated ₹${a.amount.toLocaleString('en-IN')}. Keep the rest unallocated as an advance.`);
+      }
+    }
     const { number } = await nextNumber(trx, cid, 'receipt', { date: p.date });
     const id = await insert(trx, 'payments', { ...p, allocations: toJson(p.allocations), number, company_id: cid, created_by: req.user.id, created_at: now() });
     await audit(trx, req.user, 'payment', id, 'payment recorded', { number, amount: p.amount, tds: p.tds });
@@ -479,7 +503,7 @@ finance.post('/payments', allow('recordPayments'), h(async (req) => {
     return { id, number };
   });
 }));
-finance.get('/ledger', h(async (req) => {
+finance.get('/ledger', allow('invoice.read'), h(async (req) => {
   const cid = req.user.company_id;
   const clients = await db('clients').where({ company_id: cid }).select('id', 'name', 'opening_balance', 'payment_terms_days');
   const invs = await db('documents').where({ company_id: cid, kind: 'invoice' }).whereIn('status', ['issued', 'paid', 'partly_paid']).select('id', 'client_id', 'date', 'total');
@@ -499,7 +523,7 @@ finance.get('/ledger', h(async (req) => {
     return { id: c.id, name: c.name, opening: Number(c.opening_balance || 0), invoiced, received, balance: Math.round((Number(c.opening_balance || 0) + invoiced - received) * 100) / 100, ageing };
   }).filter((c) => c.invoiced || c.received || c.opening);
 }));
-finance.get('/ledger/:clientId', h(async (req) => ledger(req.user.company_id, Number(req.params.clientId))));
+finance.get('/ledger/:clientId', allow('invoice.read'), h(async (req) => ledger(req.user.company_id, Number(req.params.clientId))));
 
 // ---------- registers ----------
 type Col = { key: string; label: string; type?: 'money' | 'date' };
@@ -507,6 +531,8 @@ finance.get('/registers/:name', h(async (req) => {
   const cid = req.user.company_id;
   const from = String(req.query.from ?? '0000-00-00'), to = String(req.query.to ?? '9999-12-31');
   const name = req.params.name;
+  const need: Record<string, string> = { quotations: 'quote.read', invoices: 'invoice.read', reports: 'report.read', samples: 'sample.read', tests: 'test.read', receipts: 'payment.read', equipment: 'equipment.read' };
+  if (need[name] && !can(req.user, need[name])) throw new HttpError(403, 'Your role cannot see this register');
   let columns: Col[] = []; let rows: Record<string, unknown>[] = [];
   if (name === 'quotations' || name === 'invoices' || name === 'reports') {
     const kind = name === 'quotations' ? 'quote' : name.slice(0, -1);

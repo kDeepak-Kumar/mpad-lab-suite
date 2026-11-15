@@ -53,9 +53,11 @@ export function computeTotals(
   const taxSummary: TaxLine[] = [...byRate.entries()].sort((a, b) => a[0] - b[0]).map(([rate, base]) => {
     const tb = r2(base);
     const tax = r2((tb * rate) / 100);
+    // intra-state: CGST and SGST are each charged at half the rate on the same taxable value, so they are always equal
+    const half = r2((tb * rate) / 200);
     return interState
       ? { rate, taxable: tb, cgst: 0, sgst: 0, igst: tax }
-      : { rate, taxable: tb, cgst: r2(tax / 2), sgst: r2(tax - r2(tax / 2)), igst: 0 };
+      : { rate, taxable: tb, cgst: half, sgst: half, igst: 0 };
   });
   const cgst = r2(taxSummary.reduce((s, t) => s + t.cgst, 0));
   const sgst = r2(taxSummary.reduce((s, t) => s + t.sgst, 0));

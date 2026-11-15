@@ -31,7 +31,9 @@ purchasing.get('/vendors', h(async (req) => {
   const rows = await db('vendors').where({ company_id: req.user.company_id }).orderBy('name');
   const spend = await db('purchases').where({ company_id: req.user.company_id }).select('vendor_id').sum({ total: 'total' }).groupBy('vendor_id');
   const m = new Map((spend as any[]).map((s) => [s.vendor_id, Number(s.total)]));
-  return rows.map((v) => ({ ...v, bank: parseJson(v.bank, {}), spend: m.get(v.id) ?? 0 }));
+  // bank details and spend are for purchasing roles only; others need just the vendor list (e.g. to pick an outside lab)
+  const full = can(req.user, 'managePurchases');
+  return rows.map((v) => full ? { ...v, bank: parseJson(v.bank, {}), spend: m.get(v.id) ?? 0 } : { ...v, bank: {}, spend: null });
 }));
 purchasing.post('/vendors', h(async (req) => {
   if (!canSee(req.user, 'managePurchases', 'manageOutsourcing')) throw new HttpError(403, 'Your role cannot add vendors');
@@ -108,9 +110,16 @@ const billSchema = z.object({
   interstate: zBool.optional(), cgst: z.number().min(0).optional(), sgst: z.number().min(0).optional(), igst: z.number().min(0).optional(),
   tds: z.number().min(0).default(0), itc_eligible: zBool.default(true), job_id: z.number().nullable().optional(), equipment_id: z.number().nullable().optional(), notes: z.string().max(2000).optional().nullable(),
 });
+const latestDate = () => { const x = new Date(today() + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+/** A bill cannot be dated in the future, and TDS cannot exceed the bill. */
+function checkBill(b: z.infer<typeof billSchema>, total: number) {
+  if (b.bill_date > latestDate() || b.bill_date < '2000-01-01') throw new HttpError(400, 'Bill date cannot be in the future');
+  if (b.tds > total + 0.005) throw new HttpError(400, 'TDS cannot be more than the bill amount');
+}
 function taxes(b: z.infer<typeof billSchema>) {
   const tax = r2(b.taxable * b.rate / 100);
-  const cgst = b.cgst ?? (b.interstate ? 0 : r2(tax / 2)), sgst = b.sgst ?? (b.interstate ? 0 : r2(tax - r2(tax / 2))), igst = b.igst ?? (b.interstate ? tax : 0);
+  const half = r2(b.taxable * b.rate / 200);
+  const cgst = b.cgst ?? (b.interstate ? 0 : half), sgst = b.sgst ?? (b.interstate ? 0 : half), igst = b.igst ?? (b.interstate ? tax : 0);
   return { cgst, sgst, igst, total: r2(b.taxable + cgst + sgst + igst) };
 }
 async function refreshStatus(id: number) {
@@ -145,6 +154,7 @@ purchasing.post('/purchases', allow('managePurchases'), h(async (req) => {
   const dup = await db('purchases').where({ company_id: cid, vendor_id: b.vendor_id, bill_no: b.bill_no }).first('id');
   if (dup) throw new HttpError(409, `Bill ${b.bill_no} from this vendor is already recorded`);
   const { interstate: _i, ...rest } = b;
+  checkBill(b, taxes(b).total);
   const id = await insert(db, 'purchases', { ...rest, ...taxes(b), company_id: cid, status: 'unpaid', created_by: req.user.id, created_at: now() });
   await audit(db, req.user, 'purchase', id, 'bill recorded', { bill: b.bill_no, category: b.category });
   return { id };
@@ -154,6 +164,9 @@ purchasing.put('/purchases/:id', allow('managePurchases'), h(async (req) => {
   if (!(await db('purchases').where({ id, company_id: cid }).first('id'))) throw new HttpError(404, 'Bill not found');
   const b = billSchema.parse(req.body);
   const { interstate: _i, ...rest } = b;
+  checkBill(b, taxes(b).total);
+  const paidSoFar = Number((await db('purchase_payments').where({ purchase_id: id }).sum({ s: 'amount' }).first())?.s ?? 0);
+  if (paidSoFar - (taxes(b).total - b.tds) > 0.5) throw new HttpError(400, 'Payments already made are more than this bill would be');
   await db('purchases').where({ id }).update({ ...rest, ...taxes(b) });
   await refreshStatus(id);
   return { ok: true };
@@ -169,6 +182,10 @@ purchasing.post('/purchases/:id/payments', allow('managePurchases'), h(async (re
   const p = await db('purchases').where({ id, company_id: cid }).first();
   if (!p) throw new HttpError(404, 'Bill not found');
   const b = z.object({ date: isoDate, amount: z.number().positive(), mode: z.string().max(30).default('Bank transfer'), ref: z.string().max(120).optional().nullable() }).parse(req.body);
+  if (b.date > latestDate() || b.date < '2000-01-01') throw new HttpError(400, 'Payment date cannot be in the future');
+  const paid = Number((await db('purchase_payments').where({ purchase_id: id }).sum({ s: 'amount' }).first())?.s ?? 0);
+  const due = r2(Number(p.total) - Number(p.tds ?? 0) - paid);
+  if (b.amount - due > 0.5) throw new HttpError(400, `Only ₹${due.toLocaleString('en-IN')} is due on this bill`);
   await insert(db, 'purchase_payments', { ...b, company_id: cid, purchase_id: id, created_by: req.user.id, created_at: now() });
   await refreshStatus(id);
   await audit(db, req.user, 'purchase', id, 'payment made', b);

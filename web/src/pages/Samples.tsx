@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Button, Group, Menu, Modal, MultiSelect, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Badge, Paper, SegmentedControl, Tooltip } from '@mantine/core';
 import { IconArchive, IconCheck, IconDots, IconFileAnalytics, IconPencil, IconPlus, IconPrinter, IconTruckDelivery } from '@tabler/icons-react';
 import { JOB_STATUS } from './Outsourcing';
-import { api, dmy, ok, useApi, localToday } from '../api';
+import { api, dmy, fail, ok, useApi, localToday } from '../api';
 import { useCan, useFields, useMe, isAdmin } from '../ctx';
 import { PageHeader, Pill, SkeletonRows, StatusBadge, TypeBadge } from '../components/ui';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
@@ -33,14 +33,20 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
   const outOfScope = v.accreditation === 'NABL' ? chosen.filter((c) => !c.nabl) : [];
   const missing = missingRequired(fields as never, v);
   const [savedAny, setSavedAny] = useState(false);
-  const save = async (another: boolean) => {
+  const save = async (another: boolean, force = false): Promise<void> => {
     setBusy(true);
     try {
       const { quoteCatalogIds, ...rest } = v;
-      const r = await api<any>('/samples', { body: {
+      let r: any;
+      try { r = await api<any>(`/samples${force ? '?force=1' : ''}`, { quiet: true, body: {
         ...rest, client_id: Number(v.client_id), site_id: v.site_id ? Number(v.site_id) : null, work_order_id: v.work_order_id ? Number(v.work_order_id) : null,
         tests: tests.map((id) => ({ catalog_id: Number(id), assigned_to: tech ? Number(tech) : null })),
-      } });
+      } }); } catch (e: any) {
+        // a likely duplicate: ask, then register anyway if confirmed
+        if (e?.status === 409 && window.confirm(`${e.message}. Register it anyway?`)) { setBusy(false); return save(another, true); }
+        if (e?.status !== 409) fail(e?.message ?? 'Could not register the sample');
+        return;
+      }
       ok(`Sample ${r.code} registered${r.ulr ? ` · ULR ${r.ulr}` : ''}`);
       if (!another) { onClose(true); return; }
       // next sample from the same delivery: keep the client, site, work order, report type and receipt details

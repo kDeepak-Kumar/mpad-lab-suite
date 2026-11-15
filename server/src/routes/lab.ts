@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { evaluateObservation, normalizeObservation, type ObservationInput } from '@suite/shared';
+import { evaluateObservation, normalizeObservation, roleAllows, type ObservationInput } from '@suite/shared';
 import { db, insert, now, parseJson, row, today, toJson } from '../db';
 import { allow, can, h, HttpError, isAdmin, type AuthUser, zBool } from '../auth';
-import { cleanWrite, mergeCustom } from '../meta';
+import { cleanWrite, getRole, mergeCustom } from '../meta';
 import { buildLayout } from '@suite/shared';
 import { audit, buildReportData, extraFieldDefs, getCompany, getObsTemplate, nextNumber, formatWithSeq } from '../services';
 import { isIsoDate } from '@suite/shared';
@@ -80,12 +80,33 @@ lab.get('/samples', allow('sample.read'), h(async (req) => {
   const tests = rows.length ? await db('tests as t').leftJoin('catalog as k', 'k.id', 't.catalog_id').whereIn('t.sample_id', rows.map((r) => r.id)).select('t.sample_id', 't.status', 'k.report_name', 'k.billing_name') : [];
   return rows.map((r) => ({ ...r, tests: tests.filter((t) => t.sample_id === r.id) }));
 }));
+/** Receipt / reference dates within a sensible range, and site / contact / work order of the sample's own client. */
+async function checkSampleRefs(cid: number, s: { client_id: number; site_id?: number | null; contact_id?: number | null; work_order_id?: number | null; received_date?: string; customer_ref_date?: string | null }) {
+  const latest = addDays(today(), 1); // one day of slack for time zones
+  if (s.received_date && (s.received_date > latest || s.received_date < '2000-01-01')) throw new HttpError(400, 'Received date cannot be in the future or before 2000');
+  if (s.customer_ref_date && (s.customer_ref_date > latest || s.customer_ref_date < '2000-01-01')) throw new HttpError(400, 'Customer reference date cannot be in the future');
+  if (s.site_id && !(await db('sites').where({ id: s.site_id, client_id: s.client_id }).first('id'))) throw new HttpError(400, 'That site belongs to another client');
+  if (s.contact_id && !(await db('contacts').where({ id: s.contact_id, client_id: s.client_id }).first('id'))) throw new HttpError(400, 'That contact belongs to another client');
+  if (s.work_order_id && !(await db('work_orders').where({ id: s.work_order_id, company_id: cid, client_id: s.client_id }).first('id'))) throw new HttpError(400, 'That work order belongs to another client');
+}
 lab.post('/samples', allow('samples'), h(async (req) => {
   const cid = req.user.company_id;
   const s = (await cleanWrite(cid, req.user.roleDef, 'sample', sampleSchema.parse(req.body), { creating: true })) as z.infer<typeof sampleSchema>;
   const client = await db('clients').where({ id: s.client_id, company_id: cid }).first();
   if (!client) throw new HttpError(404, 'Client not found');
   const cats = await db('catalog').whereIn('id', s.tests.map((t) => t.catalog_id)).andWhere({ company_id: cid });
+  if (cats.length !== new Set(s.tests.map((t) => t.catalog_id)).size) throw new HttpError(400, 'One of the selected tests is not in the rate card');
+  await checkSampleRefs(cid, s);
+  for (const a of new Set(s.tests.map((t) => t.assigned_to).filter(Boolean))) await checkAssignee(cid, a as number);
+  if (!req.query.force && s.customer_ref) {
+    // same client, delivery reference, date, material, description and tests: very likely registered twice
+    const same = await db('samples').where({ company_id: cid, client_id: s.client_id, customer_ref: s.customer_ref, received_date: s.received_date, material: s.material })
+      .andWhere((w) => (s.description ? w.where('description', s.description) : w.whereNull('description').orWhere('description', ''))).select('id', 'code');
+    for (const x of same) {
+      const ids = (await db('tests').where({ sample_id: x.id }).select('catalog_id')).map((t) => t.catalog_id).sort().join(',');
+      if (ids === s.tests.map((t) => t.catalog_id).sort().join(',')) throw new HttpError(409, `This looks like sample ${x.code}, registered with the same reference, date, description and tests`);
+    }
+  }
   const missing = cats.filter((c) => !c.obs_template_code);
   if (missing.length) throw new HttpError(400, `No observation sheet linked to: ${missing.map((m) => m.billing_name).join(', ')}. Link one in Rate card.`);
   const accreditation = s.accreditation || (cats.some((c) => c.nabl) ? 'NABL' : 'Non-NABL');
@@ -155,6 +176,17 @@ lab.put('/samples/:id', allow('samples'), h(async (req) => {
     patch.retention_days = keep; patch.dispose_after = addDays(patch.received_date ?? ex.received_date, keep);
   }
   if (patch.accreditation === 'Non-NABL') patch.ulr = null;
+  const merged = { ...ex, ...patch };
+  await checkSampleRefs(cid, merged);
+  if (patch.client_id && Number(patch.client_id) !== Number(ex.client_id)) {
+    // the job code carries the client's code: give a new one, but only while no test has started
+    const started = await db('tests').where({ sample_id: id }).whereNot('status', 'pending').first('id');
+    if (started) throw new HttpError(409, 'Testing has started, so the client can no longer be changed. Cancel this sample and register it again for the right client.');
+    const client = await db('clients').where({ id: patch.client_id, company_id: cid }).first();
+    if (!client) throw new HttpError(404, 'Client not found');
+    const { seq, number } = await nextNumber(db, cid, 'sample', { date: merged.received_date, client: client.short_code || client.name.replace(/[^A-Za-z]/g, '').slice(0, 4), material: merged.material });
+    patch.seq = seq; patch.code = number;
+  }
   await db('samples').where({ id }).update({ ...patch, data: toJson(withExtra(mergeCustom(ex.data, custom), extra)) });
   await audit(db, req.user, 'sample', id, 'updated', patch);
   return { ok: true };
@@ -211,6 +243,43 @@ function diffObservation(a: ObservationInput | null, b: ObservationInput) {
   return changes;
 }
 
+
+/** Results that can legitimately be negative (swell, displacement, ignition loss); every other reported result must be 0 or more. */
+const MAY_BE_NEGATIVE = new Set(['fsi', 'resid', 'dmax', 'smax', 'r_loi']);
+const blankResult = (v: unknown) => v === '' || v === null || v === undefined;
+/** Checks the app adds on top of the template's own: nothing reported can be calculated, a result is an error, negative or implausible. */
+export function resultChecks(tpl: { code: string; reportRows: { name: string; result: string }[] }, results: Record<string, unknown>) {
+  const out: { level: 'error' | 'warning'; message: string }[] = [];
+  const rows = tpl.reportRows ?? [];
+  if (!rows.length) return out;
+  const vals = rows.map((r) => ({ r, v: results[r.result] }));
+  const usable = vals.filter(({ v }) => (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && v.trim() !== ''));
+  if (!usable.length) out.push({ level: 'error', message: 'No result could be calculated yet. Enter the readings before submitting.' });
+  for (const { r, v } of vals) {
+    if (blankResult(v)) continue;
+    if ((typeof v === 'number' && !Number.isFinite(v)) || (typeof v === 'object' && v !== null && 'error' in (v as object)))
+      out.push({ level: 'error', message: `${r.name}: the result could not be calculated – check the readings.` });
+    else if (typeof v === 'number' && v < 0 && !MAY_BE_NEGATIVE.has(r.result)) out.push({ level: 'error', message: `${r.name} cannot be negative (${Number(v.toFixed(3))}). Check the readings.` });
+  }
+  if (tpl.code === 'CUBE-COMP' && typeof results.avg === 'number' && results.avg > 120) out.push({ level: 'warning', message: `Average strength ${results.avg.toFixed(1)} N/mm² is unusually high – check the loads and dimensions.` });
+  return out;
+}
+const isoOk = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d + 'T00:00:00Z')) && new Date(d + 'T00:00:00Z').toISOString().slice(0, 10) === d;
+/** Testing dates: real dates, not before the sample arrived, not in the future, and finished no earlier than started. */
+async function checkTestDates(sampleId: number, started?: string | null, completed?: string | null) {
+  for (const [label, d] of [['Start date', started], ['Completion date', completed]] as const) if (d && !isoOk(d)) throw new HttpError(400, `${label} is not a valid date`);
+  const s = await db('samples').where({ id: sampleId }).first('received_date');
+  const latest = addDays(today(), 1);
+  if (started && s?.received_date && started < s.received_date) throw new HttpError(400, `Testing cannot start before the sample was received (${s.received_date.split('-').reverse().join('-')})`);
+  if ((started && started > latest) || (completed && completed > latest)) throw new HttpError(400, 'Testing dates cannot be in the future');
+  if (started && completed && completed < started) throw new HttpError(400, 'Completion date cannot be before the start date');
+}
+const envNum = (v: string | number | null | undefined, lo: number, hi: number, label: string) => {
+  if (v === null || v === undefined || v === '') return v === undefined ? undefined : null;
+  const n = Number(String(v).replace(/[^0-9.+-]/g, ''));
+  if (!Number.isFinite(n) || n < lo || n > hi) throw new HttpError(400, `${label} must be between ${lo} and ${hi}`);
+  return String(n);
+};
 lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
   const cid = req.user.company_id, id = Number(req.params.id);
   const t = row(await db('tests').where({ id, company_id: cid }).first(), ['observation']);
@@ -219,7 +288,10 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
   if (!['pending', 'in_progress', 'returned'].includes(t.status as string) && !(admin && t.status !== 'reported'))
     throw new HttpError(409, 'This observation sheet is locked. Ask the reviewer to return it for correction.');
   const body = z.object({ observation: z.any(), started_at: z.string().nullable().optional(), completed_at: z.string().nullable().optional(), reason: z.string().optional(),
-    env_temp: z.string().max(12).nullable().optional(), env_rh: z.string().max(12).nullable().optional() }).parse(req.body);
+    env_temp: z.union([z.string().max(12), z.number()]).nullable().optional(), env_rh: z.union([z.string().max(12), z.number()]).nullable().optional() }).parse(req.body);
+  body.env_temp = envNum(body.env_temp, -10, 60, 'Lab temperature (°C)');
+  body.env_rh = envNum(body.env_rh, 0, 100, 'Relative humidity (%)');
+  await checkTestDates(t.sample_id as number, body.started_at ?? (t.started_at as string | null), body.completed_at ?? null);
   const tpl = await getObsTemplate(cid, t.template_code as string, t.template_version as number);
   if (!body.observation || typeof body.observation !== 'object') throw new HttpError(400, 'Observation data is missing');
   const raw = body.observation as ObservationInput;
@@ -240,6 +312,7 @@ lab.put('/tests/:id/observation', allow('observe'), h(async (req) => {
     }
   }
   const res = evaluateObservation(tpl, obs);
+  res.checks = [...res.checks, ...resultChecks(tpl as never, res.results as Record<string, unknown>)] as typeof res.checks;
   const changes = diffObservation(t.observation as ObservationInput | null, obs);
   await db('tests').where({ id }).update({
     observation: toJson(obs), results: toJson(res.results), checks: toJson(res.checks), status: t.status === 'pending' ? 'in_progress' : t.status,
@@ -272,7 +345,9 @@ lab.post('/tests/:id/submit', allow('observe'), h(async (req) => {
   const obs = t.observation as ObservationInput;
   const missing = tpl.headerFields.filter((f) => f.required && f.default === undefined && (obs?.header?.[f.key] === null || obs?.header?.[f.key] === undefined || obs?.header?.[f.key] === ''));
   if (missing.length && !admin) throw new HttpError(400, `Fill in: ${missing.map((m) => m.label).join(', ')}`);
-  const errs = ((t.checks ?? []) as { level: string; message: string }[]).filter((c) => c.level === 'error');
+  const stored = (row(await db('tests').where({ id }).first('results'), ['results'])?.results ?? null) as Record<string, unknown> | null;
+  await checkTestDates(t.sample_id as number, t.started_at as string | null, (t.completed_at as string | null) ?? today());
+  const errs = [...((t.checks ?? []) as { level: string; message: string }[]), ...resultChecks(tpl as never, stored ?? {})].filter((c, i, a) => c.level === 'error' && a.findIndex((x) => x.message === c.message) === i);
   if (errs.length && !admin) throw new HttpError(400, errs.map((e) => e.message).join(' '));
   if (admin && (missing.length || errs.length)) await audit(db, req.user, 'test', id, 'submitted by System Admin with checks bypassed', { missing: missing.map((m) => m.label), errors: errs.map((e) => e.message) });
   await db('tests').where({ id }).update({ status: 'submitted', submitted_at: now(), completed_at: t.completed_at ?? today() });
@@ -296,9 +371,20 @@ lab.post('/tests/:id/review', allow('review'), h(async (req) => {
   await audit(db, req.user, 'test', id, action === 'accept' ? 'accepted' : 'returned for correction', { note });
   return { ok: true };
 }));
+/** A test can be assigned only to an active colleague whose role may enter observations. */
+async function checkAssignee(cid: number, userId: number | null | undefined) {
+  if (!userId) return;
+  const u = await db('users').where({ id: userId, company_id: cid, active: true }).first('id', 'role');
+  if (!u) throw new HttpError(400, 'That person is not an active user');
+  if (!roleAllows(await getRole(cid, u.role), 'enterObservations')) throw new HttpError(400, 'That person\'s role cannot enter observations');
+}
 lab.post('/tests/:id/assign', allow('samples'), h(async (req) => {
   const { user_id } = z.object({ user_id: z.number().nullable() }).parse(req.body);
-  await db('tests').where({ id: Number(req.params.id), company_id: req.user.company_id }).update({ assigned_to: user_id });
+  const t = await db('tests').where({ id: Number(req.params.id), company_id: req.user.company_id }).first('id', 'status');
+  if (!t) throw new HttpError(404, 'Test not found');
+  if (['accepted', 'reported'].includes(t.status)) throw new HttpError(409, 'This test is already finished');
+  await checkAssignee(req.user.company_id, user_id);
+  await db('tests').where({ id: t.id }).update({ assigned_to: user_id });
   await audit(db, req.user, 'test', Number(req.params.id), 'assigned', { user_id });
   return { ok: true };
 }));

@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { passwordRule, sendAccessLink } from './onboarding';
 import { docVisibility, recordAccess, restrictList } from '../sharing';
 import { z } from 'zod';
-import { DEFAULT_TEMPLATES, EQUIPMENT_CATEGORIES, INDIAN_STATES, isIsoDate, type DocKind } from '@suite/shared';
+import { DEFAULT_TEMPLATES, EQUIPMENT_CATEGORIES, INDIAN_STATES, isIsoDate, validateGstin, type DocKind } from '@suite/shared';
 import { db, insert, now, parseJson, row, toJson } from '../db';
 import { allow, can, checkPassword, clearSession, h, hashPassword, HttpError, isAdmin, requireAuth, setSession, zBool } from '../auth';
 import { moveToBin } from '../recycle';
@@ -54,11 +54,28 @@ core.post('/alerts/run', allow('settings'), h(async (req) => {
 // ---------- company settings ----------
 const maskCompany = (c: Record<string, any>) => ({ ...c, ai: c.ai ? { ...c.ai, apiKey: undefined, hasKey: Boolean(c.ai.apiKey) } : undefined });
 core.get('/company', h(async (req) => maskCompany(await getCompany(req.user.company_id))));
+/** Settings that feed documents and numbers must be valid before they are saved. */
+function checkCompany(name: unknown, d: Record<string, any>, changed: Record<string, any>) {
+  const bad = (m: string) => { throw new HttpError(400, m); };
+  const has = (k: string) => k in changed; // only what this save changes, so older stored values never block an unrelated save
+  if (has('name') && !String(name ?? '').trim()) bad('Company name is required');
+  if ((has('gstin') || has('stateCode')) && d.gstin) { const g = validateGstin(String(d.gstin)); if (!g.ok) bad(`GSTIN: ${g.message}`); if (d.stateCode && g.state !== String(d.stateCode)) bad('State does not match the GSTIN (its first two digits)'); }
+  if (has('stateCode') && d.stateCode && !INDIAN_STATES.some((x) => x.code === String(d.stateCode))) bad('Choose a valid state');
+  const gst = has('defaults') ? d.defaults?.gstRate : undefined; if (gst !== undefined && gst !== null && gst !== '' && !(Number(gst) >= 0 && Number(gst) <= 28)) bad('Default GST rate must be between 0 and 28 %');
+  for (const k of ['paymentTermsDays', 'validityDays']) { const v = has('defaults') ? d.defaults?.[k] : undefined; if (v !== undefined && v !== null && v !== '' && !(Number(v) >= 0 && Number(v) <= 3650)) bad('Days must be 0 or more'); }
+  const loc = has('accreditation') ? d.accreditation?.location : undefined; if (loc !== undefined && loc !== null && loc !== '' && !/^[0-9]$/.test(String(loc))) bad('Laboratory location code must be a single digit, 0–9');
+  for (const [k, v] of Object.entries(has('numbering') ? changed.numbering ?? {} : {})) {
+    if (v === null || v === undefined || v === '') continue;
+    if (typeof v !== 'string' || v.length > 80) bad(`Numbering for ${k} is too long`);
+    if (!/\{SEQ(:\d+)?\}/.test(v as string)) bad(`Numbering for ${k} must include a running number, e.g. {SEQ} or {SEQ:4}, so every number is different`);
+  }
+}
 core.put('/company', allow('settings'), h(async (req) => {
   const cur = await getCompany(req.user.company_id);
   const body = { ...req.body };
   if (body.ai) body.ai = { ...body.ai, apiKey: body.ai.apiKey ? body.ai.apiKey : cur.ai && (cur.ai as any).apiKey, hasKey: undefined };
   const { id: _i, name, ...data } = { ...cur, ...body };
+  checkCompany(name, data as Record<string, any>, body);
   await db('companies').where({ id: req.user.company_id }).update({ name, data: toJson(data) });
   await audit(db, req.user, 'company', req.user.company_id, 'updated settings', { fields: Object.keys(body) });
   return { ok: true };
@@ -136,23 +153,30 @@ core.post('/users', allow('users'), h(async (req) => {
   const invite = await sendAccessLink(req, { id, name: u.name, email, company_id: req.user.company_id }, 'invite', req.user.id);
   return { id, invite };
 }));
-core.put('/users/:id', h(async (req) => {
+core.put('/users/:id', h(async (req, res) => {
   const id = Number(req.params.id);
   const manager = can(req.user, 'manageUsers');
   if (!manager && req.user.id !== id) throw new HttpError(403, 'You can only edit your own profile');
   const { password, ...u } = userSchema.partial().parse(req.body);
   if (!manager) { delete u.role; delete u.active; }
+  // your own password is changed under Account (it asks for the current one); here only a user manager may set one
+  if (password && !manager) throw new HttpError(403, 'Change your password under Account → Security; it asks for your current password');
   const target = await db('users').where({ id, company_id: req.user.company_id }).first();
   if (target?.role === 'admin' && !isAdmin(req.user)) throw new HttpError(403, 'Only a System Administrator can change another System Administrator');
   await checkRoleAssign(req as never, u.role);
   const patch: Record<string, unknown> = { ...u };
   if (u.email) patch.email = u.email.toLowerCase();
-  if (password) { patch.password_hash = await hashPassword(password); patch.password_set = true; }
+  if (password) {
+    patch.password_hash = await hashPassword(password); patch.password_set = true;
+    patch.token_version = Number(target?.token_version ?? 0) + 1; // a new password ends every existing session of that user
+  }
+  if (!Object.keys(patch).length) return { ok: true };
   if (u.email && target && u.email.toLowerCase() !== target.email) {
     if (await db('users').where({ email: u.email.toLowerCase() }).whereNot({ id }).first('id')) throw new HttpError(400, 'A user with this email already exists');
     patch.email_verified_at = null; // new address is not confirmed yet
   }
   await db('users').where({ id, company_id: req.user.company_id }).update(patch);
+  if (password && id === req.user.id) setSession(res, { id, token_version: patch.token_version as number }); // keep this browser signed in
   await audit(db, req.user, 'user', id, 'updated', { fields: Object.keys(patch).filter((k) => k !== 'password_hash' && k !== 'signature') });
   return { ok: true };
 }));
@@ -578,6 +602,7 @@ core.post('/doc-templates/:id/default', allow('templates'), h(async (req) => {
 
 // ---------- audit ----------
 core.get('/audit', h(async (req) => {
+  if (!isAdmin(req.user) && !can(req.user, 'manageUsers')) throw new HttpError(403, 'Only administrators can read the audit log');
   const q = db('audit_log').where({ company_id: req.user.company_id });
   if (req.query.entity) q.andWhere({ entity: String(req.query.entity) });
   if (req.query.id) q.andWhere({ entity_id: Number(req.query.id) });
