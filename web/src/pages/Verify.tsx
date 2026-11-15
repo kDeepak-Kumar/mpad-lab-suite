@@ -15,6 +15,8 @@ import { FitWidth } from '../doc/FitWidth';
  */
 export function VerifyPage() {
   const { token } = useParams();
+  /** ?print=1: the report alone, for the server's PDF printer */
+  const printOnly = new URLSearchParams(window.location.search).get('print') === '1';
   const [d, setD] = useState<any>(token ? undefined : null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,7 +26,7 @@ export function VerifyPage() {
   const take = async (r: Response) => { const j = await r.json().catch(() => ({ error: 'Unexpected answer from the server.' })); if (r.ok) { setD(j); setErr(''); } else { setErr(j.error); setD(null); } };
   useEffect(() => {
     if (!token) return;
-    fetch(`/api/public/verify/${encodeURIComponent(token)}`).then(take).catch(() => { setErr('Could not reach the laboratory server.'); setD(null); });
+    fetch(`/api/public/verify/${encodeURIComponent(token)}${printOnly ? '?render=1' : ''}`).then(take).catch(() => { setErr('Could not reach the laboratory server.'); setD(null); });
   }, [token]);
   const lookup = async () => {
     setBusy(true);
@@ -56,8 +58,29 @@ export function VerifyPage() {
 
   const valid = d.status === 'Valid';
   const file = `Test report ${d.number}`.replace(/[\\/:*?"<>|]+/g, '-');
-  const download = async () => { setBusy(true); try { const m = await import('../doc/export'); await m.downloadPdf(ref.current!, file); } finally { setBusy(false); } };
+  // text PDF printed by the server when it can; otherwise made here in the browser – either way the phone's own viewer opens it
+  const download = async () => {
+    setBusy(true);
+    try {
+      if (d.serverPdf) {
+        const r = await fetch(`/api/public/verify/${encodeURIComponent(d.token)}/pdf`);
+        if (r.ok && r.headers.get('content-type')?.includes('pdf')) {
+          const u = URL.createObjectURL(await r.blob());
+          const a = document.createElement('a'); a.href = u; a.download = `${file}.pdf`; document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(u), 60_000);
+          return;
+        }
+      }
+      const m = await import('../doc/export'); await m.downloadPdf(ref.current!, file);
+    } finally { setBusy(false); }
+  };
   const facts = [['Report number', d.number], ['ULR', d.ulr], ['Date of issue', d.issued], ['Issued to', d.client], ['Sample', d.material], ['Tests', (d.tests ?? []).join(', ')], ['Signed by', d.signedBy]].filter(([, v]) => v);
+  if (printOnly) return rep && template ? (
+    <div className="print-root">
+      <DocRenderer template={template} kind="report" data={{ ...rep.data, date: rep.date }} company={rep.company} number={rep.number} status={rep.status}
+        issuer={rep.issuer} verifyUrl={`${(/^https?:\/\/[\w.-]+(:\d+)?$/.test(new URLSearchParams(window.location.search).get('origin') ?? '') ? new URLSearchParams(window.location.search).get('origin') : d.publicUrl) || window.location.origin}/verify/${d.token}`} />
+    </div>
+  ) : null;
   return (
     <Box bg="#f5f5f4" mih="100vh">
       <Stack maw={1000} mx="auto" p="md" gap="md">

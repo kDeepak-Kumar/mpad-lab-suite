@@ -1,4 +1,8 @@
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Router } from 'express';
 import { z } from 'zod';
 import { formatDate } from '@suite/shared';
@@ -51,7 +55,7 @@ publicApi.get('/public/doc/:token', h(async (req) => {
 export const verifyCode = (token: string) => (token.split('-').slice(1).join('-').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase());
 
 /** Everything the verify page shows for an issued report: status, key facts, the integrity check and the genuine report itself. */
-async function verifyPayload(d: Record<string, any>, req: { ip?: string }) {
+async function verifyPayload(d: Record<string, any>, req: { ip?: string; query?: Record<string, unknown> }) {
   const data = parseJson<Record<string, any>>(d.data, {});
   const overrides = parseJson<Record<string, any> | null>(d.overrides, null);
   const full = await getCompany(d.company_id);
@@ -63,7 +67,7 @@ async function verifyPayload(d: Record<string, any>, req: { ip?: string }) {
   const intact = [overrides, overrides ?? {}, d.overrides].some((o) => sha256({ data, overrides: o, template: d.template_id }) === d.hash);
   if (!intact) console.warn(`[verify] report ${d.number} (id ${d.id}): stored content no longer matches its issue fingerprint`);
   // scan log: every check is recorded (History of the report shows who and when, by IP)
-  await db('audit_log').insert({ company_id: d.company_id, user_id: null, entity: 'document', entity_id: d.id, action: 'verified by QR / code', detail: JSON.stringify({ ip: req.ip }), at: now() });
+  if (!(req.query?.render === '1' && isLocal(req.ip))) await db('audit_log').insert({ company_id: d.company_id, user_id: null, entity: 'document', entity_id: d.id, action: 'verified by QR / code', detail: JSON.stringify({ ip: req.ip }), at: now() });
   const scans = await db('audit_log').where({ company_id: d.company_id, entity: 'document', entity_id: d.id, action: 'verified by QR / code' }).count({ n: '*' }).first();
   const tpl = await getDocTemplate(d.company_id, 'report', d.template_id);
   const tests = ((data.tests ?? []) as { name?: string; sampleLabel?: string }[]);
@@ -74,7 +78,8 @@ async function verifyPayload(d: Record<string, any>, req: { ip?: string }) {
     intact, replacedBy: replaced?.number ?? null, client: data.customer?.name || data.client?.name || client?.name || '', ulr: data.ulr ?? '', jobCode: data.jobCodeText ?? '',
     material: data.specification || data.material || '', signedBy: data.signatory?.name ?? '', scans: Number(scans?.n ?? 0),
     tests: [...new Set([...tests.map((t) => t.name).filter(Boolean), ...((data.rows ?? []) as { group?: string; name: string }[]).map((r) => r.group || r.name)])],
-    code: verifyCode(token), token,
+    publicUrl: String(process.env.APP_URL || process.env.PUBLIC_URL || '').replace(/\/+$/, '') || null,
+    code: verifyCode(token), token, serverPdf: Boolean(chromiumPath()) && intact && d.status === 'issued',
     // the genuine report, drawn from the issued record (never a stored file): view, print or save as PDF
     report: intact ? { kind: 'report', number: d.number, status: d.status, date: d.date, data, overrides: overrides ?? {}, company, template: tpl?.definition ?? null, issuer: data.signatory?.name ? data.signatory : null } : null,
   };
@@ -86,6 +91,64 @@ publicApi.get('/public/verify/:token', h(async (req) => {
   if (!d || !d.hash || verifyToken(d.id, d.hash) !== req.params.token) throw new HttpError(404, 'No issued report matches this code. The report may be altered or not issued by this laboratory.');
   return verifyPayload(d, req);
 }));
+const isLocal = (ip?: string) => !!ip && /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(ip);
+
+/**
+ * Text PDF of the genuine report, printed on the server by Chromium (free, open source; installed once on the server,
+ * nothing on the customer's phone). Without Chromium the verify page makes the PDF in the browser instead.
+ */
+let chromium: string | null | undefined;
+export function chromiumPath(): string | null {
+  if (chromium !== undefined) return chromium;
+  // preferred: Chromium's headless shell, installed once with
+  //   npx -y playwright install --with-deps chromium-headless-shell
+  const shells: string[] = [];
+  for (const root of [process.env.PLAYWRIGHT_BROWSERS_PATH, path.join(os.homedir(), '.cache/ms-playwright'), '/root/.cache/ms-playwright', '/opt/pw-browsers'].filter(Boolean) as string[]) {
+    try {
+      for (const d of fs.readdirSync(root).filter((x) => x.startsWith('chromium_headless_shell-')).sort().reverse()) shells.push(path.join(root, d, 'chrome-headless-shell-linux64', 'chrome-headless-shell'), path.join(root, d, 'chrome-linux', 'headless_shell'));
+    } catch { /* not there */ }
+  }
+  const c = [process.env.CHROMIUM_PATH, ...shells, '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'].filter(Boolean) as string[];
+  chromium = c.find((f) => { try { fs.accessSync(f, fs.constants.X_OK); return true; } catch { return false; } }) ?? null;
+  return chromium;
+}
+let printing = 0;
+const pdfHits = new Map<string, { n: number; at: number }>();
+publicApi.get('/public/verify/:token/pdf', async (req, res) => {
+  try {
+    const [idPart] = String(req.params.token).split('-');
+    const d = Number.isFinite(Number(idPart)) ? await db('documents').where({ id: Number(idPart), kind: 'report', status: 'issued' }).first('id', 'hash', 'number') : null;
+    if (!d || !d.hash || verifyToken(d.id, d.hash) !== req.params.token) { res.status(404).json({ error: 'No issued report matches this code.' }); return; }
+    const exe = chromiumPath();
+    if (!exe) { res.status(501).json({ error: 'Server PDF not available' }); return; }
+    const key = String(req.ip), t = Date.now(), e = pdfHits.get(key);
+    const cur = e && t - e.at < 15 * 60_000 ? e : { n: 0, at: t };
+    if (cur.n >= 20) { res.status(429).json({ error: 'Too many downloads. Please try again later.' }); return; }
+    pdfHits.set(key, { n: cur.n + 1, at: cur.at }); if (pdfHits.size > 5000) pdfHits.clear();
+    if (printing >= 2) { res.status(503).json({ error: 'Busy, please try again in a moment.' }); return; }
+    printing++;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rpt-'));
+    const out = path.join(dir, 'report.pdf');
+    // the QR in the PDF must carry the public address, not the local one Chromium reads the page from
+    const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').split(',')[0].trim();
+    const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol).split(',')[0].trim();
+    const origin = String(process.env.APP_URL || process.env.PUBLIC_URL || (/^[\w.-]+(:\d+)?$/.test(host) ? `${proto === 'https' ? 'https' : 'http'}://${host}` : '')).replace(/\/+$/, '');
+    const url = `http://127.0.0.1:${Number(process.env.PORT || 4000)}/verify/${encodeURIComponent(String(req.params.token))}?print=1&origin=${encodeURIComponent(origin)}`;
+    try {
+      await new Promise<void>((ok, bad) => execFile(exe, [...(/headless.shell/.test(exe) ? [] : ['--headless=new']), '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', `--user-data-dir=${path.join(dir, 'p')}`,
+        '--virtual-time-budget=20000', '--run-all-compositor-stages-before-draw', '--no-pdf-header-footer', `--print-to-pdf=${out}`, url], { timeout: 60_000 }, (err) => (err ? bad(err) : ok())));
+      const pdf = fs.readFileSync(out);
+      if (pdf.subarray(0, 5).toString() !== '%PDF-') throw new Error('not a PDF');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${`Test report ${d.number}`.replace(/[^\w .-]+/g, '-')}.pdf"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(pdf);
+    } finally { printing--; fs.rmSync(dir, { recursive: true, force: true }); }
+  } catch (err) {
+    console.warn('[verify pdf]', (err as Error).message);
+    if (!res.headersSent) res.status(500).json({ error: 'Could not make the PDF. Please use the button again.' });
+  }
+});
 /** Manual check without the QR code: report number + the verification code printed beside the QR. Limited per address. */
 const lookups = new Map<string, { n: number; at: number }>();
 publicApi.post('/public/verify-lookup', h(async (req) => {
