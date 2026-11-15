@@ -91,7 +91,7 @@ export const DEFAULT_TEMPLATES: Record<DocKind, DocTemplate> = {
     ],
   },
   report: {
-    kind: 'report', name: 'Test report (combined table)', page: { ...page, marginMm: 10 },
+    kind: 'report', name: 'Test report (combined table)', page: { ...page, marginMm: 10, fontFamily: 'Arial, Helvetica, sans-serif', fontSize: 10 },
     docControl: 'TR/01',
     blocks: [
       { id: 'letterhead', type: 'letterhead', visible: true, props: { showLogo: true, showCIN: true, showGST: true, showAccreditation: true } },

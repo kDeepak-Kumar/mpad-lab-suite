@@ -322,3 +322,6 @@ body.dragging-rows, body.dragging-rows * { cursor: grabbing !important; user-sel
 .lay-toolbar { position: sticky; top: 0; z-index: 20; background: var(--mantine-color-body); border: 1px solid var(--mantine-color-default-border); border-radius: 8px; padding: 4px 6px; margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 2px 4px; align-items: center; box-shadow: 0 2px 8px rgba(28,25,23,.06); }
 .lay-toolbar .sep { width: 1px; align-self: stretch; background: var(--mantine-color-default-border); margin: 2px 3px; }
 .lay-toolbar .lbl { font-size: 11px; color: var(--mantine-color-dimmed); margin: 0 2px 0 4px; }
+.lay-rowbar { display: flex; gap: 6px; margin-top: 4px; }
+.lay-rowbar button { font: inherit; font-family: Inter, system-ui, sans-serif; font-size: 11.5px; padding: 3px 9px; border-radius: 6px; border: 1px dashed #a8a29e; background: #fff; color: #44403c; cursor: pointer; }
+.lay-rowbar button:hover { border-style: solid; border-color: #c2410c; color: #9a3412; }

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
-import { cleanHtml, fillTokens, resizeCol, unfillTokens, type Cell, type Section, type TableSection, type TextSection } from '@suite/shared';
+import { addRowBelow, cleanHtml, deleteRow, fillTokens, resizeCol, unfillTokens, type Cell, type Section, type TableSection, type TextSection } from '@suite/shared';
 
 /** Selection inside the report layout: a section, optionally a cell or a block of cells (r..r2 × c..c2). */
 export interface LayoutSel { sid: string; r?: number; c?: number; r2?: number; c2?: number }
@@ -43,10 +43,22 @@ export function RichText({ html, onChange, editable, style, className, onFocus }
   );
 }
 
+/** Rules of the 'lines' and 'open' table styles: a firm rule on top, hairlines between rows / groups. */
+const RULE = '1.2px solid #1c1917', HAIR = '0.6px solid #d6d3d1', HEADRULE = '0.9px solid #1c1917';
 const cellStyle = (t: TableSection, c: Cell, i: number, j: number, rows: number, cols: number): CSSProperties => {
   const b = t.border ?? 'all';
-  const st: CSSProperties = { textAlign: c.al ?? 'center', verticalAlign: c.va ?? 'middle', padding: t.pad !== undefined ? `${t.pad}px ${Math.max(t.pad, 2) + 2}px` : '2px 5px', fontWeight: c.b ? 700 : undefined, fontSize: c.sz ? `${c.sz}pt` : undefined, background: c.bg, overflowWrap: 'break-word' };
-  if (b === 'all') st.border = BORDER;
+  const ruled = b === 'lines' || b === 'open';
+  const st: CSSProperties = { textAlign: c.al ?? 'center', verticalAlign: c.va ?? 'middle', padding: t.pad !== undefined ? `${t.pad}px ${Math.max(t.pad, 2) + 2}px` : ruled ? '3px 5px' : '2px 5px', fontWeight: c.b ? 700 : undefined, fontSize: c.sz ? `${c.sz}pt` : undefined, background: c.bg, color: c.fg && /^#[0-9a-f]{3,8}$/i.test(c.fg) ? c.fg : undefined, overflowWrap: 'break-word' };
+  const last = i + (c.rs ?? 1) >= rows;
+  if (b === 'lines') {
+    const head = t.head ?? 0;
+    if (i === 0) st.borderTop = RULE;
+    if (head && i < head && i + (c.rs ?? 1) >= head) st.borderBottom = HEADRULE;
+    else if (i >= head) st.borderBottom = last ? HAIR : HAIR;
+  } else if (b === 'open') {
+    if (i === 0) st.borderTop = RULE; else if (c.bt) st.borderTop = HAIR;
+    if (last) st.borderBottom = HAIR;
+  } else if (b === 'all') st.border = BORDER;
   else if (b === 'outer') { if (i === 0) st.borderTop = BORDER; if (i + (c.rs ?? 1) >= rows) st.borderBottom = BORDER; if (j === 0) st.borderLeft = BORDER; if (j + (c.cs ?? 1) >= cols) st.borderRight = BORDER; }
   else if (b === 'inner') { if (i > 0) st.borderTop = BORDER; if (j > 0) st.borderLeft = BORDER; }
   return st;
@@ -110,6 +122,17 @@ function TableView({ t, tok, edit }: { t: TableSection; tok: Record<string, stri
         <tbody>{Array.from({ length: R - head }, (_, k) => row(head + k))}</tbody>
       </table>
       {handles}
+      {editing && selected && edit!.sel?.r !== undefined && (() => {
+        // the row the selection ends on (a label merged down the side counts as its last row)
+        const r0 = edit!.sel!.r!, c0 = edit!.sel!.c ?? 0, cell = t.rows[r0]?.[c0];
+        const below = Math.max(r0, edit!.sel!.r2 ?? r0) + Math.max(0, (cell?.rs ?? 1) - 1);
+        return (
+          <div className="lay-rowbar no-print" onMouseDown={(e) => e.preventDefault()}>
+            <button type="button" onClick={() => { edit!.update(t.id, (x) => addRowBelow(x as TableSection, below)); edit!.setSel({ sid: t.id, r: below + 1, c: c0 }); setTimeout(() => (wrap.current?.querySelectorAll('tr')[below + 1]?.querySelector('[contenteditable="true"]') as HTMLElement | null)?.focus(), 60); }} title="Add an empty row below the selected row, shaped like it">+ Add row</button>
+            {R > 1 && r0 >= head && <button type="button" onClick={() => { edit!.update(t.id, (x) => deleteRow(x as TableSection, r0)); edit!.setSel({ sid: t.id }); }} title="Remove the selected row">− Remove row</button>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -117,6 +140,7 @@ function TableView({ t, tok, edit }: { t: TableSection; tok: Record<string, stri
 function TextView({ s, tok, edit }: { s: TextSection; tok: Record<string, string>; edit?: LayoutEdit }) {
   const style: CSSProperties = {
     textAlign: s.al ?? 'left', fontSize: s.sz ? `${s.sz}pt` : undefined, lineHeight: s.lh ?? undefined, paddingLeft: s.indent ? `${s.indent}mm` : undefined,
+    ...(s.rule ? { borderTop: RULE, paddingTop: '1.6mm' } : {}),
     ...(s.box ? { border: BORDER, padding: '4px 6px', width: s.width ? `${s.width}%` : undefined } : {}),
     minHeight: edit ? '1.3em' : undefined,
   };
@@ -134,7 +158,7 @@ export function layoutBlocks(sections: Section[], tok: Record<string, string>, d
     const mb = s.type === 'text' && s.mb !== undefined ? `${s.mb}mm` : undefined;
     return (
       <div key={s.id} data-block={type} data-sid={s.id} className={`doc-block lay-sec${edit ? ' lay-editing' : ''}${sel ? ' lay-sel' : ''}`} style={{ marginTop: mt, marginBottom: mb }}
-        onMouseDown={edit ? () => { if (edit.sel?.sid !== s.id) edit.setSel({ sid: s.id }); } : undefined} onClick={edit ? (e) => e.stopPropagation() : undefined}>
+        onMouseDown={edit ? (e) => { if ((e.target as HTMLElement).closest?.('td,th')) return; /* the cell set its own selection */ if (edit.sel?.sid !== s.id) edit.setSel({ sid: s.id }); } : undefined} onClick={edit ? (e) => e.stopPropagation() : undefined}>
         {s.type === 'table' ? <TableView t={s} tok={tok} edit={edit} /> : s.type === 'text' ? <TextView s={s} tok={tok} edit={edit} /> : details(s.what)}
       </div>
     );

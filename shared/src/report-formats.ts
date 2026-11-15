@@ -133,24 +133,74 @@ export function extraSections(d: FormatInput['data']): Section[] {
 
 /** Section band (CUSTOMER, TEST RESULTS – …, REMARKS), sub-band (sieve analysis, other tests) and column-heading shades. */
 export const BAND_BG = '#E3E8EF', SUB_BG = '#EEF1F5', HEAD_BG = '#F4F6F9';
-const bandHtml = (s: string) => `<b><span style="letter-spacing: 0.6pt">${s}</span></b>`;
-
-/** Notes in one compact paragraph ("Notes: 1. … 2. …"), small print. */
+/** Concept A house style: black text, grey labels, hairline rules; bold only for results outside their limits. */
+export const GREY = '#78716c';
+const capsHtml = (s: string, sz = 7.5) => `<span style="font-size: ${sz}pt; letter-spacing: 0.6pt; color: ${GREY}">${escapeHtml(s.toUpperCase())}</span>`;
+const greyHtml = (html: string) => `<span style="color: ${GREY}">${html}</span>`;
+/** Label | text rows (remarks, notes) under a thin rule. */
+function labelled(label: string, html: string, role: string, o: { sz?: number; mt?: number } = {}): TableSection {
+  return table([14, 86], [[{ h: capsHtml(label), al: 'left', va: 'top' }, { h: html, al: 'justify', va: 'top' }]], { border: 'open', role, sz: o.sz ?? 9.5, mt: o.mt ?? 2.5 });
+}
+/** Notes in one compact paragraph, small print. */
 function notesSection(d: FormatInput['data']): Section[] {
   const notes: string[] = (Array.isArray(d.notes) ? d.notes : String(d.notes ?? '').split('\n')).map((s: string) => String(s).trim().replace(/^\(?\d{1,2}[.)]\s+/, '')).filter(Boolean);
   if (!notes.length) return [];
-  const t = table([9, 91], [[{ h: '<b>Notes:</b>', al: 'left', va: 'top' }, { h: notes.map((n, i) => `${i + 1}. ${h(n)}`).join('&nbsp;&nbsp; '), al: 'justify' }]], { border: 'none', sz: 8.5, pad: 0, mt: 2.5, role: 'notes' });
-  return [t];
+  return [labelled('Notes', notes.map((n, i) => `${i + 1}. ${h(n)}`).join('&nbsp;&nbsp; '), 'notes', { sz: 8.5 })];
 }
-/** Remarks in a ruled box with a REMARKS band, like the parts of the details section. */
 function remarksSection(d: FormatInput['data'], fallback?: string): Section[] {
   const r = String(d.remarks ?? '').trim() || fallback;
-  return r ? [table([100], [[{ h: bandHtml('REMARKS'), al: 'left', bg: BAND_BG, role: 'sec' }], [{ h: h(r), al: 'left' }]], { head: 1, role: 'remarks', mt: 2, sz: 10.5 })] : [];
+  return r ? [labelled('Remarks', h(r), 'remarks')] : [];
 }
-const endSection = () => text('<span style="letter-spacing: 0.6pt">— END OF REPORT —</span>', { al: 'center', mt: 3, sz: 10, role: 'end' });
-/** Results heading; drawn as the band on top of the results table that follows it (see polish). */
-const title = (s: string, sub?: string) => text(escapeHtml(`TEST RESULTS – ${s}${sub ? ` ${sub}` : ''}`), { al: 'left', heading: true, mt: 3, sz: 10.5, role: 'title' });
-const subTitle = (s: string) => text(escapeHtml(s), { heading: true, mt: 2, sz: 10.5 });
+const endSection = () => text(greyHtml('<span style="letter-spacing: 0.6pt">— END OF REPORT —</span>'), { al: 'center', mt: 3, sz: 8.5, role: 'end' });
+
+/** Words kept in capitals when a heading is turned into sentence case. */
+const KEEP_CAPS = /^(IS|TMT|GGBS|FDD|FMC|MDD|OMC|CBR|FSI|NDT|UPV|PH|TDS|RCC|PCC|OPC|PPC|PSC|LOI|IR|SO3|MgO|CaO|NABL|ULR|LL|PL|PI|SPT|DCP|UTS|LA|AIV|ACV|II|III|IV|VI)$/i;
+export function sentenceCase(s: string): string {
+  const words = String(s).trim().split(/(\s+|[–\-/(),&])/);
+  let first = true;
+  return words.map((w) => {
+    if (!/[A-Za-z]/.test(w)) return w;
+    const bare = w.replace(/[^A-Za-z0-9]/g, '');
+    let out: string;
+    if (KEEP_CAPS.test(bare) || /\d/.test(w) && /[A-Z]/.test(w)) out = w.toUpperCase() === w ? w : w;
+    else out = w.toLowerCase();
+    if (first) { out = out.charAt(0).toUpperCase() + out.slice(1); first = false; }
+    return out;
+  }).join('');
+}
+/** Report title (moved to the top as the document title by polish: "TEST REPORT" label, title not bold, NABL marker). */
+const title = (s: string, _sub?: string) => text(escapeHtml(s), { al: 'left', heading: true, mt: 3, sz: 10.5, role: 'title' });
+/** Heading inside the results (a sieve analysis, "Other tests"…): plain, sentence case. */
+const subTitle = (s: string) => text(escapeHtml(sentenceCase(s.replace(/:\s*$/, ''))), { heading: true, mt: 2.5, sz: 9.5 });
+
+/** Numbers in a requirement: "Min. 33", "≥ 2.5", "Max 10", "≤ 0.3", "Not more than 5", "85 – 100", "10 to 30". */
+export function limitsOf(spec: unknown): { min?: number; max?: number } | null {
+  const t = String(spec ?? '').replace(/<[^>]+>/g, ' ').replace(/,(?=\d{3}\b)/g, '').trim();
+  if (!t || t === '--') return null;
+  const num = '(-?\\d+(?:\\.\\d+)?)';
+  let m = new RegExp(`^${num}\\s*(?:-|–|—|to)\\s*${num}\\b`, 'i').exec(t);
+  if (m) { const a = Number(m[1]), b = Number(m[2]); return a <= b ? { min: a, max: b } : null; }
+  m = new RegExp(`(?:min(?:imum)?\\.?|≥|>=|not\\s+less\\s+than|at\\s+least)\\s*:?\\s*${num}`, 'i').exec(t);
+  const mn = m ? Number(m[1]) : undefined;
+  m = new RegExp(`(?:max(?:imum)?\\.?|≤|<=|not\\s+more\\s+than|not\\s+exceeding|up\\s*to)\\s*:?\\s*${num}`, 'i').exec(t);
+  const mx = m ? Number(m[1]) : undefined;
+  if (mn === undefined && mx === undefined) {
+    m = new RegExp(`^${num}\\s*(?:\\(?\\s*(min|max)\\.?\\s*\\)?)`, 'i').exec(t);
+    if (m) return /min/i.test(m[2]) ? { min: Number(m[1]) } : { max: Number(m[1]) };
+    return null;
+  }
+  return { min: mn, max: mx };
+}
+/** A result outside its limits (bold on the report). Text results are judged only by words such as "does not conform". */
+export function outOfLimit(value: unknown, lim: { min?: number; max?: number } | null | undefined): boolean {
+  const v = String(value ?? '').trim();
+  if (/\b(does\s+not\s+conform|not\s+conforming|fail(?:s|ed)?|not\s+satisfactory|unsatisfactory)\b/i.test(v)) return true;
+  if (!lim) return false;
+  const n = Number(v.replace(/[^\d.\-]/g, ''));
+  if (!v || !Number.isFinite(n) || !/\d/.test(v)) return false;
+  return (lim.min !== undefined && n < lim.min - 1e-9) || (lim.max !== undefined && n > lim.max + 1e-9);
+}
+const flag = (value: unknown, lim: { min?: number; max?: number } | null | undefined): Partial<Cell> => (outOfLimit(value, lim) ? { b: true } : {});
 
 // ---------------------------------------------------------------- standard report details (approved Layout A)
 
@@ -160,10 +210,10 @@ export function customerNameHtml(d: FormatInput['data']): string {
   const un = (d.unlocked ?? {}) as Record<string, boolean>;
   const name = un['client.name'] && d.client?.name ? d.client.name : c.name;
   const address = un['client.address'] && d.client?.address !== undefined ? d.client.address : c.address;
-  const lines = [`<b>${h(name)}</b>`];
+  const lines = [h(name)];
   if (address) lines.push(h(address));
   if (d.options?.includeContact && c.contact && (c.contact.name || c.contact.phone || c.contact.email)) lines.push(`Contact: ${h([c.contact.name, c.contact.phone, c.contact.email].filter(Boolean).join(', '))}`);
-  if (d.amendment) lines.push(`<b>Amendment ${h(d.amendment.revision)} of report ${h(d.amendment.of)}: ${h(d.amendment.reason)}</b>`);
+  if (d.amendment) lines.push(`Amendment ${h(d.amendment.revision)} of report ${h(d.amendment.of)}: ${h(d.amendment.reason)}`);
   return lines.join('<br>');
 }
 
@@ -191,8 +241,8 @@ function pairRows(left: Pair[], right: Pair[]): CellSpec[][] {
   const ok = (p: Pair) => p[1] !== undefined && p[1] !== null && String(p[1]).trim() !== '';
   const Lf = left.filter(ok), Rt = right.filter(ok);
   const rows: CellSpec[][] = [];
-  const lab = (t: string): CellSpec => ({ t, al: 'left', bg: '#FAFAFB' });
-  const val = (p: Pair, extra: Partial<Cell> = {}): CellSpec => ({ h: /\{\{\w+\}\}/.test(String(p[1])) ? escapeHtml(String(p[1])) : textToHtml(p[1]), al: 'left', ...(p[2] ?? {}), ...extra });
+  const lab = (t: string): CellSpec => ({ t, al: 'left', va: 'top', fg: GREY });
+  const val = (p: Pair, extra: Partial<Cell> = {}): CellSpec => ({ h: /\{\{\w+\}\}/.test(String(p[1])) ? escapeHtml(String(p[1])) : textToHtml(p[1]), al: 'left', va: 'top', ...(p[2] ?? {}), ...extra });
   for (let i = 0; i < Math.max(Lf.length, Rt.length); i++) {
     const a = Lf[i], b = Rt[i];
     if (a && b) rows.push([lab(a[0]), val(a), lab(b[0]), val(b)]);
@@ -209,23 +259,23 @@ function pairRows(left: Pair[], right: Pair[]): CellSpec[][] {
  */
 export function reportDetails(d: FormatInput['data'], tests: TestSnap[], o: { sample?: Pair[]; testing?: Pair[]; method?: string } = {}): Section[] {
   const nabl = d.accreditation === 'NABL';
-  // one ULR per report, assigned when it is signed and issued (NABL); filled in through the {{ulr}} token
-  const band: [string, string][] = [['Test Report No.', token('number')], ...(nabl ? [['ULR No.', token('ulr')] as [string, string]] : []), ['Date of Issue', token('issueText')], ['Page', token('pageOf')]];
-  const bandT = table(band.map(() => 100 / band.length), [band.map(([l, v]) => ({ h: `<span style="font-size: 8.5pt">${escapeHtml(l)}</span><br><b>${escapeHtml(v)}</b>`, al: 'left', bg: '#F1F3F6' } as CellSpec))], { role: 'idband', sz: 10.5, mt: 1 });
+  // identification row: report no. | ULR (NABL, assigned on issue) | date of issue | page – the customer is in the details below
+  const band: [string, string][] = [['Test report no.', token('number')], ...(nabl ? [['ULR no.', token('ulr')] as [string, string]] : []), ['Date of issue', token('issueText')], ['Page', token('pageOf')]];
+  const widths = nabl ? [24, 40, 22, 14] : [34, 40, 26];
+  const bandT = table(widths, [band.map(([l, v], i) => ({ h: `${capsHtml(l, 7)}<br>${escapeHtml(v)}`, al: i === band.length - 1 ? 'right' : 'left', va: 'top' } as CellSpec))], { role: 'idband', border: 'open', sz: 10, mt: 2 });
   const c: ReportCustomer = d.customer ?? { name: d.client?.name ?? '', address: d.client?.address ?? '' };
   const ref = d.customerRef !== undefined && d.customerRef !== null && d.customerRef !== '' ? d.customerRef : c.customerRef;
   const refText = ref ? `${ref}${d.customerRefDate ? `, dated ${d.customerRefDate}` : ''}` : '';
-  const sec = (t: string): CellSpec[] => [{ h: bandHtml(t), al: 'left', cs: 4, bg: BAND_BG, role: 'sec' }, null, null, null];
-  const lab = (t: string): CellSpec => ({ t, al: 'left', bg: '#FAFAFB' });
-  const custRight: Pair[] = [['Project / site*', c.project], ['Customer reference*', refText]].filter((p) => p[1]) as Pair[];
-  const custRows: CellSpec[][] = custRight.length
-    ? custRight.map((p, i) => [i === 0 ? { ...lab('Name & address') as object, rs: custRight.length } as CellSpec : null, i === 0 ? { h: customerNameHtml(d), al: 'left', va: 'top', rs: custRight.length, role: 'customer' } : null, lab(p[0]), { h: textToHtml(p[1]), al: 'left' }])
-    : [[lab('Name & address'), { h: customerNameHtml(d), al: 'left', cs: 3, role: 'customer' }, null, null]];
+  const lab = (t: string): CellSpec => ({ t, al: 'left', va: 'top', fg: GREY });
+  const custRows: CellSpec[][] = [
+    [lab('Name & address'), { h: customerNameHtml(d), al: 'left', va: 'top', cs: 3, role: 'customer' }, null, null],
+    ...pairRows([['Project / site*', c.project]], [['Customer reference*', refText]]),
+  ];
   const descr = d.specification || d.material || '';
   const labels = (d.samples ?? []).map((x: any) => x.label).filter((x: string) => x && !/^Sample-\d+$/.test(x));
   const sampleLeft: Pair[] = [
     ['Job code / UIN', (d.samples ?? []).some((x: any) => x.code) ? codeRange((d.samples ?? []).map((x: any) => x.code).filter(Boolean)) : d.jobCodeText],
-    ['Sample description*', descr, { b: true }],
+    ['Sample description*', descr],
     ['Sample ID*', labels.join(', ')],
     ...extraPairs(d),
     ...(o.sample ?? []),
@@ -240,14 +290,19 @@ export function reportDetails(d: FormatInput['data'], tests: TestSnap[], o: { sa
   const method = o.method ?? uniq(tests.map((t) => t.method).filter(Boolean)).join('; ');
   const testLeft: Pair[] = [['Period of testing', d.testDatesText], ['Test method', method], ...(o.testing ?? [])];
   const testRight: Pair[] = [['Environmental conditions', envApplies(d.material) ? d.envText : ''], ['Test location', d.testLocation]];
-  const rows: CellSpec[][] = [sec('CUSTOMER'), ...custRows, sec('SAMPLE'), ...pairRows(sampleLeft, sampleRight)];
+  // each group: a grey label merged down the left, a thin rule above it; "+ Add row" inside a group extends it
+  const group = (label: string, rows: CellSpec[][]): CellSpec[][] => rows.map((r, i) => [
+    i === 0 ? { h: capsHtml(label), al: 'left', va: 'top', rs: rows.length, bt: true, role: 'sec' } : null,
+    ...r.map((x) => (i === 0 && x && typeof x === 'object' ? { ...x, bt: true } : x)),
+  ]);
+  const rows: CellSpec[][] = [...group('Customer', custRows), ...group('Sample', pairRows(sampleLeft, sampleRight))];
   const tr = pairRows(testLeft, testRight);
-  if (tr.length) rows.push(sec('TESTING'), ...tr);
-  const details = table([17, 33, 19, 31], rows, { role: 'header', sz: 10.5, mt: 2 });
+  if (tr.length) rows.push(...group('Testing', tr));
+  const details = table([12, 16, 27, 18, 27], rows, { role: 'header', border: 'open', sz: 9.5, mt: 2.5 });
   // the "* furnished by the customer" key is skipped when the report notes already carry it
   const notesText = (Array.isArray(d.notes) ? d.notes : [d.notes ?? '']).join(' ');
   const footText = [/furnished by the customer/i.test(notesText) ? '' : '* Details as furnished by the customer.', d.accreditation === 'NABL' || d.nablStatement === false ? '' : 'Tests in this report are not covered under the scope of NABL accreditation.'].filter(Boolean).join(' ');
-  return [bandT, details, ...(footText ? [text(footText, { sz: 8.5, mt: 0.5, role: 'detailsnote' })] : [])];
+  return [bandT, details, ...(footText ? [text(greyHtml(escapeHtml(footText)), { sz: 8, mt: 0.8, role: 'detailsnote' })] : [])];
 }
 
 /** Generic results table: S.No | Test | Units | Results… | Requirements | Test method (columns re-ordered per format). */
@@ -296,7 +351,7 @@ function resultsTable(tests: TestSnap[], d: FormatInput['data'], o: { order: ('s
           else line.push(H(chem(r.name), { cs: 2, al: 'left' }), null);
         } else line.push(H(chem(r.name), { al: 'left' }));
       } else if (k === 'unit') line.push(H(unitHtml(r.unit || '--')));
-      else if (k === 'results') line.push(...r.values.map((v) => C(v || '--', v ? { b: true } : {})));
+      else if (k === 'results') { const lim = limitsOf(r.spec); line.push(...r.values.map((v) => C(v || '--', flag(v, lim)))); }
       else if (k === 'spec') line.push(H(chem(r.spec || '--')));
       else { const ms = span(i, (x) => x.method); line.push(ms > 0 ? C(r.method, { rs: ms }) : null); }
     }
@@ -314,29 +369,40 @@ const detailsSection = (d: FormatInput['data']): Section[] =>
 
 type Builder = (tests: TestSnap[], d: FormatInput['data']) => Section[];
 
+/** Minimum strength at early ages as % of the grade (no 28-day entry: at 28 days the grade itself applies). */
+const CUBE_AGE_PCT: Record<number, number> = { 3: 45, 7: 60, 14: 85 };
+const fckOf = (g?: string) => { const m = /M\s*-?\s*(\d{2,3})/i.exec(g ?? ''); return m ? Number(m[1]) : NaN; };
 const cubes: Builder = (tests, d) => {
   const rows: CellSpec[][] = [[
-    C('Sl. no'), C('Grade of concrete*'), C('Date of Casting*'), C('Date of Testing'), C('Age at test (days)*'), C('Weight (Kg)'), C('Load (KN)'), H('Compressive Strength (N/mm<sup>2</sup>)'), H('Average Compressive Strength (N/mm<sup>2</sup>)'),
+    C('Sl. no'), C('Grade of concrete*'), C('Date of casting*'), C('Date of testing'), C('Age at test (days)*'), C('Weight (kg)'), C('Load (kN)'), H('Compressive strength (N/mm<sup>2</sup>)'), H('Average compressive strength (N/mm<sup>2</sup>)'),
   ]];
   let n = 0;
   for (const t of tests) {
     const cubesRows = t.grids.cubes?.rows.filter((r) => r.fc || r.load) ?? [];
     const k = Math.max(1, cubesRows.length);
     const grade = [t.header.grade?.replace(/^M(\d)/, 'M-$1'), t.header.element].filter(Boolean).map(h).join('<br>');
+    // the average is bold when below the minimum for its age (3, 7, 14 days: % of grade; 28 days: the grade)
+    const fck = fckOf(t.header.grade), age = Number(t.header.age);
+    const pct = CUBE_AGE_PCT[age] ?? (age >= 28 ? 100 : undefined);
+    const lim = Number.isFinite(fck) && pct ? { min: Math.round(fck * pct) / 100 } : null;
     for (let i = 0; i < k; i++) {
       const c = cubesRows[i] ?? {};
       const first = i === 0;
       rows.push([
         C(`${++n}.`), first ? H(grade || '--', { rs: k }) : null, first ? C(short(t.header.casting_date) || '--', { rs: k }) : null, first ? C(short(t.completed || t.started) || '--', { rs: k }) : null,
-        first ? C(t.header.age || '--', { rs: k }) : null, C(fix(c.mass, 3) || '--'), C(fix(c.load, 1) || '--'), C(c.fc || '--', { b: !!c.fc }), first ? C(t.results.avg || '--', { rs: k, b: !!t.results.avg }) : null,
+        first ? C(t.header.age || '--', { rs: k }) : null, C(fix(c.mass, 3) || '--'), C(fix(c.load, 1) || '--'), C(c.fc || '--'), first ? C(t.results.avg || '--', { rs: k, ...flag(t.results.avg, lim) }) : null,
       ]);
     }
   }
-  const method = uniq(tests.map((t) => t.method)).join('; ');
+  const req = table([34, 22, 22, 22], [
+    [C('Minimum strength as % of grade', { al: 'left' }), C('3 days'), C('7 days'), C('14 days')],
+    [C('Requirement', { al: 'left' }), C('45 %'), C('60 %'), C('85 %')],
+  ], { head: 1, mt: 2.5, role: 'requirements', sz: 9 });
   return [
     ...reportDetails(d, tests),
     title('COMPRESSIVE STRENGTH OF CONCRETE CUBES'),
-    table([6, 15, 11, 11, 9, 10, 10, 13, 15], rows, { head: 1, role: 'results', sz: 10 }),
+    table([6, 15, 11, 11, 9, 10, 10, 13, 15], rows, { head: 1, role: 'results', sz: 9.5 }),
+    req,
     ...extraSections(d),
     ...remarksSection(d), ...notesSection(d), endSection(),
   ];
@@ -352,13 +418,15 @@ const cores: Builder = (tests, d) => {
   for (const t of tests) {
     const cs = t.grids.cores?.rows.filter((r) => r.fcube || r.p) ?? [];
     const k = Math.max(1, cs.length);
+    const fck0 = Number(t.results.fck);
+    const fckLim = (f: number) => (Number.isFinite(fck0) && fck0 > 0 ? { min: Math.round(f * fck0 * 100) / 100 } : null);
     const grade = [t.header.grade?.replace(/^M(\d)/, 'M-$1'), t.header.condition].filter(Boolean).map(h).join('<br>');
     cs.forEach((c, i) => {
       const first = i === 0;
-      rows.push([C(`${++n}.`), first ? H(grade || '--', { rs: k }) : null, C(c.id || '--'), C(fix(c.d, 0) || '--'), C(c.ld || '--'), C(fix(c.p, 1) || '--'), C(c.fcyl || '--'), C(c.fcube || '--', { b: !!c.fcube }), first ? C(t.results.avg || '--', { rs: k, b: !!t.results.avg }) : null]);
+      rows.push([C(`${++n}.`), first ? H(grade || '--', { rs: k }) : null, C(c.id || '--'), C(fix(c.d, 0) || '--'), C(c.ld || '--'), C(fix(c.p, 1) || '--'), C(c.fcyl || '--'), C(c.fcube || '--', flag(c.fcube, fckLim(0.75))), first ? C(t.results.avg || '--', { rs: k, ...flag(t.results.avg, fckLim(0.85)) }) : null]);
     });
     const fck = Number(t.results.fck);
-    if (Number.isFinite(fck) && fck > 0) acc.push([C(t.header.grade || '--'), C(`${t.results.avg || '--'} (≥ ${(0.85 * fck).toFixed(2)})`), C(`${t.results.minv || '--'} (≥ ${(0.75 * fck).toFixed(2)})`), C(t.results.verdict || '--')]);
+    if (Number.isFinite(fck) && fck > 0) acc.push([C(t.header.grade || '--'), C(`${t.results.avg || '--'} (≥ ${(0.85 * fck).toFixed(2)})`), C(`${t.results.minv || '--'} (≥ ${(0.75 * fck).toFixed(2)})`), C(t.results.verdict || '--', flag(t.results.verdict, null))]);
   }
   const method = uniq(tests.map((t) => t.method)).join('; ');
   return [
@@ -395,7 +463,14 @@ const steelPhysical: Builder = (tests, d) => {
   sorted.forEach((t, i) => {
     const m = make(t);
     let span = 1; if (i > 0 && make(sorted[i - 1]) === m) span = 0; else while (i + span < sorted.length && make(sorted[i + span]) === m) span++;
-    rows.push([C(`${i + 1}.`), C(t.header.dia || '--'), span ? C(m || '--', { rs: span }) : null, C(t.results.mpm || '--', { b: true }), C(t.results.uts || '--', { b: true }), C(t.results.ys || '--', { b: true }), C(t.results.el || '--', { b: true }), C(t.results.bend || '--'), C(t.results.rebend || '--')]);
+    const g = STEEL_GRADE[gradeKey(t.header.grade)];
+    const mass = STEEL_MASS.find(([dd]) => dd === Number(t.header.dia));
+    const ys = Number(t.results.ys);
+    const utsMin = g ? Math.max(g.ts, Number.isFinite(ys) ? ys * (1 + g.pct / 100) : 0) : undefined;
+    rows.push([C(`${i + 1}.`), C(t.header.dia || '--'), span ? C(m || '--', { rs: span }) : null,
+      C(t.results.mpm || '--', flag(t.results.mpm, mass ? { min: mass[1], max: mass[2] } : null)), C(t.results.uts || '--', flag(t.results.uts, utsMin ? { min: Math.round(utsMin * 100) / 100 } : null)),
+      C(t.results.ys || '--', flag(t.results.ys, g ? { min: g.ys } : null)), C(t.results.el || '--', flag(t.results.el, g ? { min: Number(g.el) } : null)),
+      C(t.results.bend || '--', flag(t.results.bend, null)), C(t.results.rebend || '--', flag(t.results.rebend, null))]);
   });
   const grades = uniq(sorted.map((t) => gradeKey(t.header.grade)).filter((g) => STEEL_GRADE[g]));
   const conforms = sorted.length > 0 && sorted.every((t) => /^conforms/i.test(t.results.verdict ?? ''));
@@ -412,7 +487,7 @@ const steelPhysical: Builder = (tests, d) => {
     title('PHYSICAL PROPERTIES OF TMT BARS'),
     table([7, 7, 13, 12, 11, 12, 11, 13.5, 13.5], rows, { head: 2, role: 'results', sz: 10 }),
     ...extraSections(d),
-    text(`Requirements as per IS: 1786-2008 (Reaffirmed 2018)`, { mt: 2, sz: 10.5, heading: true }),
+    subTitle('Requirements as per IS 1786:2008 (Reaffirmed 2018)'),
     reqT,
     ...(grades.length ? [table([12, 25, 25, 26, 12], gradeRows, { role: 'requirements', sz: 9.5, head: 1 })] : []),
     ...remarksSection(d, conforms ? `Above tested samples conform to IS 1786-2008${grades.length === 1 ? ` (${grades[0]})` : ''}.` : undefined),
@@ -428,7 +503,7 @@ const steelChemical: Builder = (tests, d) => {
     const m = make(t);
     let span = 1; if (i > 0 && make(sorted[i - 1]) === m) span = 0; else while (i + span < sorted.length && make(sorted[i + span]) === m) span++;
     rows.push([C(`${i + 1}.`), C(t.header.dia || '--'), span ? C(m || '--', { rs: span }) : null, i === 0 ? C(t.method, { rs: sorted.length }) : null,
-      C(t.results.r_c || '--', { b: true }), C(t.results.r_p || '--', { b: true }), C(t.results.r_s || '--', { b: true }), C(t.results.r_ps || '--', { b: true }), C(t.results.verdict || '--')]);
+      ...(() => { const g = STEEL_GRADE[gradeKey(t.header.grade)]; const mx = (v?: string) => (g && v ? { max: Number(v) } : null); return [C(t.results.r_c || '--', flag(t.results.r_c, mx(g?.c))), C(t.results.r_p || '--', flag(t.results.r_p, mx(g?.p))), C(t.results.r_s || '--', flag(t.results.r_s, mx(g?.s))), C(t.results.r_ps || '--', flag(t.results.r_ps, mx(g?.ps))), C(t.results.verdict || '--', flag(t.results.verdict, null))]; })()]);
   });
   const req: CellSpec[][] = [[C('Requirement as per IS: 1786-2008 (RA 2018) (%max) with tolerance', { cs: 5 }), null, null, null, null], [C('Grade'), C('C % (Max.)'), C('P % (Max.)'), C('S % (Max.)'), C('P + S % (Max.)')]];
   for (const g of ['Fe 500', 'Fe 500D', 'Fe 550', 'Fe 550D', 'Fe 600']) { const x = STEEL_GRADE[g]; req.push([C(g), C(x.c), C(x.p), C(x.s), C(x.ps)]); }
@@ -451,7 +526,7 @@ function sieveCoarse(t: TestSnap): Section[] {
     [C('IS Sieve Size (mm)', { rs: 2 }), C('% Cumulative weight', { cs: 2 }), null, C(`Specification as per IS:383-2016 in respect of ${agg} (% passing)`), C('Test Method', { rs: 2 })],
     [null, C('Retained %'), C('Passing %'), C(/single/i.test(agg) ? 'Single size' : 'Graded'), null],
   ];
-  rows.forEach((r, i) => out.push([C(r.size || r.sieve), C(r.cump || '--'), C(r.pass, { b: true }), C(r.limit || '--'), i === 0 ? C(t.method, { rs: rows.length }) : null]));
+  rows.forEach((r, i) => out.push([C(r.size || r.sieve), C(r.cump || '--'), C(r.pass, flag(r.pass, limitsOf(r.limit))), C(r.limit || '--'), i === 0 ? C(t.method, { rs: rows.length }) : null]));
   return [subTitle(`SIEVE ANALYSIS – ${agg}${t.sampleLabel ? ` (${t.sampleLabel})` : ''}`), table([16, 17, 17, 32, 18], out, { head: 2, role: 'results', sz: 10 })];
 }
 function sieveFine(t: TestSnap): Section[] {
@@ -462,7 +537,7 @@ function sieveFine(t: TestSnap): Section[] {
     [C('IS Sieve Size', { rs: 2 }), C('% Cumulative weight', { cs: 2 }), null, C('Specification as per IS:383-2016 in respect of fine aggregate (% passing)', { cs: 4 }), null, null, null, C('Test Method', { rs: 2 })],
     [null, C('Retained %'), C('Passing %'), C('ZONE I'), C('ZONE II'), C('ZONE III'), C('ZONE IV'), null],
   ];
-  rows.forEach((r, i) => out.push([C(r.sieve || r.size), C(r.cump || '--'), C(r.pass, { b: true }), C(r.z1 || '--'), C(r.z2 || '--'), C(r.z3 || '--'), C(r.z4 || '--'), i === 0 ? C(t.method, { rs: rows.length }) : null]));
+  rows.forEach((r, i) => out.push([C(r.sieve || r.size), C(r.cump || '--'), C(r.pass, flag(r.pass, (() => { const z = /zone\s*(I{1,3}V?|IV|[1-4])/i.exec(String(t.results.zone ?? '')); const k = z ? ({ I: 'z1', II: 'z2', III: 'z3', IV: 'z4', '1': 'z1', '2': 'z2', '3': 'z3', '4': 'z4' } as Record<string, string>)[z[1].toUpperCase()] : ''; return k ? limitsOf(r[k]) : null; })())), C(r.z1 || '--'), C(r.z2 || '--'), C(r.z3 || '--'), C(r.z4 || '--'), i === 0 ? C(t.method, { rs: rows.length }) : null]));
   const sections: Section[] = [subTitle(`SIEVE ANALYSIS${t.sampleLabel ? ` (${t.sampleLabel})` : ''}:`), table([14, 11, 11, 11, 11, 11, 11, 20], out, { head: 2, role: 'results', sz: 9.5 })];
   if (t.results.zone) sections.push(text(`Grading: ${h(t.results.zone)}${t.results.fm ? `; Fineness modulus: ${h(t.results.fm)}` : ''}`, { sz: 9.5, mt: 1 }));
   return sections;
@@ -586,44 +661,35 @@ export function formatFits(format: string, codes: string[]): boolean {
 }
 
 /**
- * House style for everything after the details: a heading becomes the shaded band on top of the table it introduces
- * (repeated with the column headings when the table continues on the next page), column headings are shaded and bold,
- * and requirement tables take the full width with their title as a band. Text and data are not changed.
+ * House style (concept A): the report title goes to the top ("TEST REPORT" label, title in sentence case, not bold,
+ * NABL marker in plain grey on the right); the results start under a ruled "Results" heading; result and requirement
+ * tables have a rule on top, a rule under the column headings (grey, not bold) and hairlines between rows, no shading.
+ * Bold is left only on results outside their limits. Text and data are not changed.
  */
-export function polish(sections: Section[]): Section[] {
-  const plain = (html: string) => html.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-  const bandRow = (n: number, html: string, bg: string): Cell[] => [{ h: html, cs: n, al: 'left', bg, role: 'band' }, ...Array.from({ length: n - 1 }, () => ({ h: '', m: true }))];
-  const shadeHead = (t: TableSection, from: number, to: number) => t.rows.map((r, i) => (i >= from && i < to ? r.map((c) => (c.m ? c : { ...c, bg: c.bg ?? HEAD_BG, b: true })) : r));
+export function polish(sections: Section[], o: { nabl?: boolean } = {}): Section[] {
+  const plain = (html: string) => html.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const ruled = (t: TableSection): TableSection => {
+    const head = t.head ?? 0, n = t.cols.length;
+    let rows = t.rows.map((r, i) => r.map((c) => (c.m ? c : i < head ? { ...c, bg: undefined, b: undefined, fg: GREY, sz: c.sz ?? 8 } : { ...c, bg: undefined })));
+    // a title row spanning the whole requirements table becomes a small grey caption
+    if (t.role === 'requirements' && n > 1 && (rows[0]?.[0]?.cs ?? 1) >= n) rows = [[{ ...rows[0][0], h: capsHtml(plain(rows[0][0].h), 7.5), al: 'left' }, ...rows[0].slice(1)], ...rows.slice(1)];
+    return { ...t, rows, border: 'lines', width: undefined, align: undefined };
+  };
   const out: Section[] = [];
-  for (let i = 0; i < sections.length; i++) {
-    const s = sections[i];
-    if (s.type === 'text' && s.heading) {
-      const bands = [{ html: bandHtml(plain(s.h)), bg: s.role === 'title' ? BAND_BG : SUB_BG }];
-      let j = i + 1;
-      const nx1 = sections[j];
-      if (s.role === 'title' && nx1?.type === 'text' && nx1.heading && sections[j + 1]?.type === 'table') { bands.push({ html: bandHtml(plain(nx1.h)), bg: SUB_BG }); j++; }
-      const nx = sections[j];
-      if (nx?.type === 'table' && nx.border !== 'none') {
-        const n = nx.cols.length, head0 = nx.head ?? 0;
-        const rows = shadeHead(nx, 0, nx.role === 'results' || nx.role === 'requirements' ? head0 : 0);
-        out.push({ ...nx, width: undefined, align: undefined, rows: [...bands.map((b) => bandRow(n, b.html, b.bg)), ...rows], head: head0 + bands.length, rh: nx.rh ? [...bands.map(() => null), ...nx.rh] : undefined, mt: s.mt ?? nx.mt });
-        i = j;
-        continue;
-      }
-      if (s.role === 'title') { out.push(table([100], [[{ h: bands[0].html, al: 'left', bg: BAND_BG, role: 'band' }]], { role: 'title', mt: s.mt, sz: s.sz })); continue; }
-    }
-    if (s.type === 'table' && s.role === 'results') { out.push({ ...s, rows: shadeHead(s, 0, s.head ?? 0) }); continue; }
-    if (s.type === 'table' && s.role === 'requirements') {
-      const n = s.cols.length, r0 = s.rows[0] ?? [];
-      const titled = n > 1 && (r0[0]?.cs ?? 1) >= n;
-      const head = titled ? Math.max(1, s.head ?? 0) : s.head;
-      const shaded = shadeHead(s, titled ? 1 : 0, head ?? 0);
-      out.push({ ...s, width: undefined, align: undefined, head, rows: titled ? [[{ ...r0[0], h: bandHtml(plain(r0[0].h)), al: 'left', bg: SUB_BG }, ...r0.slice(1)], ...shaded.slice(1)] : shaded });
+  let docTitle: Section | null = null;
+  for (const s of sections) {
+    if (s.type === 'text' && s.role === 'title') {
+      if (!docTitle) {
+        const right = o.nabl ? { h: greyHtml(`Accredited – NABL ${token('certNo')}`), al: 'right' as const, va: 'bottom' as const, sz: 8.5 } : { h: '', al: 'right' as const };
+        docTitle = table([72, 28], [[{ h: `${capsHtml('Test report', 7.5)}<br><span style="font-size: 15pt">${escapeHtml(sentenceCase(plain(s.h)))}</span>`, al: 'left', va: 'bottom' }, right]], { border: 'none', role: 'doctitle', mt: 0, pad: 0 });
+        out.push(text('Results', { heading: true, rule: true, sz: 10, mt: 4, role: 'resultshead' }));
+      } else out.push(text(escapeHtml(sentenceCase(plain(s.h))), { heading: true, mt: 2.5, sz: 9.5 }));
       continue;
     }
+    if (s.type === 'table' && (s.role === 'results' || s.role === 'requirements' || s.role === 'extra')) { out.push(ruled(s)); continue; }
     out.push(s);
   }
-  return out;
+  return docTitle ? [docTitle, ...out] : out;
 }
 
 /** Generate the editable layout of a report from its data. */
@@ -634,7 +700,7 @@ export function buildLayout(input: FormatInput): ReportLayout {
   const forced = d.options?.format && REPORT_FORMATS[d.options.format] && formatFits(d.options.format, tests.map((t) => t.code)) ? d.options.format : null;
   const fmt = forced ?? pickFormat(tests.map((t) => t.code));
   if (!d.tests) { // reports drafted before formats existed: general layout from the result rows
-    return { format: 'generic', version: 1, sections: polish(legacyLayout(d)) };
+    return { format: 'generic', version: 1, sections: polish(legacyLayout(d), { nabl: d.accreditation === 'NABL' }) };
   }
   // tests that belong to another format are still shown (general results table) rather than dropped
   const main = tests.filter((t) => fmt === 'generic' || REPORT_FORMATS[fmt].codes?.test(t.code));
@@ -644,7 +710,7 @@ export function buildLayout(input: FormatInput): ReportLayout {
     const t = resultsTable(rest, d, { order: ['sno', 'test', 'unit', 'method', 'spec', 'results'], sampleHeader: true });
     if (t) { const at = sections.findIndex((s) => s.role === 'remarks' || s.role === 'notes' || s.role === 'end'); sections.splice(at < 0 ? sections.length : at, 0, subTitle('OTHER TESTS'), t); }
   }
-  return { format: fmt, version: 1, sections: polish(sections) };
+  return { format: fmt, version: 1, sections: polish(sections, { nabl: d.accreditation === 'NABL' }) };
 }
 
 function legacyLayout(d: FormatInput['data']): Section[] {

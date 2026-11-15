@@ -134,7 +134,7 @@ await ad.getByRole('button', { name: 'Sign & issue' }).click();
 await ad.waitForTimeout(1500);
 const r2 = await ad.locator('.doc-page').innerText();
 if (!r2.includes('Data Centre Division')) problems.push('admin: unlocked client name not on report');
-if (!/ULR No\.\s*\n?\s*[A-Z0-9]+\d{11}[FP]/.test(r2)) problems.push('admin: issued NABL report shows no ULR');
+if (!/ULR No\.\s*\n?\s*[A-Z0-9]+\d{11}[FP]/i.test(r2)) problems.push('admin: issued NABL report shows no ULR');
 const certNo = (await api(ad, '/company')).accreditation?.certNo;
 if (certNo && !r2.includes(certNo)) problems.push('admin: NABL letterhead (certificate no.) missing');
 if (!r2.includes('Free Swell Index')) problems.push('admin: FSI result missing');

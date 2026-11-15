@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   anchorOf, certCode, formatNumber, DEFAULT_NUMBERING, buildLayout, normalizeObservation, cleanHtml, cleanLayout, deleteCol, deleteRow, evaluateObservation, CIVIL_LAB_TEMPLATES, fillTokens, htmlToText, insertCol, insertRow, mergeCells,
-  pickFormat, refreshRoles, resizeCol, snapTest, splitCell, table, unfillTokens, type TableSection, type TestSnap,
+  pickFormat, refreshRoles, addRowBelow, limitsOf, outOfLimit, sentenceCase, resizeCol, snapTest, splitCell, table, unfillTokens, type TableSection, type TestSnap,
 } from '../src/index';
 
 const grid = (t: TableSection) => t.rows.map((r) => r.map((c) => (c.m ? '·' : htmlToText(c.h) || '_') + ((c.rs ?? 1) > 1 ? `↓${c.rs}` : '') + ((c.cs ?? 1) > 1 ? `→${c.cs}` : '')).join(' '));
@@ -106,11 +106,18 @@ describe('report formats', () => {
   it('cube report: standard details section (band, customer, sample, testing) and one row per cube', () => {
     const l = buildLayout({ data: { ...base, accreditation: 'NABL', ulr: 'TC752326000003170F', jobCodeText: 'Concrete : MPAD/0044/10/2026', receivedTime: '11:40', customerRefDate: '29-10-2026', envText: '27 °C, 65 % RH', testLocation: 'Laboratory (permanent facility)', tests: [cube(1, 28, [879.8, 871.7, 842.4])], customer, options: {} } });
     expect(l.format).toBe('cubes');
-    const band = l.sections[0] as TableSection;
+    const top = l.sections[0] as TableSection;
+    expect(top.role).toBe('doctitle');
+    expect(htmlToText(top.rows[0][0].h)).toBe('TEST REPORT\nCompressive strength of concrete cubes'); // no subtitle, sentence case
+    expect(top.rows[0][0].h).not.toContain('<b>'); expect(top.rows[0].some((c) => c.b)).toBe(false); // the title is not bold
+    expect(htmlToText(top.rows[0][1].h)).toBe('Accredited – NABL {{certNo}}'); expect(top.rows[0][1].h).toContain('color: #78716c'); // plain grey marker
+    const band = l.sections[1] as TableSection;
     expect(band.role).toBe('idband');
-    expect(band.rows[0].map((c) => htmlToText(c.h).split('\n')[0])).toEqual(['Test Report No.', 'ULR No.', 'Date of Issue', 'Page']);
+    expect(band.rows[0].map((c) => htmlToText(c.h).split('\n')[0])).toEqual(['TEST REPORT NO.', 'ULR NO.', 'DATE OF ISSUE', 'PAGE']);
+    expect(all(l).split('\n').slice(0, 4).join(' ')).not.toContain('Example Infra'); // the customer is in the details only
     expect(band.rows[0][0].h).toContain('{{number}}'); expect(band.rows[0][3].h).toContain('{{pageOf}}');
-    const det = l.sections[1] as TableSection;
+    const det = l.sections[2] as TableSection;
+    expect(det.border).toBe('open');
     const cust = det.rows.flat().find((c) => c.role === 'customer')!;
     expect(htmlToText(cust.h)).toContain('Example Infra Pvt Ltd');
     expect(htmlToText(cust.h)).not.toContain('R. Kumar'); // contact details only when asked for
@@ -118,39 +125,74 @@ describe('report formats', () => {
     for (const x of ['CUSTOMER', 'SAMPLE', 'TESTING', 'Project / site*', 'Pristinia', 'Customer reference*', 'EI/QC/Oct/2026, dated 29-10-2026', 'Date & time of receipt', '20-10-2026, 11:40', 'Test location', 'Test method', 'Condition on receipt']) expect(t).toContain(x);
     expect(t).not.toContain('not covered under the scope of NABL');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(res.rows.length).toBe(5);
-    expect(res.rows[2][1].rs).toBe(3); expect(htmlToText(res.rows[2][1].h)).toBe('M-30\nSlab RCC, Tower-A');
-    expect(htmlToText(res.rows[2][7].h)).toBe('39.10'); expect(htmlToText(res.rows[2][8].h)).toBe('38.43'); // average of the unrounded strengths
-    expect(res.rows[2][8].rs).toBe(3);
+    expect(res.rows.length).toBe(4);
+    expect(res.rows[1][1].rs).toBe(3); expect(htmlToText(res.rows[1][1].h)).toBe('M-30\nSlab RCC, Tower-A');
+    expect(htmlToText(res.rows[1][7].h)).toBe('39.10'); expect(htmlToText(res.rows[1][8].h)).toBe('38.43'); // average of the unrounded strengths
+    expect(res.rows[1][8].rs).toBe(3);
+    expect(res.rows.flat().some((c) => c.b)).toBe(false); // 38.43 ≥ 30 at 28 days: nothing bold
     expect(t).toContain('END OF REPORT');
   });
-  it('house style: results band with heading row shaded, remarks box, compact notes, end line', () => {
-    const l = buildLayout({ data: { ...base, remarks: 'Meets the 7-day requirement.', notes: ['Results relate only to the sample tested.', 'Not to be reproduced except in full.'], tests: [cube(1, 7, [600, 610, 620])], customer, options: {} } });
-    expect(l.sections.some((s) => s.type === 'text' && s.role === 'title')).toBe(false); // the title is the band on the results table
+  it('house style: ruled results, bold only below the limit, cube table for 3/7/14 days, remarks and notes rows', () => {
+    const l = buildLayout({ data: { ...base, remarks: 'Meets the 7-day requirement.', notes: ['Results relate only to the sample tested.', 'Not to be reproduced except in full.'], tests: [cube(1, 7, [600, 610, 620]), cube(2, 7, [300, 310, 320])], customer, options: {} } });
+    expect(l.sections.some((s) => s.type === 'text' && s.role === 'title')).toBe(false); // moved to the top as the document title
+    const head = l.sections.find((s) => s.role === 'resultshead') as any;
+    expect(head.h).toBe('Results'); expect(head.rule).toBe(true);
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(htmlToText(res.rows[0][0].h)).toBe('TEST RESULTS – COMPRESSIVE STRENGTH OF CONCRETE CUBES');
-    expect(res.rows[0][0].cs).toBe(res.cols.length); expect(res.head).toBe(2);
-    expect(res.rows[1].filter((c) => !c.m).every((c) => c.b && c.bg)).toBe(true);
-    expect(res.rows[2][7].b).toBe(true); // strengths in bold
+    expect(res.border).toBe('lines'); expect(res.head).toBe(1);
+    expect(res.rows[0].filter((c) => !c.m).every((c) => !c.b && !c.bg && c.fg)).toBe(true); // grey, not bold, not shaded
+    // M30 at 7 days needs 60 % = 18 N/mm²: 27.11 passes, 13.78 is bold
+    expect(res.rows[1][8].b).toBeFalsy(); expect(res.rows[4][8].b).toBe(true);
+    expect(res.rows.flat().filter((c) => c.b).length).toBe(1);
+    const req = l.sections.find((s) => s.role === 'requirements') as TableSection;
+    expect(all({ ...l, sections: [req] })).toBe('Minimum strength as % of grade|3 days|7 days|14 days\nRequirement|45 %|60 %|85 %');
+    expect(all(l)).not.toContain('100 %'); expect(all(l)).not.toContain('28 days'); expect(all(l)).not.toContain('Environmental conditions');
     const rem = l.sections.find((s) => s.role === 'remarks') as TableSection;
-    expect(rem.type).toBe('table'); expect(htmlToText(rem.rows[0][0].h)).toBe('REMARKS'); expect(htmlToText(rem.rows[1][0].h)).toBe('Meets the 7-day requirement.');
+    expect(rem.type).toBe('table'); expect(htmlToText(rem.rows[0][0].h)).toBe('REMARKS'); expect(htmlToText(rem.rows[0][1].h)).toBe('Meets the 7-day requirement.');
     const notes = l.sections.find((s) => s.role === 'notes') as TableSection;
     expect(notes.rows.length).toBe(1); expect(htmlToText(notes.rows[0][1].h)).toContain('2. Not to be reproduced');
-    // cube reports carry no "% of grade strength by age" table; environmental conditions are not reported for concrete
-    expect(l.sections.find((s) => s.role === 'requirements')).toBeUndefined();
-    expect(all(l)).not.toContain('28 days – 100 %'); expect(all(l)).not.toContain('Environmental conditions');
     expect(all(l)).toContain('— END OF REPORT —');
     const again = refreshRoles(l, { data: { ...base, remarks: 'Changed.', tests: [], customer } }, ['remarks']);
-    expect(htmlToText((again.sections.find((s) => s.role === 'remarks') as TableSection).rows[1][0].h)).toBe('Changed.');
+    expect(htmlToText((again.sections.find((s) => s.role === 'remarks') as TableSection).rows[0][1].h)).toBe('Changed.');
+  });
+  it('reads limits from requirement text', () => {
+    expect(limitsOf('Min. 33')).toEqual({ min: 33, max: undefined });
+    expect(limitsOf('≤ 0.30')).toEqual({ min: undefined, max: 0.3 });
+    expect(limitsOf('Not more than 5.0')).toEqual({ min: undefined, max: 5 });
+    expect(limitsOf('85 – 100')).toEqual({ min: 85, max: 100 });
+    expect(limitsOf('30 (Min)')).toEqual({ min: 30 });
+    expect(limitsOf('--')).toBeNull(); expect(limitsOf('Satisfactory')).toBeNull();
+    expect(outOfLimit('31.5', limitsOf('Min. 33'))).toBe(true); expect(outOfLimit('34', limitsOf('Min. 33'))).toBe(false);
+    expect(outOfLimit('101', limitsOf('85-100'))).toBe(true); expect(outOfLimit('Does not conform', null)).toBe(true);
+    expect(outOfLimit('Satisfactory', null)).toBe(false);
+    expect(sentenceCase('PHYSICAL PROPERTIES OF TMT BARS')).toBe('Physical properties of TMT bars');
+  });
+  it('"+ Add row" in a details group extends the group label and keeps the row shape', () => {
+    const l = buildLayout({ data: { ...base, tests: [cube(1, 7, [600, 610, 620])], customer, options: {} } });
+    const det = l.sections.find((s) => s.role === 'header') as TableSection;
+    const r = det.rows.findIndex((row) => row.some((c) => c.role === 'customer'));
+    const span = det.rows[r][0].rs ?? 1;
+    const t2 = addRowBelow(det, r);
+    expect(t2.rows.length).toBe(det.rows.length + 1);
+    expect(t2.rows[r][0].rs).toBe(span + 1); // CUSTOMER label grows over the new row
+    expect(t2.rows[r + 1][0].m).toBe(true);
+    expect(t2.rows[r + 1][1].fg).toBe(det.rows[r][1].fg); expect(t2.rows[r + 1][2].cs).toBe(3);
+    expect(cleanLayout({ sections: [t2] })!.sections[0]).toBeTruthy();
+    // a one-row group grows too
+    const one = buildLayout({ data: { ...base, tests: [cube(1, 7, [600, 610, 620])], customer: { name: 'X', address: 'Y' }, options: {} } });
+    const d1 = one.sections.find((s) => s.role === 'header') as TableSection;
+    expect(d1.rows[0][0].rs ?? 1).toBe(1);
+    const g = addRowBelow(d1, 0);
+    expect(g.rows[0][0].rs).toBe(2); expect(g.rows[1][0].m).toBe(true);
   });
   it('non-NABL: no ULR cell, no empty rows, scope statement', () => {
     const l = buildLayout({ data: { ...base, accreditation: 'Non-NABL', ulr: '', condition: '', tests: [cube(1, 7, [600, 610, 620])], customer, options: {} } });
-    const band = l.sections[0] as TableSection;
-    expect(band.cols.length).toBe(3);
+    const band = l.sections[1] as TableSection;
+    expect(band.role).toBe('idband'); expect(band.cols.length).toBe(3);
+    expect(htmlToText((l.sections[0] as TableSection).rows[0][1].h)).toBe(''); // no NABL marker
     expect(all(l)).not.toContain('ULR');
     expect(all(l)).not.toContain('Condition on receipt'); // empty values leave no blank row
     expect(all(l)).toContain('not covered under the scope of NABL accreditation');
-    const det = l.sections[1] as TableSection;
+    const det = l.sections[2] as TableSection;
     for (const r of det.rows) expect(r.filter((c) => !c.m).every((c) => htmlToText(c.h).trim() !== '')).toBe(true);
   });
   it('contact details and additional information can be switched on and off', () => {
@@ -185,19 +227,19 @@ describe('report formats', () => {
     const d: any = { ...base, tests: [cube(1, 3, [300, 310, 320]), cube(2, 7, [500, 510, 520]), cube(3, 28, [800, 810, 820])], customer, options: { excluded: ['1', '3'] } };
     const l = buildLayout({ data: d });
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(res.rows.length).toBe(5);
-    expect(htmlToText(res.rows[2][4].h)).toBe('7');
+    expect(res.rows.length).toBe(4);
+    expect(htmlToText(res.rows[1][4].h)).toBe('7');
   });
   it('concrete cores: one row per core in the cube-report style, IS 456 acceptance', () => {
     const t = snap(9, 'NDT-CORE', { grade: 'M25', condition: 'Soaked 48 h (wet)' }, { cores: [{ id: 'C1 – Column C4', d: 150, l: 150, p: 420.6 }, { id: 'C2', d: 150, l: 150, p: 450 }, { id: 'C3', d: 150, l: 150, p: 470 }] });
     const l = buildLayout({ data: { ...base, tests: [t], customer, options: {} } });
     expect(l.format).toBe('cores');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(res.rows.length).toBe(5);
-    expect(htmlToText(res.rows[2][2].h)).toBe('C1 – Column C4');
-    expect(res.rows[2][1].rs).toBe(3); expect(res.rows[2][8].rs).toBe(3);
-    expect(all(l)).toContain('COMPRESSIVE STRENGTH OF CONCRETE CORES');
-    expect(all(l)).toContain('Acceptance as per IS 456:2000');
+    expect(res.rows.length).toBe(4);
+    expect(htmlToText(res.rows[1][2].h)).toBe('C1 – Column C4');
+    expect(res.rows[1][1].rs).toBe(3); expect(res.rows[1][8].rs).toBe(3);
+    expect(all(l)).toContain('Compressive strength of concrete cores');
+    expect(all(l)).toContain('ACCEPTANCE AS PER IS 456:2000');
     // choosing the cube format for core results is ignored (it would give an empty cube table)
     const l2 = buildLayout({ data: { ...base, tests: [t], customer, options: { format: 'cubes' } } });
     expect(l2.format).toBe('cores');
@@ -207,9 +249,9 @@ describe('report formats', () => {
     const l = buildLayout({ data: { ...base, tests: [bar(2, '10', 610), bar(1, '8', 598)], customer, options: {} } });
     expect(l.format).toBe('steel-physical');
     const res = l.sections.find((s) => s.type === 'table' && s.role === 'results') as TableSection;
-    expect(htmlToText(res.rows[2][0].h)).toBe('Test Method as per IS');
-    expect(htmlToText(res.rows[3][1].h)).toBe('8'); expect(htmlToText(res.rows[4][1].h)).toBe('10');
-    expect(res.rows[3][2].rs).toBe(2); // same make merged
+    expect(htmlToText(res.rows[1][0].h)).toBe('Test Method as per IS');
+    expect(htmlToText(res.rows[2][1].h)).toBe('8'); expect(htmlToText(res.rows[3][1].h)).toBe('10');
+    expect(res.rows[2][2].rs).toBe(2); // same make merged
     expect(all(l)).toContain('600 or 8% more than actual proof Stress whichever is Higher');
   });
   it('coarse aggregate: sieve analysis table plus properties with requirements and method', () => {
@@ -217,7 +259,7 @@ describe('report formats', () => {
     const aiv = snap(2, 'CA-AIV', {}, { t: [{ a: 300, b: 45 }, { a: 300, b: 48 }] });
     const l = buildLayout({ data: { ...base, tests: [sv, aiv], customer, options: {} } });
     expect(l.format).toBe('coarse-aggregate');
-    expect(all(l)).toContain('SIEVE ANALYSIS – 20 mm single size');
+    expect(all(l)).toContain('Sieve analysis – 20 mm single size');
     expect(all(l)).toContain('Specification as per IS:383-2016 in respect of 20 mm single size (% passing)');
     expect(all(l)).toContain('Requirements as per IS: 383-2016');
   });

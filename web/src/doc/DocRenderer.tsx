@@ -84,6 +84,9 @@ export function DocRenderer(p: RenderInput) {
   };
   const layout = p.kind === 'report' && Array.isArray(p.data.layout?.sections) ? (p.data.layout as ReportLayout) : null;
   let layoutDone = false;
+  // "— END OF REPORT —" is printed after the signature (as on the approved design), not before it
+  const signs = t.blocks.some((b) => b.visible && b.type === 'signature');
+  const endSec = layout && signs ? layout.sections.find((s) => s.type === 'text' && s.role === 'end') as { id: string; h: string } | undefined : undefined;
   return (
     <div className="doc-page" style={{ ...page, position: 'relative' }} data-ident={p.kind === 'report' && p.number ? `Report No. ${p.number}` : undefined}>
       {isDraft && <div className="doc-watermark">DRAFT</div>}
@@ -93,16 +96,17 @@ export function DocRenderer(p: RenderInput) {
           if (layoutDone) return null;
           layoutDone = true;
           const rb = t.blocks.find((x) => x.type === 'results');
-          return layoutBlocks(layout.sections, { number: p.number ?? '', ulr: p.data.ulr ?? '', issueText: p.data.issueText ?? '', pageOf: `Page 1 of ${p.pages ?? 1}` }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
+          return layoutBlocks(endSec ? layout.sections.filter((s) => s.id !== endSec.id) : layout.sections, { number: p.number ?? '', ulr: p.data.ulr ?? '', issueText: p.data.issueText ?? '', pageOf: `Page 1 of ${p.pages ?? 1}`, certNo: p.company?.accreditation?.certNo ?? '' }, (what) => (what === 'charts' ? (!p.data.hideCharts && (p.data.charts ?? []).length ? <ChartList charts={p.data.charts} /> : null) : <ResultExtras p={p} pr={(rb?.props ?? {}) as Record<string, any>} />), p.layoutEdit);
         }
         const el = renderBlock(b, p, ctx);
         if (!el) return null;
-        return (
+        return [
           <div key={b.id} data-block={b.type} className={`doc-block${p.onSelect ? ' selectable' : ''}${p.selected === b.id ? ' selected' : ''}`}
             style={b.type === 'footer' ? { marginTop: 'auto' } : undefined} onClick={p.onSelect ? (e) => { e.stopPropagation(); p.onSelect!(b.id); } : undefined}>
             {el}
-          </div>
-        );
+          </div>,
+          ...(b.type === 'signature' && endSec ? [<div key="end-of-report" data-block="ltext" className="doc-block" style={{ textAlign: 'center', fontSize: '8.5pt', marginTop: '4mm' }} dangerouslySetInnerHTML={{ __html: endSec.h }} />] : []),
+        ];
       })}
     </div>
   );
@@ -455,13 +459,13 @@ function ChartList({ charts }: { charts: any[] }) {
   );
 }
 
-function VerifyQr({ url }: { url: string }) {
+function VerifyQr({ url, caption = 'Scan to verify' }: { url: string; caption?: string }) {
   const qr = qrcode(0, 'M');
   qr.addData(url); qr.make();
   return (
     <div style={{ textAlign: 'center', fontSize: '7.5pt', lineHeight: 1.2 }}>
       <div style={{ width: 84, height: 84, margin: '0 auto' }} dangerouslySetInnerHTML={{ __html: qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true }) }} />
-      <div style={{ marginTop: 2 }}>Scan to verify</div>
+      <div style={{ marginTop: 3, color: '#78716c' }}>{caption}</div>
     </div>
   );
 }
@@ -498,24 +502,24 @@ function ReportSignature({ pr, p, fill }: { pr: Record<string, any>; p: RenderIn
   const qr = p.verifyUrl && pr.showQr !== false;
   const ph: CSSProperties = { border: '1px dashed #b8c2d3', color: '#8a96a8', fontSize: '7.5pt', display: 'grid', placeItems: 'center', textAlign: 'center', lineHeight: 1.2 };
   return (
-    <div className="rpt-sign" style={{ marginTop: '4mm', border: '1px solid #333', display: 'flex', alignItems: 'stretch', fontSize: '10pt', lineHeight: 1.3 }}>
-      <div style={{ flex: 1, padding: '5px 8px', display: 'flex', flexDirection: 'column' }}>
-        {pr.forText && <div style={{ fontSize: '9pt', color: '#444' }}>{fill(pr.forText)}</div>}
-        <div style={{ height: '17mm', display: 'flex', alignItems: 'center' }}>
+    <div className="rpt-sign" style={{ marginTop: '5mm', borderTop: '1.2px solid #1c1917', paddingTop: '3mm', display: 'flex', alignItems: 'flex-end', gap: '6mm', fontSize: '10pt', lineHeight: 1.3 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {pr.forText && <div style={{ fontSize: '8pt', color: '#78716c' }}>{fill(pr.forText)}</div>}
+        <div style={{ height: '16mm', display: 'flex', alignItems: 'center' }}>
           {issued && pr.showSignature && signer?.signature && <img src={signer.signature} alt="" style={{ maxHeight: '15mm', maxWidth: '60mm' }} />}
           {!issued && pr.showSignature && <span className="no-print" style={{ ...ph, width: '42mm', height: '12mm' }}>Signature – applied on issue</span>}
         </div>
-        {pr.showName && showSigner ? <div style={{ fontWeight: 700 }}>{signer!.name}</div> : null}
-        <div>{label}{pr.showQualifications && showSigner && signer!.designation ? <span style={{ color: '#444' }}> · {signer!.designation}</span> : null}</div>
-        {pr.showQualifications && showSigner && signer!.qualifications ? <div style={{ fontSize: '8.5pt', color: '#444' }}>{signer!.qualifications}</div> : null}
+        {pr.showName && showSigner ? <div style={{ fontSize: '11pt' }}>{signer!.name}</div> : null}
+        <div style={{ color: '#57534e' }}>{pr.showQualifications && showSigner && signer!.designation ? `${signer!.designation} · ` : ''}{label}</div>
+        {pr.showQualifications && showSigner && signer!.qualifications ? <div style={{ fontSize: '8.5pt', color: '#78716c' }}>{signer!.qualifications}</div> : null}
       </div>
       {seal && (
-        <div style={{ width: '36mm', padding: '4px', display: 'grid', placeItems: 'center' }}>
-          {issued && p.company.seal && <img src={p.company.seal} alt="" style={{ maxHeight: '26mm', maxWidth: '32mm' }} />}
+        <div style={{ width: '30mm', display: 'grid', placeItems: 'center' }}>
+          {issued && p.company.seal && <img src={p.company.seal} alt="" style={{ maxHeight: '26mm', maxWidth: '28mm' }} />}
           {!issued && <span className="no-print" style={{ ...ph, width: '24mm', height: '24mm', borderRadius: '50%' }}>{p.company.seal ? 'Seal – applied on issue' : 'Laboratory seal'}</span>}
         </div>
       )}
-      {qr && <div style={{ width: '26mm', padding: '4px', display: 'grid', placeItems: 'center' }}><VerifyQr url={p.verifyUrl!} /></div>}
+      {qr && <div style={{ width: '22mm', display: 'grid', placeItems: 'center' }}><VerifyQr url={p.verifyUrl!} caption="Verify online" /></div>}
     </div>
   );
 }

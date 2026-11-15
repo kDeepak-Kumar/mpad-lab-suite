@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActionIcon, Button, Group, Menu, NumberInput, Popover, Select, Stack, Text, Tooltip } from '@mantine/core';
 import {
+  IconLineDashed, IconSeparatorHorizontal,
   IconAlignCenter, IconAlignJustified, IconAlignLeft, IconAlignRight, IconArrowBackUp, IconArrowForwardUp, IconArrowDown, IconArrowUp, IconBold, IconClearFormatting, IconColumnInsertLeft,
   IconColumnInsertRight, IconColumnRemove, IconCopy, IconItalic, IconLayoutAlignBottom, IconLayoutAlignMiddle, IconLayoutAlignTop, IconPlus, IconRowInsertBottom, IconRowInsertTop, IconRowRemove,
   IconSubscript, IconSuperscript, IconTableOptions, IconTrash, IconUnderline, IconArrowsJoin2, IconArrowsSplit2, IconTable, IconTextSize, IconBorderAll, IconBorderOuter, IconBorderNone, IconBorderInner,
@@ -156,7 +157,7 @@ export function LayoutToolbar({ sections, sel, setSel, onChange, undo, redo, can
 
 function TableProps({ t, sel, onChange }: { t: TableSection; sel: LayoutSel | null; onChange: (t: TableSection) => void }) {
   const r = sel?.r;
-  const borders: [NonNullable<TableSection['border']>, React.ReactNode, string][] = [['all', <IconBorderAll size={15} key="a" />, 'All borders'], ['outer', <IconBorderOuter size={15} key="o" />, 'Outside border'], ['inner', <IconBorderInner size={15} key="i" />, 'Inside borders'], ['none', <IconBorderNone size={15} key="n" />, 'No borders']];
+  const borders: [NonNullable<TableSection['border']>, React.ReactNode, string][] = [['all', <IconBorderAll size={15} key="a" />, 'All borders'], ['outer', <IconBorderOuter size={15} key="o" />, 'Outside border'], ['inner', <IconBorderInner size={15} key="i" />, 'Inside borders'], ['none', <IconBorderNone size={15} key="n" />, 'No borders'], ['lines', <IconLineDashed size={15} key="l" />, 'Lines between rows (no vertical lines)'], ['open', <IconSeparatorHorizontal size={15} key="op" />, 'Rule on top, lines between groups only']];
   return (
     <Popover withinPortal position="bottom" shadow="md">
       <Popover.Target><Tooltip label="Table properties: borders, width, column widths, row height" openDelay={300}><ActionIcon variant="subtle" color="gray" onMouseDown={keep} aria-label="Table properties"><IconTableOptions size={17} /></ActionIcon></Tooltip></Popover.Target>

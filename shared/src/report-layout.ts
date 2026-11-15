@@ -17,6 +17,10 @@ export interface Cell {
   m?: boolean;
   al?: Align; va?: 'top' | 'middle' | 'bottom';
   b?: boolean; sz?: number; bg?: string;
+  /** Text colour (hex), e.g. grey labels. */
+  fg?: string;
+  /** Thin rule above this cell (tables drawn 'open'): separates groups such as Customer / Sample / Testing. */
+  bt?: boolean;
   /** Content generated from data (customer, additional info…); can be refreshed from the source. */
   role?: string;
 }
@@ -29,7 +33,9 @@ export interface TableSection {
   rh?: (number | null)[];
   /** Leading heading rows (repeated when the table continues on the next page). */
   head?: number;
-  border?: 'all' | 'outer' | 'none' | 'inner';
+  /** all / outer / inner / none: grid lines; lines: hairline under every row (no vertical lines);
+   *  open: a rule on top of the table and hairlines only above cells marked bt. */
+  border?: 'all' | 'outer' | 'none' | 'inner' | 'lines' | 'open';
   /** Table width as % of the text width, and its position. */
   width?: number; align?: 'left' | 'center' | 'right';
   /** Font size (pt), cell padding (px), space before (mm). */
@@ -45,6 +51,8 @@ export interface TextSection {
   lh?: number; mt?: number; mb?: number; indent?: number;
   /** Heading: kept with what follows it. */
   heading?: boolean;
+  /** Rule above the paragraph (section heading). */
+  rule?: boolean;
   /** Text box: bordered, optional width (% of text width). */
   box?: boolean; width?: number;
   role?: string;
@@ -136,14 +144,14 @@ export const textToHtml = (s: unknown) => escapeHtml(String(s ?? '')).replace(/\
 export const htmlToText = (h: string) => String(h ?? '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\n+$/, '');
 
 /** Values known only on issue (report number, issue date) are kept as tokens and filled when rendering. */
-export const TOKENS: Record<string, string> = { number: 'Report no. (on issue)', ulr: 'ULR (assigned when the report is signed)', issueText: 'Issue date (on issue)', pageOf: 'Page 1 of the printed pages' };
+export const TOKENS: Record<string, string> = { number: 'Report no. (on issue)', ulr: 'ULR (assigned when the report is signed)', issueText: 'Issue date (on issue)', pageOf: 'Page 1 of the printed pages', certNo: 'NABL certificate no. (Settings → Company)' };
 export const token = (k: keyof typeof TOKENS | string) => `{{${k}}}`;
 export function fillTokens(h: string, v: Record<string, string | null | undefined>, editing = false) {
   return String(h ?? '').replace(/\{\{(\w+)\}\}/g, (_, k) => {
     const val = v[k];
     // same text as printed (so the preview wraps exactly like the PDF), marked as a field in the editor
-    if (editing) return `<span data-token="${k}" contenteditable="false" class="lay-token" title="${escapeHtml(TOKENS[k] ?? k)}">${escapeHtml(val || (k === 'pageOf' ? 'Page 1 of 1' : TOKENS[k] ? '(on issue)' : ''))}</span>`;
-    return escapeHtml(val || (k === 'pageOf' ? 'Page 1 of 1' : TOKENS[k] ? '(on issue)' : ''));
+    if (editing) return `<span data-token="${k}" contenteditable="false" class="lay-token" title="${escapeHtml(TOKENS[k] ?? k)}">${escapeHtml(val || (k === 'pageOf' ? 'Page 1 of 1' : TOKENS[k] && k !== 'certNo' ? '(on issue)' : ''))}</span>`;
+    return escapeHtml(val || (k === 'pageOf' ? 'Page 1 of 1' : TOKENS[k] && k !== 'certNo' ? '(on issue)' : ''));
   });
 }
 /** Turn token chips from the editor back into {{tokens}} before saving. */
@@ -209,6 +217,33 @@ export function insertRow(t0: TableSection, at: number, copyStyleFrom?: number):
   return normalise(t);
 }
 
+/**
+ * "+ Add row": a new empty row right below row `from`, shaped like it – same merged columns, alignment, size and colour,
+ * and inside the same group (a label merged down the side, e.g. CUSTOMER, grows to cover it).
+ */
+export function addRowBelow(t0: TableSection, from: number): TableSection {
+  const t = clone(t0);
+  const n = t.cols.length, at = from + 1;
+  const src = t.rows[from];
+  if (!src) return t0;
+  const row: Cell[] = Array.from({ length: n }, () => ({ h: '' }));
+  for (let j = 0; j < n; j++) {
+    const [ai, aj] = anchorOf(t, from, j);
+    const a = t.rows[ai][aj];
+    if (ai < from || (a.rs ?? 1) > 1 || a.role === 'sec') { // a group label (CUSTOMER, SAMPLE…) always covers its new row
+      // merged down from above (or from this row): grow it over the new row
+      if (aj === j && ai + (a.rs ?? 1) - 1 >= from) a.rs = (a.rs ?? 1) + 1;
+      row[j] = { h: '', m: true };
+      continue;
+    }
+    if (aj < j) { row[j] = { h: '', m: true }; continue; } // covered sideways by the anchor of this row
+    row[j] = { h: '', al: a.al, va: a.va, sz: a.sz, fg: a.fg, ...(a.cs && a.cs > 1 ? { cs: a.cs } : {}) };
+  }
+  t.rows.splice(at, 0, row);
+  if (t.rh) t.rh.splice(at, 0, null);
+  if (t.head && at < t.head) t.head++;
+  return normalise(t);
+}
 export function deleteRow(t0: TableSection, r: number): TableSection {
   if (t0.rows.length <= 1) return t0;
   const t = clone(t0);
@@ -332,7 +367,7 @@ export function cleanLayout(x: unknown): ReportLayout | null {
     if (s.type === 'auto') { sections.push({ id, type: 'auto', what: (s as AutoSection).what === 'charts' ? 'charts' : 'details', mt: num((s as AutoSection).mt, 0, 50) }); continue; }
     if (s.type === 'text') {
       const p = s as TextSection;
-      sections.push(strip({ id, type: 'text' as const, h: cleanHtml(p.h).slice(0, 50000), al: al(p.al), sz: num(p.sz, 5, 30), lh: num(p.lh, 0.8, 3), mt: num(p.mt, 0, 80), mb: num(p.mb, 0, 80), indent: num(p.indent, 0, 120), heading: p.heading ? true : undefined, box: p.box ? true : undefined, width: num(p.width, 10, 100), role: p.role ? String(p.role).slice(0, 30) : undefined }) as TextSection);
+      sections.push(strip({ id, type: 'text' as const, h: cleanHtml(p.h).slice(0, 50000), al: al(p.al), sz: num(p.sz, 5, 30), lh: num(p.lh, 0.8, 3), mt: num(p.mt, 0, 80), mb: num(p.mb, 0, 80), indent: num(p.indent, 0, 120), heading: p.heading ? true : undefined, box: p.box ? true : undefined, rule: p.rule ? true : undefined, width: num(p.width, 10, 100), role: p.role ? String(p.role).slice(0, 30) : undefined }) as TextSection);
       continue;
     }
     if (s.type === 'table') {
@@ -342,11 +377,12 @@ export function cleanLayout(x: unknown): ReportLayout | null {
       const rows = p.rows.slice(0, 500).map((r) => (Array.isArray(r) ? r : []).slice(0, 40).map((c: Cell) => strip({
         h: c?.m ? '' : cleanHtml(c?.h).slice(0, 20000), cs: num(c?.cs, 1, 40), rs: num(c?.rs, 1, 500), m: c?.m ? true : undefined, al: al(c?.al),
         va: ['top', 'middle', 'bottom'].includes(String(c?.va)) ? c.va : undefined, b: c?.b ? true : undefined, sz: num(c?.sz, 5, 30),
-        bg: /^#[0-9a-f]{3,8}$/i.test(String(c?.bg ?? '')) ? c.bg : undefined, role: c?.role ? String(c.role).slice(0, 30) : undefined,
+        bg: /^#[0-9a-f]{3,8}$/i.test(String(c?.bg ?? '')) ? c.bg : undefined, fg: /^#[0-9a-f]{3,8}$/i.test(String(c?.fg ?? '')) ? c.fg : undefined,
+        bt: c?.bt ? true : undefined, role: c?.role ? String(c.role).slice(0, 30) : undefined,
       }) as Cell));
       sections.push(normalise(strip({
         id, type: 'table' as const, cols, rows, rh: Array.isArray(p.rh) ? p.rh.slice(0, 500).map((h) => num(h, 2, 200) ?? null) : undefined, head: num(p.head, 0, 20),
-        border: ['all', 'outer', 'none', 'inner'].includes(String(p.border)) ? p.border : undefined, width: num(p.width, 10, 100),
+        border: ['all', 'outer', 'none', 'inner', 'lines', 'open'].includes(String(p.border)) ? p.border : undefined, width: num(p.width, 10, 100),
         align: ['left', 'center', 'right'].includes(String(p.align)) ? p.align : undefined, sz: num(p.sz, 5, 30), pad: num(p.pad, 0, 20), mt: num(p.mt, 0, 80), role: p.role ? String(p.role).slice(0, 30) : undefined,
       }) as TableSection));
     }
