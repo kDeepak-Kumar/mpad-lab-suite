@@ -118,6 +118,7 @@ describe('report formats', () => {
     expect(band.rows[0][0].h).toContain('{{number}}'); expect(band.rows[0][3].h).toContain('{{pageOf}}');
     const det = l.sections[2] as TableSection;
     expect(det.border).toBe('open');
+    expect(all({ ...l, sections: [det] })).toContain('Tests performed');
     const cust = det.rows.flat().find((c) => c.role === 'customer')!;
     expect(htmlToText(cust.h)).toContain('Example Infra Pvt Ltd');
     expect(htmlToText(cust.h)).not.toContain('R. Kumar'); // contact details only when asked for

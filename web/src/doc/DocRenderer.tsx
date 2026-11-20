@@ -466,7 +466,7 @@ function VerifyQr({ url, caption = 'Scan to verify' }: { url: string; caption?: 
   qr.addData(url); qr.make();
   return (
     <div style={{ textAlign: 'center', fontSize: '7.5pt', lineHeight: 1.2 }}>
-      <div style={{ width: 84, height: 84, margin: '0 auto' }} dangerouslySetInnerHTML={{ __html: qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true }) }} />
+      <div data-qr={url} style={{ width: 84, height: 84, margin: '0 auto' }} dangerouslySetInnerHTML={{ __html: qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true }) }} />
       <div style={{ marginTop: 3, color: '#78716c' }}>{caption}</div>
     </div>
   );

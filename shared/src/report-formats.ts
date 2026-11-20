@@ -296,7 +296,12 @@ export function reportDetails(d: FormatInput['data'], tests: TestSnap[], o: { sa
     ...r.map((x) => (i === 0 && x && typeof x === 'object' ? { ...x, bt: true } : x)),
   ]);
   const rows: CellSpec[][] = [...group('Customer', custRows), ...group('Sample', pairRows(sampleLeft, sampleRight))];
-  const tr = pairRows(testLeft, testRight);
+  // the tests carried out under this report, by name
+  const testNames = uniq(tests.map((t) => String(t.name ?? '').trim()).filter(Boolean));
+  const tr: CellSpec[][] = [
+    ...(testNames.length ? [[lab('Tests performed'), { h: escapeHtml(testNames.join(', ')), al: 'left', va: 'top', cs: 3, role: 'tests' } as CellSpec, null, null]] : []),
+    ...pairRows(testLeft, testRight),
+  ];
   if (tr.length) rows.push(...group('Testing', tr));
   const details = table([12, 16, 27, 18, 27], rows, { role: 'header', border: 'open', sz: 9.5, mt: 2.5 });
   // the "* furnished by the customer" key is skipped when the report notes already carry it

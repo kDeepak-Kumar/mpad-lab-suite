@@ -10,6 +10,7 @@
  */
 import { toPng } from 'html-to-image';
 import { measureDoc, planPages } from './paginate';
+import qrcode from 'qrcode-generator';
 import {
   AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageNumber, Paragraph, ShadingType, Table, TableCell,
   TableLayoutType, TableRow, TextRun, VerticalAlign, WidthType, HorizontalPositionRelativeFrom, VerticalPositionRelativeFrom, TextWrappingType, type IBorderOptions, type ParagraphChild,
@@ -88,7 +89,7 @@ async function pixels(el: Element, ctx: Ctx): Promise<{ data: Uint8Array; width:
       const g = c.getContext('2d')!; g.imageSmoothingEnabled = false; g.drawImage(im, 0, 0, c.width, c.height);
       url = c.toDataURL('image/png');
     }
-    else url = await toPng(el as HTMLElement, { pixelRatio: ratio, backgroundColor: undefined, filter: (n) => !(n instanceof HTMLElement && n.classList.contains('no-print')) });
+    else url = await toPng(el as HTMLElement, { pixelRatio: ratio, backgroundColor: undefined, style: { margin: '0' }, filter: (n) => !(n instanceof HTMLElement && n.classList.contains('no-print')) });
     const data = Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), (ch) => ch.charCodeAt(0));
     return { data, width: imgPx(ctx, r.width), height: imgPx(ctx, r.height) };
   } catch (e) { console.warn('[docx] image skipped', e); return null; }
@@ -260,6 +261,15 @@ async function blocks(el: Element, ctx: Ctx): Promise<Block[]> {
     const mid = cs.textAlign === 'center' || ((cs.display.includes('grid') && /center/.test(cs.justifyItems + cs.placeItems)) || (cs.display.includes('flex') && cs.justifyContent === 'center'));
     return im ? [new Paragraph({ children: [im], alignment: mid ? AlignmentType.CENTER : alignIn(ctx, cs.textAlign) })] : [];
   }
+  // QR code: drawn again from its address, square and sharp
+  const qrUrl = (el as HTMLElement).dataset?.qr;
+  if (qrUrl) {
+    const r = el.getBoundingClientRect();
+    const q = qrcode(0, 'M'); q.addData(qrUrl); q.make();
+    const url = q.createDataURL(10, 0);
+    const data = Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), (ch) => ch.charCodeAt(0));
+    return [new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ type: 'gif', data, transformation: { width: imgPx(ctx, r.width), height: imgPx(ctx, r.width) } })] })];
+  }
   if (isRow(el)) return sideBySide(el, ctx);
   const kids = [...el.childNodes];
   const hasBlockKid = kids.some((n) => n instanceof Element && visible(n) && isBlock(n));
@@ -320,17 +330,21 @@ export async function makeDocx(root: HTMLElement): Promise<Blob> {
     // header and footer: copied as they look (letterheads are often a picture), at the full text width
     const headerKids: Paragraph[] = [];
     let headMm = 0;
+    const outdent = (el: Element) => { const r = el.getBoundingClientRect(); const l = mm(r.left - pr.left) - left; const rr = mm(pr.right - r.right) - right; return Math.abs(l) > 0.3 || Math.abs(rr) > 0.3 ? { left: Math.round(l * DXA_PER_MM), right: Math.round(rr * DXA_PER_MM) } : undefined; };
+    /** a letterhead / footer that is just a picture is used as it is (sharper than a copy of the screen) */
+    const only = (b: HTMLElement) => { const imgs = [...b.querySelectorAll('img')].filter(visible); return imgs.length === 1 && !(b.textContent ?? '').trim() ? imgs[0] : null; };
     if (head) {
-      const im = await raster(head, ctxFull);
-      if (im) { headerKids.push(new Paragraph({ children: [im] })); headMm = mm(head.getBoundingClientRect().height); }
+      const im = await raster(only(head) ?? head, ctxFull);
+      if (im) { headerKids.push(new Paragraph({ children: [im], indent: outdent(only(head) ?? head) })); headMm = mm((only(head) ?? head).getBoundingClientRect().height); }
     }
     const ident = page.dataset.ident ?? '';
     const pageNo = new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 40, after: 40 }, children: [new TextRun({ size: 15, color: '57534E', font: ctx.font, children: [ident ? `${ident}  ·  Page ` : 'Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES] })] });
     const footerKids: Paragraph[] = [pageNo];
     let footMm = 5;
     if (foot) {
-      const im = await raster(foot, ctxFull);
-      if (im) { footerKids.push(new Paragraph({ children: [im] })); footMm += mm(foot.getBoundingClientRect().height); }
+      const src = only(foot) ?? foot;
+      const im = await raster(src, ctxFull);
+      if (im) { footerKids.push(new Paragraph({ children: [im], indent: outdent(src) })); footMm += mm(src.getBoundingClientRect().height); }
     }
 
     const children: Block[] = [];
