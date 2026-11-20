@@ -127,17 +127,8 @@ export async function pdfBase64(root: HTMLElement) {
   return s.slice(s.indexOf(',') + 1);
 }
 
-/** Word-compatible export on an A4 page: letterhead images sized in millimetres so Word keeps them full width. */
-export function downloadDoc(root: HTMLElement, filename: string) {
-  const src = pageEl(root);
-  const el = src.cloneNode(true) as HTMLElement;
-  el.querySelectorAll('.no-print, .doc-watermark').forEach((n) => n.remove());
-  el.style.cssText = 'font-family:' + (src.style.fontFamily || 'Times New Roman') + ';font-size:' + (src.style.fontSize || '11pt');
-  el.querySelectorAll<HTMLImageElement>('img.doc-lh-img').forEach((i) => { i.setAttribute('width', '718'); i.style.cssText = 'width:190mm;display:block;margin:0 0 3mm'; });
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8">
-<style>@page WordSection1{size:210mm 297mm;margin:10mm 10mm 10mm 10mm}div.WordSection1{page:WordSection1}table{border-collapse:collapse;width:100%} .bx td,.bx th{border:1px solid #333;padding:3px 6px}</style></head>
-<body><div class="WordSection1">${el.outerHTML}</div></body></html>`;
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob(['﻿', html], { type: 'application/msword' }));
-  a.download = filename.endsWith('.doc') ? filename : `${filename}.doc`; a.click();
+/** Word (.docx): rebuilt natively (tables, header and footer, images at their size) – see docx.ts. */
+export async function downloadDoc(root: HTMLElement, filename: string) {
+  const m = await import('./docx');
+  await m.downloadDocx(root, filename);
 }

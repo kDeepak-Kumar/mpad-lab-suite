@@ -138,6 +138,21 @@ if (!/ULR No\.\s*\n?\s*[A-Z0-9]+\d{11}[FP]/i.test(r2)) problems.push('admin: iss
 const certNo = (await api(ad, '/company')).accreditation?.certNo;
 if (certNo && !r2.includes(certNo)) problems.push('admin: NABL letterhead (certificate no.) missing');
 if (!r2.includes('Free Swell Index')) problems.push('admin: FSI result missing');
+// Word export: a real .docx – letterhead and footer in Word's header / footer, tables, report number, page numbers
+{
+  await ad.getByRole('button', { name: 'Export' }).first().click();
+  const [dl] = await Promise.all([ad.waitForEvent('download', { timeout: 60000 }), ad.getByRole('menuitem', { name: /Word/ }).click()]);
+  const { unzipSync, strFromU8 } = await import('fflate');
+  const z = unzipSync(new Uint8Array(fs.readFileSync(await dl.path())));
+  const docXml = strFromU8(z['word/document.xml'] ?? new Uint8Array());
+  const hdr = Object.keys(z).filter((k) => /^word\/header\d*\.xml$/.test(k)).map((k) => strFromU8(z[k])).join('');
+  const ftr = Object.keys(z).filter((k) => /^word\/footer\d*\.xml$/.test(k)).map((k) => strFromU8(z[k])).join('');
+  if (!dl.suggestedFilename().endsWith('.docx')) problems.push('word: not a .docx file');
+  if (!/<w:tbl>/.test(docXml) || !docXml.includes('Free Swell Index')) problems.push('word: report tables / results missing');
+  if (!/<pic:pic|<w:drawing/.test(hdr)) problems.push('word: letterhead not in the Word header');
+  if (!/PAGE/.test(ftr) || !/NUMPAGES/.test(ftr)) problems.push('word: footer has no "Page x of y"');
+  if (/w:tcW w:type="dxa" w:w="0"/.test(docXml)) problems.push('word: zero-width table column');
+}
 await ad.screenshot({ path: `${out}/admin-nabl-report.png`, fullPage: true });
 
 // quote with quantity and GST switched on

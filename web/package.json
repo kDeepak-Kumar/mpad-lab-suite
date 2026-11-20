@@ -19,6 +19,7 @@
     "@tabler/icons-react": "^3.19.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "dayjs": "^1.11.13",
+    "docx": "^9.16.0",
     "html-to-image": "^1.11.11",
     "jspdf": "^2.5.2",
     "pdfjs-dist": "^4.10.38",

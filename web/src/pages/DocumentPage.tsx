@@ -232,7 +232,7 @@ function DocumentView({ id }: { id: number }) {
             <Menu.Label>Download</Menu.Label>
             <Menu.Item leftSection={<IconFileTypePdf size={15} />} onClick={() => exp('downloadPdf')}>Download PDF</Menu.Item>
             <Menu.Item leftSection={<IconPhoto size={15} />} onClick={() => exp('downloadPng')}>Download PNG image</Menu.Item>
-            <Menu.Item leftSection={<IconFileTypeDoc size={15} />} onClick={() => exp('downloadDoc')}>Download Word (.doc)</Menu.Item>
+            <Menu.Item leftSection={<IconFileTypeDoc size={15} />} onClick={() => exp('downloadDoc')}>Download Word (.docx)</Menu.Item>
           </Menu.Dropdown></Menu>
           {(['quote', 'invoice'].includes(doc.kind)) && (
             <Menu position="bottom-end" width={220}>
