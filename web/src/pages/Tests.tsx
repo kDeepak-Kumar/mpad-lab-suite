@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ActionIcon, Alert, Button, Checkbox, Grid, Group, Menu, Paper, Select, SimpleGrid, Stack, Tabs, Text, TextInput, Textarea, Timeline, Modal, Badge, List, Tooltip } from '@mantine/core';
-import { IconAlertTriangle, IconCheck, IconDots, IconPrinter, IconTemplate, IconTestPipe } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCopy, IconCheck, IconDots, IconPrinter, IconTemplate, IconTestPipe } from '@tabler/icons-react';
 import { emptyInput, envApplies, evaluateObservation, normalizeObservation, parseNumberInput, reportParts, formatValue, chartSeries, allCharts, fillRefs, boreLogData, renderSampleCalc, TEST_STATUS_LABEL, type ObservationInput, type ObservationTemplate } from '@suite/shared';
-import { api, dmy, listTotal, ok, useApi, localToday } from '../api';
+import { api, dmy, fail, listTotal, ok, useApi, localToday } from '../api';
 import { useMe, hasRole } from '../App';
 import { useCan, isAdmin } from '../ctx';
 import { ListView } from '../components/ListView';
@@ -127,6 +127,11 @@ export function TestSheetPage() {
               <Menu.Item leftSection={<IconPrinter size={15} />} onClick={() => window.print()}>Print sheet</Menu.Item>
               {can('manageTemplates') && <Menu.Item leftSection={<IconTemplate size={15} />} onClick={() => nav(`/settings/templates/obs/${encodeURIComponent(tpl.code)}`)}>Edit sheet template</Menu.Item>}
               <Menu.Item leftSection={<IconTestPipe size={15} />} onClick={() => nav(`/samples?open=${s.id}`)}>Open sample {s.code}</Menu.Item>
+              {can('samples') && <Menu.Item leftSection={<IconCopy size={15} />} onClick={async () => {
+                // another set of the same test on this sample (second set of cubes, another diameter / brand of steel)
+                try { const r = await api<{ id: number }>(`/samples/${s.id}/tests`, { method: 'POST', body: { from_test: t.id } }); ok('Another set added – grade, dates and brand carried over; enter its readings.'); nav(`/tests/${r.id}`); }
+                catch (e) { fail((e as Error).message); }
+              }}>Add another set of this test</Menu.Item>}
             </Menu.Dropdown>
           </Menu>
           <AdminDelete object="test" id={t.id} compact onDeleted={() => nav('/tests')} />
@@ -221,6 +226,7 @@ export function TestSheetPage() {
                 </section>
                 {inputIssues.length > 0 && <Alert color="red" icon={<IconAlertTriangle size={16} />} py={6} title="Fix these entries before saving">{inputIssues.slice(0, 6).map((m, i) => <div key={i}>{m}</div>)}</Alert>}
                 {result.checks.map((c, i) => <Alert key={i} color={c.level === 'error' ? 'red' : 'orange'} icon={<IconAlertTriangle size={16} />} py={6}>{c.message}</Alert>)}
+                {setHints(tpl, result).map((m, i) => <Alert key={`set${i}`} color="orange" icon={<IconAlertTriangle size={16} />} py={6} title="More than one set in this sheet?">{m} Use <b>⋯ → Add another set of this test</b> and move those readings there; each set then gets its own lines on the report.</Alert>)}
                 {allCharts(tpl).map((ch, i) => {
                   const series = chartSeries(tpl, result, ch);
                   return (series[0]?.points.length ?? 0) > 1 ? <div key={i} style={{ textAlign: 'center', breakInside: 'avoid' }}><LineChart series={series} xLog={ch.xLog} yLog={ch.yLog} yReverse={ch.yReverse} xTop={ch.xTop} xMin={ch.xMin} xMax={ch.xMax} yMin={ch.yMin} yMax={ch.yMax} fit={ch.fit} title={ch.title} xLabel={ch.xLabel} yLabel={ch.yLabel} note={ch.note ? fillRefs(ch.note, result) : undefined} /></div> : null;
@@ -323,4 +329,23 @@ function ReasonModal({ opened, title, onClose, onSubmit }: { opened: boolean; ti
       <Group justify="flex-end" mt="sm"><Button disabled={n.trim().length < 3} onClick={() => { onSubmit(n.trim()); setN(''); }}>Submit</Button></Group>
     </Modal>
   );
+}
+
+/**
+ * Several sets typed into one sheet: one sheet is one set (3 cubes of one grade and age; bars of one diameter and
+ * brand), so the report would average them together.
+ */
+function setHints(tpl: ObservationTemplate, result: { grids: Record<string, Record<string, unknown>[]> }): string[] {
+  const out: string[] = [];
+  const rows = (k: string) => (result.grids[k] ?? []) as Record<string, unknown>[];
+  const n = (v: unknown) => (v === '' || v === null || v === undefined ? NaN : Number(v));
+  if (/^CUBE/i.test(tpl.code)) {
+    const c = rows('cubes').filter((r) => Number.isFinite(n(r.load)) || Number.isFinite(n(r.fc)));
+    if (c.length > 3) out.push(`This sheet has ${c.length} cubes. IS 516 tests a set of 3 cubes and reports their average – all ${c.length} would be averaged as one set.`);
+  }
+  if (/^STEEL/i.test(tpl.code)) {
+    const far = rows('b').map((r, i) => ({ i: i + 1, id: String(r.id ?? ''), dev: n(r.dev) })).filter((r) => Number.isFinite(r.dev) && Math.abs(r.dev) > 15);
+    if (far.length) out.push(`${far.map((r) => `Bar ${r.i}${r.id ? ` (${r.id})` : ''}`).join(', ')} ${far.length > 1 ? 'are' : 'is'} more than 15 % off the nominal mass for this diameter – ${far.length > 1 ? 'they look' : 'it looks'} like a different diameter. One sheet is one diameter and brand.`);
+  }
+  return out;
 }

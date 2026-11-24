@@ -145,6 +145,33 @@ lab.post('/samples', allow('samples'), h(async (req) => {
     return { id, code, ulr, accreditation };
   });
 }));
+/**
+ * Another set of a test already on the sample (a second set of cubes, another bar diameter or brand): a new test with
+ * its own observation sheet. The heading values of the test it is copied from (grade, casting date, brand…) are
+ * carried over to save typing; the readings start empty.
+ */
+lab.post('/samples/:id/tests', allow('samples'), h(async (req) => {
+  const cid = req.user.company_id;
+  const b = z.object({ from_test: z.number().int().positive() }).parse(req.body);
+  const sample = await db('samples').where({ id: Number(req.params.id), company_id: cid }).first();
+  if (!sample) throw new HttpError(404, 'Sample not found');
+  const src = await db('tests').where({ id: b.from_test, sample_id: sample.id, company_id: cid }).first();
+  if (!src) throw new HttpError(404, 'Test not found on this sample');
+  const cat = await db('catalog').where({ id: src.catalog_id, company_id: cid }).first();
+  if (!cat?.obs_template_code) throw new HttpError(400, 'This test has no observation sheet linked');
+  const tpl = await getObsTemplate(cid, cat.obs_template_code, null);
+  const prev = parseJson<Record<string, any>>(src.observation, {});
+  // heading, constants and machine (grade, casting date, brand, CTM…), never readings or results
+  const carry = prev.header && typeof prev.header === 'object' ? { header: { ...prev.header }, constants: prev.constants ?? {}, equipment: prev.equipment ?? {}, grids: {} } : null;
+  return db.transaction(async (trx) => {
+    const id = await insert(trx, 'tests', {
+      company_id: cid, sample_id: sample.id, catalog_id: cat.id, template_code: tpl.code, template_version: tpl.version, status: 'pending',
+      assigned_to: src.assigned_to ?? null, due_date: src.due_date, created_at: now(), ...(carry ? { observation: toJson(carry) } : {}),
+    });
+    await audit(trx, req.user, 'sample', sample.id, 'set added', { test: id, from: src.id, name: cat.report_name || cat.billing_name });
+    return { id };
+  });
+}));
 lab.get('/samples/:id', allow('sample.read'), h(async (req) => {
   const cid = req.user.company_id;
   const s = await db('samples').where({ id: Number(req.params.id), company_id: cid }).first();

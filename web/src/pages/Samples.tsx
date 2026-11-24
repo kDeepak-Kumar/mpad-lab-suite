@@ -5,6 +5,7 @@ import { ActionIcon, Alert, Button, Group, Menu, Modal, MultiSelect, NumberInput
 import { IconArchive, IconCheck, IconDots, IconFileAnalytics, IconPencil, IconPlus, IconPrinter, IconTruckDelivery } from '@tabler/icons-react';
 import { JOB_STATUS } from './Outsourcing';
 import { api, dmy, fail, listTotal, ok, useApi, localToday } from '../api';
+import { materialMatches } from '@suite/shared';
 import { useCan, useFields, useMe, isAdmin } from '../ctx';
 import { PageHeader, Pill, SkeletonRows, StatusBadge, TypeBadge } from '../components/ui';
 import { ListView, useCustomCols, type Col } from '../components/ListView';
@@ -21,6 +22,8 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
   const { data: wos } = useApi<any[]>('/workorders');
   const [v, setV] = useState<any>({ received_date: localToday(), condition: 'Satisfactory', source: 'Sample supplied by the customer', material: 'Soil', accreditation: preset?.accreditation ?? 'NABL', ...preset });
   const [tests, setTests] = useState<string[]>([]);
+  /** sets per test (two sets of cubes, three diameters of steel…): each set is its own test with its own sheet */
+  const [sets, setSets] = useState<Record<string, number>>({});
   const { data: client } = useApi<any>(v.client_id ? `/clients/${v.client_id}` : null, [v.client_id]);
   const [tech, setTech] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,7 +43,7 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
       let r: any;
       try { r = await api<any>(`/samples${force ? '?force=1' : ''}`, { quiet: true, body: {
         ...rest, client_id: Number(v.client_id), site_id: v.site_id ? Number(v.site_id) : null, work_order_id: v.work_order_id ? Number(v.work_order_id) : null,
-        tests: tests.map((id) => ({ catalog_id: Number(id), assigned_to: tech ? Number(tech) : null })),
+        tests: tests.flatMap((id) => Array.from({ length: Math.max(1, Math.min(20, sets[id] ?? 1)) }, () => ({ catalog_id: Number(id), assigned_to: tech ? Number(tech) : null }))),
       } }); } catch (e: any) {
         // a likely duplicate: ask, then register anyway if confirmed
         if (e?.status === 409 && window.confirm(`${e.message}. Register it anyway?`)) { setBusy(false); return save(another, true); }
@@ -79,7 +82,27 @@ export function NewSampleModal({ preset, onClose }: { preset?: { work_order_id?:
       <FormSection n={2} title="Sample & tests" hint="What came in and what to test">
         <Stack gap="sm">
           <RecordForm object="sample" value={v} onChange={setV} cols={2} only={S_SAMPLE} />
-          <MultiSelect label="Tests to perform" required searchable placeholder={tests.length ? undefined : 'Pick from the rate card'} data={testable.filter((c) => !v.material || c.material === v.material || tests.includes(String(c.id))).map((c) => ({ value: String(c.id), label: `${c.report_name || c.billing_name} (${c.method || c.code})${c.nabl ? '' : ' · Non-NABL'}` }))} value={tests} onChange={setTests} />
+          {(() => {
+            const forMaterial = testable.filter((c) => materialMatches(v.material, c.material));
+            const list = forMaterial.length ? forMaterial : testable; // nothing on the rate card for this material: offer everything
+            return (
+              <MultiSelect label="Tests to perform" required searchable description={v.material && !forMaterial.length ? `No rate-card tests are marked "${v.material}" – showing all tests` : undefined}
+                placeholder={tests.length ? undefined : 'Pick from the rate card'}
+                data={[...list, ...testable.filter((c) => !list.includes(c) && tests.includes(String(c.id)))].map((c) => ({ value: String(c.id), label: `${c.report_name || c.billing_name} (${c.method || c.code})${c.nabl ? '' : ' · Non-NABL'}` }))}
+                value={tests} onChange={setTests} />
+            );
+          })()}
+          {chosen.length > 0 && (
+            <Stack gap={4} style={{ gridColumn: '1 / -1' }}>
+              <Text size="xs" c="dimmed">Sets – enter 2 or more when the sample has several sets of the same test (e.g. two sets of 3 cubes, or bars of three diameters). Each set gets its own observation sheet and its own lines on the report.</Text>
+              {chosen.map((c) => (
+                <Group key={c.id} gap="xs" wrap="nowrap">
+                  <Text size="sm" style={{ flex: 1 }} truncate>{c.report_name || c.billing_name}</Text>
+                  <NumberInput aria-label={`Sets of ${c.report_name || c.billing_name}`} w={90} size="xs" min={1} max={20} value={sets[String(c.id)] ?? 1} onChange={(x) => setSets({ ...sets, [String(c.id)]: Math.max(1, Math.min(20, Number(x) || 1)) })} suffix=" set(s)" />
+                </Group>
+              ))}
+            </Stack>
+          )}
           {outOfScope.length > 0 && <Alert color={isAdmin(me) ? 'orange' : 'red'} variant="light">Not in NABL scope: {outOfScope.map((c) => c.report_name || c.billing_name).join(', ')}. {isAdmin(me) ? 'As System Admin you may still register them.' : 'Register those as a separate Non-NABL sample.'}</Alert>}
           <Select label="Assign to technician" clearable placeholder="Optional" data={(users ?? []).filter((u) => ['technician', 'reviewer', 'owner', 'admin', 'signatory'].includes(u.role)).map((u) => ({ value: String(u.id), label: u.name }))} value={tech} onChange={setTech} />
         </Stack>

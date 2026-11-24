@@ -151,3 +151,17 @@ export function roleAllows(role: RoleDef | undefined, perm: string): boolean {
 }
 export const fieldAccess = (role: RoleDef | undefined, object: string, field: string): 'edit' | 'read' | 'hidden' =>
   role?.admin ? 'edit' : (role?.fields[`${object}.${field}`] ?? 'edit');
+
+/**
+ * Does a rate-card test belong to a sample of this material? The sample list uses broad names (Aggregate, Sand)
+ * where the rate card is specific (Coarse aggregate, Fine aggregate): match the family, not the exact words.
+ */
+export function materialMatches(sampleMaterial: string | null | undefined, testMaterial: string | null | undefined): boolean {
+  const a = String(sampleMaterial ?? '').trim().toLowerCase(), b = String(testMaterial ?? '').trim().toLowerCase();
+  if (!a || !b) return true;
+  if (a === b) return true;
+  // the sample's family, matched against the rate card's wording
+  const fam = /sand|fine\s*agg/.test(a) ? ['fine aggregate', 'sand'] : /coarse\s*agg/.test(a) ? ['coarse aggregate'] : /agg|gsb|wmm|metal|stone\s*dust/.test(a) ? ['aggregate']
+    : /block|brick/.test(a) ? ['brick', 'block'] : [a];
+  return fam.some((x) => b.includes(x)) || b.split(/\s*\/\s*/).some((part) => part && a.includes(part));
+}
